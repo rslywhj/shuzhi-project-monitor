@@ -43,6 +43,13 @@
       "when": 1784800385085,
       "tag": "0005_lethal_ogun",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1784803661699,
+      "tag": "0006_faithful_black_cat",
+      "breakpoints": true
     }
   ]
 }

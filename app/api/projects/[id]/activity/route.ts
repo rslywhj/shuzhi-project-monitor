@@ -2,6 +2,7 @@ import { and, desc, eq, inArray, or } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   auditLogs,
+  attachments,
   baselineChanges,
   baselineVersions,
   correctiveActions,
@@ -44,7 +45,7 @@ export async function GET(
       return Response.json({ error: "未找到指定项目。" }, { status: 404 });
     }
 
-    const [reportRows, versionRows, changeRows, milestoneRows, riskRows, actionRows] =
+    const [reportRows, versionRows, changeRows, milestoneRows, riskRows, actionRows, attachmentRows] =
       await Promise.all([
         db
           .select()
@@ -74,6 +75,22 @@ export async function GET(
           .select({ id: correctiveActions.id })
           .from(correctiveActions)
           .where(eq(correctiveActions.projectId, id)),
+        db
+          .select({
+            id: attachments.id,
+            projectId: attachments.projectId,
+            weekKey: attachments.weekKey,
+            milestoneId: attachments.milestoneId,
+            filename: attachments.filename,
+            contentType: attachments.contentType,
+            sizeBytes: attachments.sizeBytes,
+            uploadedBy: attachments.uploadedBy,
+            createdAt: attachments.createdAt,
+          })
+          .from(attachments)
+          .where(eq(attachments.projectId, id))
+          .orderBy(desc(attachments.createdAt))
+          .limit(200),
       ]);
 
     const projectAuditCondition = and(
@@ -117,6 +134,15 @@ export async function GET(
             ),
           )
         : undefined,
+      attachmentRows.length
+        ? and(
+            eq(auditLogs.entityType, "attachment"),
+            inArray(
+              auditLogs.entityId,
+              attachmentRows.map((row) => String(row.id)),
+            ),
+          )
+        : undefined,
     ].filter((condition) => condition !== undefined);
     const auditRows = await db
       .select()
@@ -141,6 +167,7 @@ export async function GET(
         changes: parseJson(row.changesJson),
         changesJson: undefined,
       })),
+      attachments: attachmentRows,
       auditLogs: auditRows.map((row) => ({
         ...row,
         detail: parseJson(row.detailJson),

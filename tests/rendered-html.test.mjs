@@ -262,3 +262,47 @@ test("closes project maintenance, account lifecycle and dynamic PMO operations",
   assert.match(page, /项目进度快照-/);
   assert.match(snapshotRead, /payload: JSON\.parse/);
 });
+
+test("persists weekly report attachments in R2 and removes dead prototype controls", async () => {
+  const [hosting, schema, migration, uploadRoute, fileRoute, activityRoute, page] =
+    await Promise.all([
+      readFile(new URL(".openai/hosting.json", templateRoot), "utf8"),
+      readFile(new URL("db/schema.ts", templateRoot), "utf8"),
+      readFile(
+        new URL("drizzle/0006_faithful_black_cat.sql", templateRoot),
+        "utf8",
+      ),
+      readFile(
+        new URL("app/api/projects/[id]/attachments/route.ts", templateRoot),
+        "utf8",
+      ),
+      readFile(
+        new URL("app/api/attachments/[id]/route.ts", templateRoot),
+        "utf8",
+      ),
+      readFile(
+        new URL("app/api/projects/[id]/activity/route.ts", templateRoot),
+        "utf8",
+      ),
+      readFile(new URL("app/page.tsx", templateRoot), "utf8"),
+    ]);
+
+  assert.match(hosting, /"r2":\s*"FILES"/);
+  assert.match(schema, /export const attachments/);
+  assert.match(migration, /CREATE TABLE `attachments`/);
+  assert.match(uploadRoute, /MAX_FILE_SIZE/);
+  assert.match(uploadRoute, /canWriteProject/);
+  assert.match(uploadRoute, /bucket\.put/);
+  assert.match(uploadRoute, /该周期快照已经锁定，不能新增附件/);
+  assert.match(uploadRoute, /attachment\.upload/);
+  assert.match(fileRoute, /content-disposition/);
+  assert.match(fileRoute, /attachment\.delete/);
+  assert.match(fileRoute, /该周期快照已经锁定，不能删除附件/);
+  assert.match(activityRoute, /attachmentRows/);
+  assert.match(page, /支撑附件/);
+  assert.match(page, /uploadAttachment/);
+  assert.match(page, /查看历史版本（/);
+  assert.doesNotMatch(page, /支撑附件（后续开放）/);
+  assert.doesNotMatch(page, /<strong>95\.5%<\/strong>/);
+  assert.doesNotMatch(page, /退出演示账号/);
+});

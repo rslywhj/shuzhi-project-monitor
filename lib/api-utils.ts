@@ -14,12 +14,13 @@ export function apiError(error: unknown) {
     message.includes("D1 binding") ||
     message.includes("no such table") ||
     message.includes("no such column");
+  const storageUnavailable = message.includes("R2 binding");
   const status =
     error instanceof ApiRequestError
       ? error.status
       : error instanceof SyntaxError
         ? 400
-        : databaseUnavailable
+        : databaseUnavailable || storageUnavailable
           ? 503
           : 500;
   if (status >= 500) {
@@ -27,8 +28,10 @@ export function apiError(error: unknown) {
   }
   return Response.json(
     {
-      error: databaseUnavailable
-        ? "数据服务尚未完成初始化，请稍后重试。"
+      error: databaseUnavailable || storageUnavailable
+        ? storageUnavailable
+          ? "附件存储服务尚未完成初始化，请稍后重试。"
+          : "数据服务尚未完成初始化，请稍后重试。"
         : error instanceof ApiRequestError
           ? error.message
           : error instanceof SyntaxError

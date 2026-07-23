@@ -130,6 +130,30 @@ export const weeklyReports = sqliteTable(
   ],
 );
 
+export const attachments = sqliteTable(
+  "attachments",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    weekKey: text("week_key").notNull(),
+    milestoneId: integer("milestone_id").references(() => milestones.id, {
+      onDelete: "set null",
+    }),
+    objectKey: text("object_key").notNull(),
+    filename: text("filename").notNull(),
+    contentType: text("content_type").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    uploadedBy: text("uploaded_by").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("attachments_object_key_idx").on(table.objectKey),
+    index("attachments_project_week_idx").on(table.projectId, table.weekKey),
+  ],
+);
+
 export const baselineVersions = sqliteTable(
   "baseline_versions",
   {

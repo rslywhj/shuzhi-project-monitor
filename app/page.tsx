@@ -133,6 +133,17 @@ type WeeklyReportDraft = {
     detail?: string;
   };
 };
+type AttachmentData = {
+  id: number;
+  projectId: string;
+  weekKey: string;
+  milestoneId: number | null;
+  filename: string;
+  contentType: string;
+  sizeBytes: number;
+  uploadedBy: string;
+  createdAt: string;
+};
 type BaselineMilestone = {
   milestoneId?: number;
   templateId?: number | null;
@@ -187,6 +198,7 @@ type ProjectAuditRow = {
 };
 type ProjectActivityData = {
   weeklyReports: WeeklyReportRow[];
+  attachments: AttachmentData[];
   baselineVersions: BaselineVersionRow[];
   baselineChanges: BaselineChangeRow[];
   auditLogs: ProjectAuditRow[];
@@ -235,6 +247,12 @@ function daysBetween(from: string, to: string) {
     (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) /
       86_400_000,
   );
+}
+
+function formatFileSize(size: number) {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function Icon({ children }: { children: React.ReactNode }) {
@@ -409,7 +427,7 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
       </div>
 
       <aside className="attention-panel">
-        <div className="attention-head"><div><span className="section-index">02</span><h2>重点关注</h2></div><button>查看全部</button></div>
+        <div className="attention-head"><div><span className="section-index">02</span><h2>重点关注</h2></div><button onClick={() => onNavigate("portfolio")}>查看全部</button></div>
         {attentionProjects.length ? attentionProjects.map((project, index) => {
           const issue = [...(project.milestones ?? [])]
             .filter((milestone) => milestone.applicable)
@@ -474,7 +492,7 @@ function Sidebar({ view, onNavigate, identity }: { view: View; onNavigate: Navig
     <nav>{visibleItems.map(item => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => onNavigate(item.id)}><Icon>{item.icon}</Icon>{item.label}</button>)}</nav>
     <div className="sidebar-divider" />
     <div className="subnav"><span>常用功能</span><button onClick={() => onNavigate("project")}><Icon>◫</Icon>风险与措施</button>{canGovern && <><button onClick={() => onNavigate("pmo")}><Icon>≋</Icon>基线变更</button><button onClick={() => onNavigate("pmo")}><Icon>⚙</Icon>规则配置</button><button onClick={() => onNavigate("admin")}><Icon>♙</Icon>用户与权限</button></>}</div>
-    <div className="sidebar-bottom"><div className="system-state"><i /><span><strong>系统运行正常</strong><small>数据更新于 14:32</small></span></div><button className="cockpit-link" onClick={() => onNavigate("cockpit")}><Icon>▦</Icon>打开管理大屏 <span>↗</span></button></div>
+    <div className="sidebar-bottom"><div className="system-state"><i /><span><strong>系统运行正常</strong><small>服务端实时数据</small></span></div><button className="cockpit-link" onClick={() => onNavigate("cockpit")}><Icon>▦</Icon>打开管理大屏 <span>↗</span></button></div>
   </aside>;
 }
 
@@ -488,14 +506,15 @@ function WorkspaceHeader({ title, subtitle, onNavigate, identity }: { title: str
   };
   const displayName = identity?.displayName || "登录用户";
   const roleName = identity ? roleNames[identity.role] : "身份加载中";
+  const canGovern = identity?.role === "admin" || identity?.role === "pmo";
   return <header className="workspace-header">
     <div><h1>{title}</h1><p>{subtitle}</p></div>
-    <div className="header-actions"><button className="icon-button" aria-label="搜索">⌕</button><button className="icon-button notice" aria-label="通知">♢<i /></button><button className="user-button" onClick={() => setMenu(!menu)}><span className="avatar">{displayName[0]}</span><span><strong>{displayName}</strong><small>{roleName}</small></span><em>⌄</em></button></div>
-    {menu && <div className="user-menu"><button>个人设置</button><button onClick={() => onNavigate("cockpit")}>打开管理大屏</button><button>退出演示账号</button></div>}
+    <div className="header-actions"><button className="icon-button" aria-label="搜索项目" onClick={() => onNavigate("portfolio")}>⌕</button>{canGovern && <button className="icon-button notice" aria-label="查看PMO待办" onClick={() => onNavigate("pmo")}>♢<i /></button>}<button className="user-button" onClick={() => setMenu(!menu)}><span className="avatar">{displayName[0]}</span><span><strong>{displayName}</strong><small>{roleName}</small></span><em>⌄</em></button></div>
+    {menu && <div className="user-menu">{canGovern && <button onClick={() => onNavigate("admin")}>用户与权限</button>}<button onClick={() => onNavigate("portfolio")}>项目工作台</button><button onClick={() => onNavigate("cockpit")}>打开管理大屏</button></div>}
   </header>;
 }
 
-function Portfolio({ onNavigate, onDataChanged, projectData = projects, identity, templateData = defaultTemplateData }: { onNavigate: Navigate; onDataChanged: () => Promise<void>; projectData?: ProjectData[]; identity: Identity | null; templateData?: TemplateData[] }) {
+function Portfolio({ onNavigate, onDataChanged, projectData = projects, identity, templateData = defaultTemplateData, weeklyReports = [] }: { onNavigate: Navigate; onDataChanged: () => Promise<void>; projectData?: ProjectData[]; identity: Identity | null; templateData?: TemplateData[]; weeklyReports?: WeeklyReportRow[] }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("全部");
   const [page, setPage] = useState(0);
@@ -521,6 +540,18 @@ function Portfolio({ onNavigate, onDataChanged, projectData = projects, identity
     red: projectData.filter((project) => project.status === "red").length,
   };
   const percent = (value: number) => counts.all ? `${((value / counts.all) * 100).toFixed(1)}%` : "0%";
+  const reportingWeek = currentReportingPeriod().weekKey;
+  const submittedProjects = new Set(
+    weeklyReports
+      .filter(
+        (report) =>
+          report.weekKey === reportingWeek && report.status !== "draft",
+      )
+      .map((report) => report.projectId),
+  ).size;
+  const reportCompletion = counts.all
+    ? Number(((submittedProjects / counts.all) * 100).toFixed(1))
+    : 0;
 
   async function createProject(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -571,7 +602,7 @@ function Portfolio({ onNavigate, onDataChanged, projectData = projects, identity
         <div className="summary-card"><span className="summary-icon green">●</span><div><small>绿色项目</small><strong>{counts.green}</strong><em>{percent(counts.green)}</em></div></div>
         <div className="summary-card"><span className="summary-icon yellow">▲</span><div><small>黄色项目</small><strong>{counts.yellow}</strong><em>{percent(counts.yellow)}</em></div></div>
         <div className="summary-card"><span className="summary-icon red">■</span><div><small>红色项目</small><strong>{counts.red}</strong><em>{percent(counts.red)}</em></div></div>
-        <div className="summary-card wide"><div><small>周报完成率</small><strong>95.5%</strong></div><ProgressBar value={95.5} /><span>42 / 44</span></div>
+        <div className="summary-card wide"><div><small>{reportingWeek} 周报完成率</small><strong>{reportCompletion}%</strong></div><ProgressBar value={reportCompletion} /><span>{submittedProjects} / {counts.all}</span></div>
       </div>
       <section className="content-card">
         <div className="table-toolbar"><div><h2>项目清单</h2><span>当前批准基线口径</span></div><div className="toolbar-actions"><label className="search"><span>⌕</span><input placeholder="搜索项目名称" value={query} onChange={e => { setQuery(e.target.value); setPage(0); }} /></label><select value={status} onChange={e => { setStatus(e.target.value); setPage(0); }}><option>全部</option><option>正常</option><option>预警</option><option>严重</option></select>{(identity?.role === "pmo" || identity?.role === "admin") && <button className="primary-button" onClick={() => setShowCreate(true)}>＋ 新建项目</button>}</div></div>
@@ -582,7 +613,7 @@ function Portfolio({ onNavigate, onDataChanged, projectData = projects, identity
             <span><StatusPill status={p.status} /></span><span className="owner"><i>{p.owner[0]}</i>{p.owner}</span>
             <span className="dual-progress"><b>{p.actual}%</b><ProgressBar value={p.actual} tone={p.status} /><small>计划 {p.plan}%</small></span>
             <span className={p.actual - p.plan < -5 ? "negative" : "positive"}>{p.actual - p.plan > 0 ? "+" : ""}{(p.actual - p.plan).toFixed(1)} pp</span>
-            <span className={`risk ${p.risk === "高" ? "high" : p.risk === "中" ? "medium" : "low"}`}>{p.risk}风险</span><span>{p.updatedAt ? p.updatedAt.replace("T", " ").slice(5, 16) : "演示数据"}</span><button className="more" aria-label="更多">•••</button>
+            <span className={`risk ${p.risk === "高" ? "high" : p.risk === "中" ? "medium" : "low"}`}>{p.risk}风险</span><span>{p.updatedAt ? p.updatedAt.replace("T", " ").slice(5, 16) : "数据未同步"}</span><button className="more" aria-label={`查看${p.name}`} onClick={() => onNavigate("project", p.id)}>•••</button>
           </div>)}
         </div>
         <div className="pagination"><span>共 {matching.length} 条，每页 10 条</span><div><button disabled={safePage === 0} onClick={() => setPage((current) => Math.max(0, current - 1))}>‹</button>{Array.from({ length: pageCount }, (_, index) => <button key={index} className={safePage === index ? "active" : ""} onClick={() => setPage(index)}>{index + 1}</button>)}<button disabled={safePage === pageCount - 1} onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))}>›</button></div></div>
@@ -857,6 +888,7 @@ function ProjectActivityPanel({
           <span>{report.submittedBy}</span>
           <time>{report.submittedAt.replace("T", " ").slice(0, 16)}</time>
           {report.reason && <p>{report.reason}</p>}
+          {data.attachments.some((attachment) => attachment.weekKey === report.weekKey) && <div className="history-attachments"><strong>支撑附件</strong>{data.attachments.filter((attachment) => attachment.weekKey === report.weekKey).map((attachment) => <a key={attachment.id} href={`/api/attachments/${attachment.id}`} target="_blank" rel="noreferrer"><span>↧</span>{attachment.filename}<small>{formatFileSize(attachment.sizeBytes)}</small></a>)}</div>}
         </article>)}
       </div> : <div className="empty-state">暂无周报记录</div>}
     </section>;
@@ -928,6 +960,8 @@ function ProjectActivityPanel({
     "risk.update": "更新风险",
     "corrective_action.create": "新增纠偏措施",
     "corrective_action.update": "更新纠偏措施",
+    "attachment.upload": "上传周报附件",
+    "attachment.delete": "删除周报附件",
   };
   return <section className="content-card activity-card">
     <div className="card-title"><div><h2>操作审计</h2><p>项目、节点、风险、措施与基线关键操作统一追踪</p></div><button className="text-button" onClick={loadActivity}>刷新</button></div>
@@ -1143,7 +1177,7 @@ function ProjectDetail({ onNavigate, onDataChanged, projectData = projects, proj
         <div className="hero-actions"><button className="outline-button" onClick={() => window.print()}>导出报告</button>{canUpdate && <><button className="outline-button" onClick={() => { setProjectError(""); setShowProjectEdit(true); }}>编辑信息</button><button className="primary-button" onClick={() => onNavigate("report", currentProject.id)}>更新本周进度</button></>}</div>
       </section>
       <section className="score-explain">
-        <div className="score-ring"><strong>{currentProject.score}</strong><span>综合健康度</span></div><div className="score-copy"><h3>项目{statusLabel[currentProject.status]}：评分与一票否决规则共同判定</h3><p>基础分 100，当前累计扣分 {100 - currentProject.score} 分。所有扣分均可追溯至节点、风险或数据更新记录。</p><div className="deductions"><span>进度偏差 <b>{variance}pp</b></span><span>节点预警 <b>{currentProject.cells.filter((cell) => cell === "yellow").length}项</b></span><span>严重节点 <b>{currentProject.cells.filter((cell) => cell === "red").length}项</b></span></div></div><button className="text-button">查看评分明细 →</button>
+        <div className="score-ring"><strong>{currentProject.score}</strong><span>综合健康度</span></div><div className="score-copy"><h3>项目{statusLabel[currentProject.status]}：评分与一票否决规则共同判定</h3><p>基础分 100，当前累计扣分 {100 - currentProject.score} 分。所有扣分均可追溯至节点、风险或数据更新记录。</p><div className="deductions"><span>进度偏差 <b>{variance}pp</b></span><span>节点预警 <b>{currentProject.cells.filter((cell) => cell === "yellow").length}项</b></span><span>严重节点 <b>{currentProject.cells.filter((cell) => cell === "red").length}项</b></span></div></div><span className="count-badge">规则可解释</span>
       </section>
       <div className="tabs">{["节点计划","周报记录","风险与措施","基线版本","操作审计"].map(t => <button className={tab === t ? "active" : ""} onClick={() => setTab(t)} key={t}>{t}{t === "风险与措施" && <b>{(currentProject.openRiskCount ?? 0) + (currentProject.openActionCount ?? 0)}</b>}</button>)}</div>
       {tab === "节点计划" && <section className="content-card milestone-card">
@@ -1217,6 +1251,8 @@ function WeeklyReport({ onNavigate, onDataChanged, projectId, projectData = proj
   const [submitting, setSubmitting] = useState(false);
   const [loadingDraft, setLoadingDraft] = useState(true);
   const [submitError, setSubmitError] = useState("");
+  const [attachmentRows, setAttachmentRows] = useState<AttachmentData[]>([]);
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const selectedMilestone =
     applicableMilestones.find(
       (milestone) => milestone.sequence === selectedSequence,
@@ -1280,6 +1316,21 @@ function WeeklyReport({ onNavigate, onDataChanged, projectId, projectData = proj
   const formCompleteness = Math.round(
     (completionItems.filter(Boolean).length / completionItems.length) * 100,
   );
+
+  const loadAttachments = useCallback(async () => {
+    const response = await fetch(
+      `/api/projects/${encodeURIComponent(projectId)}/attachments?weekKey=${encodeURIComponent(reportingPeriod.weekKey)}`,
+      { cache: "no-store" },
+    );
+    const result = (await response.json()) as {
+      attachments?: AttachmentData[];
+      error?: string;
+    };
+    if (!response.ok) {
+      throw new Error(result.error || "附件列表读取失败");
+    }
+    setAttachmentRows(result.attachments ?? []);
+  }, [projectId, reportingPeriod.weekKey]);
 
   useEffect(() => {
     if (!recommendedMilestone) return;
@@ -1366,6 +1417,25 @@ function WeeklyReport({ onNavigate, onDataChanged, projectId, projectData = proj
     };
   }, [currentProject.owner, projectId, reportingPeriod.weekKey]);
 
+  useEffect(() => {
+    let active = true;
+    const timer = window.setTimeout(() => {
+      loadAttachments().catch((attachmentError) => {
+        if (active) {
+          setSubmitError(
+            attachmentError instanceof Error
+              ? attachmentError.message
+              : "附件列表读取失败",
+          );
+        }
+      });
+    }, 0);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [loadAttachments]);
+
   function selectMilestone(sequence: number) {
     const milestone = applicableMilestones.find(
       (row) => row.sequence === sequence,
@@ -1378,6 +1448,58 @@ function WeeklyReport({ onNavigate, onDataChanged, projectId, projectData = proj
     setReason(milestone.reason ?? "");
     setRecoveryDate(milestone.forecastFinish ?? milestone.plannedFinish);
     setSubmitError("");
+  }
+
+  async function uploadAttachment(
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (!file) return;
+    setUploadingAttachment(true);
+    setSubmitError("");
+    try {
+      const form = new FormData();
+      form.set("file", file);
+      form.set("weekKey", reportingPeriod.weekKey);
+      if (selectedMilestone) {
+        form.set("milestoneId", String(selectedMilestone.id));
+      }
+      const response = await fetch(
+        `/api/projects/${encodeURIComponent(projectId)}/attachments`,
+        { method: "POST", body: form },
+      );
+      const result = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        throw new Error(result.error || "附件上传失败");
+      }
+      await loadAttachments();
+      setSavedMessage(`${file.name} 已上传`);
+      window.setTimeout(() => setSavedMessage(""), 3000);
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : "附件上传失败");
+    } finally {
+      setUploadingAttachment(false);
+    }
+  }
+
+  async function deleteAttachment(attachment: AttachmentData) {
+    setUploadingAttachment(true);
+    setSubmitError("");
+    try {
+      const response = await fetch(`/api/attachments/${attachment.id}`, {
+        method: "DELETE",
+      });
+      const result = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        throw new Error(result.error || "附件删除失败");
+      }
+      await loadAttachments();
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : "附件删除失败");
+    } finally {
+      setUploadingAttachment(false);
+    }
   }
 
   async function saveWeeklyReport(submitMode: "draft" | "submitted") {
@@ -1477,11 +1599,15 @@ function WeeklyReport({ onNavigate, onDataChanged, projectId, projectData = proj
             <div className="form-title"><span>03</span><div><h3>异常纠偏措施</h3><p>当前节点已触发{previewStatus === "red" ? "红色" : "黄色"}预警，正式提交前必须完整填写。</p></div></div>
             <div className="action-form"><div className="form-grid"><label>措施名称 <b>*</b><input value={actionName} onChange={(event) => setActionName(event.target.value)} placeholder="例如：接口联调专项攻坚" /></label><label>责任人 <b>*</b><input value={actionOwner} onChange={(event) => setActionOwner(event.target.value)} /></label><label>预计恢复日期 <b>*</b><input type="date" value={recoveryDate} onChange={(event) => setRecoveryDate(event.target.value)} /></label><label>措施状态<div className="readonly-input">进行中</div></label></div><label className="full-label">具体行动 <b>*</b><input value={actionDetail} onChange={(event) => setActionDetail(event.target.value)} placeholder="说明动作、资源投入、检查频率和完成标准" /></label></div>
           </section>}
+          <section className="content-card form-section attachment-section">
+            <div className="form-title"><span>04</span><div><h3>支撑附件</h3><p>上传会议纪要、验收材料、进度截图或问题清单；单个文件不超过10MB。</p></div><label className={`attachment-upload ${uploadingAttachment ? "disabled" : ""}`}>＋ {uploadingAttachment ? "正在处理…" : "选择文件"}<input type="file" disabled={uploadingAttachment} accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.png,.jpg,.jpeg,.txt,.csv,.zip" onChange={uploadAttachment} /></label></div>
+            {attachmentRows.length ? <div className="attachment-list">{attachmentRows.map((attachment) => <div key={attachment.id}><span className="attachment-type">↧</span><div><a href={`/api/attachments/${attachment.id}`} target="_blank" rel="noreferrer">{attachment.filename}</a><small>{formatFileSize(attachment.sizeBytes)} · {attachment.uploadedBy} · {attachment.createdAt.replace("T", " ").slice(0, 16)}</small></div><button type="button" disabled={uploadingAttachment} onClick={() => deleteAttachment(attachment)}>删除</button></div>)}</div> : <div className="attachment-empty">尚未上传附件，本项为选填。</div>}
+          </section>
           {submitError && <div className="form-error" role="alert">! {submitError}</div>}
           <div className="report-actions"><button className="outline-button" disabled={submitting || loadingDraft} onClick={() => saveWeeklyReport("draft")}>{submitting ? "处理中…" : "保存草稿"}</button><button className="primary-button" disabled={submitting || loadingDraft || !selectedMilestone} onClick={() => saveWeeklyReport("submitted")}>{submitting ? "正在提交…" : "提交本周进度"}</button></div>
         </div>
         <aside className="report-aside">
-          <div className="aside-card"><h3>填报完整度</h3><div className="completion-circle" style={{ background: `conic-gradient(var(--blue) ${formCompleteness}%,#e9edf3 0)` }}><strong>{formCompleteness}%</strong></div><ul><li className="done">✓ 总体进度</li><li className={selectedMilestone ? "done" : ""}>{selectedMilestone ? "✓" : "○"} 节点更新</li><li className={reason.trim() ? "done" : ""}>{reason.trim() ? "✓" : "○"} 本周进展说明</li><li className={!requiresAction || actionComplete ? "done" : ""}>{!requiresAction || actionComplete ? "✓" : "○"} 纠偏措施</li><li>○ 支撑附件（后续开放）</li></ul></div>
+          <div className="aside-card"><h3>填报完整度</h3><div className="completion-circle" style={{ background: `conic-gradient(var(--blue) ${formCompleteness}%,#e9edf3 0)` }}><strong>{formCompleteness}%</strong></div><ul><li className="done">✓ 总体进度</li><li className={selectedMilestone ? "done" : ""}>{selectedMilestone ? "✓" : "○"} 节点更新</li><li className={reason.trim() ? "done" : ""}>{reason.trim() ? "✓" : "○"} 本周进展说明</li><li className={!requiresAction || actionComplete ? "done" : ""}>{!requiresAction || actionComplete ? "✓" : "○"} 纠偏措施</li><li className={attachmentRows.length ? "done" : ""}>{attachmentRows.length ? "✓" : "○"} 支撑附件（选填）</li></ul></div>
           <div className="aside-card rule-tips"><h3>本次规则检查</h3><p className={Math.abs(diff) <= 5 ? "pass" : "warning"}>{Math.abs(diff) <= 5 ? "✓ 申报与计算进度一致" : `▲ 申报与计算相差 ${Math.abs(diff).toFixed(1)}pp`}</p><p className={reason.trim() ? "pass" : "warning"}>{reason.trim() ? "✓ 已填写本周进展说明" : "▲ 尚未填写进展说明"}</p><p className={!requiresAction || actionComplete ? "pass" : "warning"}>{!requiresAction ? "✓ 当前节点未触发措施必填" : actionComplete ? "✓ 纠偏措施字段完整" : "▲ 红黄节点措施尚不完整"}</p><p className={deviationDays > 0 ? "warning" : "pass"}>{deviationDays > 0 ? `▲ 预测完成日晚于基线 ${deviationDays} 天` : "✓ 节点未晚于批准基线"}</p></div>
           <div className="aside-card"><h3>快照提示</h3><p>{reportingPeriod.fridayLabel} 17:00 PMO 将锁定第{reportingPeriod.week}周快照。锁定后本周期不可再修改。</p></div>
         </aside>
@@ -1503,26 +1629,47 @@ function RuleConfigPanel() {
   const [version, setVersion] = useState(1);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+  type RuleHistoryRow = typeof values & {
+    id: number;
+    version: number;
+    active: boolean;
+    createdBy: string;
+    createdAt: string;
+  };
+  const [history, setHistory] = useState<RuleHistoryRow[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+
+  const loadRuleHistory = useCallback(async () => {
+    const response = await fetch("/api/rule-configs", { cache: "no-store" });
+    const data = (await response.json()) as {
+      ruleConfigs?: RuleHistoryRow[];
+      error?: string;
+    };
+    if (!response.ok) {
+      throw new Error(data.error || "规则版本读取失败");
+    }
+    const rows = data.ruleConfigs ?? [];
+    setHistory(rows);
+    const rule = rows[0];
+    if (rule) {
+      setValues({
+        normalYellowDays: rule.normalYellowDays,
+        normalRedDays: rule.normalRedDays,
+        criticalYellowDays: rule.criticalYellowDays,
+        criticalRedDays: rule.criticalRedDays,
+        greenScore: rule.greenScore,
+        yellowScore: rule.yellowScore,
+      });
+      setVersion(rule.version);
+    }
+  }, []);
 
   useEffect(() => {
-    fetch("/api/rule-configs")
-      .then((response) => response.json())
-      .then((data: { ruleConfigs?: Array<typeof values & { version: number }> }) => {
-        const rule = data.ruleConfigs?.[0];
-        if (rule) {
-          setValues({
-            normalYellowDays: rule.normalYellowDays,
-            normalRedDays: rule.normalRedDays,
-            criticalYellowDays: rule.criticalYellowDays,
-            criticalRedDays: rule.criticalRedDays,
-            greenScore: rule.greenScore,
-            yellowScore: rule.yellowScore,
-          });
-          setVersion(rule.version);
-        }
-      })
-      .catch(() => undefined);
-  }, []);
+    const timer = window.setTimeout(() => {
+      loadRuleHistory().catch(() => undefined);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadRuleHistory]);
 
   async function publishRule() {
     setSaving(true);
@@ -1540,6 +1687,7 @@ function RuleConfigPanel() {
       if (!response.ok) throw new Error(result.error || "规则发布失败");
       setVersion(result.rule?.version ?? version + 1);
       setMessage("规则已发布，新版本将用于后续状态计算。");
+      await loadRuleHistory();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "规则发布失败");
     } finally {
@@ -1550,7 +1698,7 @@ function RuleConfigPanel() {
   const field = (key: keyof typeof values, label: string, suffix: string) =>
     <label>{label}<div className="rule-input"><input type="number" min="0" max="365" value={values[key]} onChange={(event) => setValues((current) => ({ ...current, [key]: Number(event.target.value) }))} /><span>{suffix}</span></div></label>;
 
-  return <section className="content-card rule-panel"><div className="card-title"><div><h2>预警规则配置</h2><p>当前生效版本 V{version} · 发布后保留历史版本并记录操作人</p></div><span className="count-badge">V{version} 生效中</span></div><div className="rule-sections"><div><h3>普通节点时间阈值</h3><p>根据预测或实际完成日期相对批准基线的偏差天数判定。</p><div className="rule-fields">{field("normalYellowDays","黄色起始阈值","天")}{field("normalRedDays","红色起始阈值","天")}</div></div><div><h3>关键节点时间阈值</h3><p>关键节点采用更严格的预警口径，并可触发项目红色一票否决。</p><div className="rule-fields">{field("criticalYellowDays","黄色起始阈值","天")}{field("criticalRedDays","红色起始阈值","天")}</div></div><div><h3>项目健康度阈值</h3><p>综合得分达到绿色阈值为正常，低于黄色阈值为严重。</p><div className="rule-fields">{field("greenScore","绿色最低分","分")}{field("yellowScore","黄色最低分","分")}</div></div></div>{message && <div className={message.includes("已发布") ? "success-message" : "form-error"}>{message}</div>}<div className="rule-actions"><button className="outline-button">查看历史版本</button><button className="primary-button" disabled={saving} onClick={publishRule}>{saving ? "正在发布…" : "发布新版本"}</button></div></section>;
+  return <section className="content-card rule-panel"><div className="card-title"><div><h2>预警规则配置</h2><p>当前生效版本 V{version} · 发布后保留历史版本并记录操作人</p></div><span className="count-badge">V{version} 生效中</span></div><div className="rule-sections"><div><h3>普通节点时间阈值</h3><p>根据预测或实际完成日期相对批准基线的偏差天数判定。</p><div className="rule-fields">{field("normalYellowDays","黄色起始阈值","天")}{field("normalRedDays","红色起始阈值","天")}</div></div><div><h3>关键节点时间阈值</h3><p>关键节点采用更严格的预警口径，并可触发项目红色一票否决。</p><div className="rule-fields">{field("criticalYellowDays","黄色起始阈值","天")}{field("criticalRedDays","红色起始阈值","天")}</div></div><div><h3>项目健康度阈值</h3><p>综合得分达到绿色阈值为正常，低于黄色阈值为严重。</p><div className="rule-fields">{field("greenScore","绿色最低分","分")}{field("yellowScore","黄色最低分","分")}</div></div></div>{showHistory && <div className="rule-history"><div className="table-head"><span>版本</span><span>普通节点</span><span>关键节点</span><span>健康度</span><span>发布人</span><span>发布时间</span></div>{history.map((rule) => <div className="table-row" key={rule.id}><span><strong>V{rule.version}</strong>{rule.active && <small>当前</small>}</span><span>黄 {rule.normalYellowDays}天 / 红 {rule.normalRedDays}天</span><span>黄 {rule.criticalYellowDays}天 / 红 {rule.criticalRedDays}天</span><span>绿 ≥{rule.greenScore} / 黄 ≥{rule.yellowScore}</span><span>{rule.createdBy}</span><span>{rule.createdAt.replace("T"," ").slice(0,16)}</span></div>)}</div>}{message && <div className={message.includes("已发布") ? "success-message" : "form-error"}>{message}</div>}<div className="rule-actions"><button className="outline-button" onClick={() => setShowHistory((value) => !value)}>{showHistory ? "收起历史版本" : `查看历史版本（${history.length}）`}</button><button className="primary-button" disabled={saving} onClick={publishRule}>{saving ? "正在发布…" : "发布新版本"}</button></div></section>;
 }
 
 function AdminPage({ onNavigate, identity }: { onNavigate: Navigate; identity: Identity | null }) {
@@ -1576,6 +1724,8 @@ function AdminPage({ onNavigate, identity }: { onNavigate: Navigate; identity: I
     "baseline_change.request": "申请基线变更",
     "baseline_change.reject": "驳回基线变更",
     "snapshot.reopen": "重新打开快照",
+    "attachment.upload": "上传附件",
+    "attachment.delete": "删除附件",
   };
 
   const loadAdminData = useCallback(async () => {
@@ -2031,6 +2181,7 @@ export default function Home() {
   const [trendData, setTrendData] = useState<TrendPoint[]>([]);
   const [templateData, setTemplateData] =
     useState<TemplateData[]>(defaultTemplateData);
+  const [weeklyReportData, setWeeklyReportData] = useState<WeeklyReportRow[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState("P02");
   const [dataState, setDataState] = useState<"loading" | "ready" | "fallback">("loading");
   const navigate: Navigate = (next, projectId) => {
@@ -2049,6 +2200,7 @@ export default function Home() {
         dashboardProjects?: ProjectData[];
         dashboardSnapshot?: DashboardSnapshot | null;
         milestoneTemplates?: TemplateData[];
+        weeklyReports?: WeeklyReportRow[];
       };
       if (data.projects?.length) setProjectData(data.projects);
       if (data.dashboardProjects?.length) {
@@ -2060,6 +2212,7 @@ export default function Home() {
       if (data.milestoneTemplates?.length) {
         setTemplateData(data.milestoneTemplates);
       }
+      setWeeklyReportData(data.weeklyReports ?? []);
       if (data.identity) setIdentity(data.identity);
       try {
         const trendResponse = await fetch("/api/dashboard/trends", {
@@ -2088,5 +2241,5 @@ export default function Home() {
   }, [refreshData]);
 
   if (view === "cockpit") return <><Cockpit onNavigate={navigate} projectData={dashboardData} snapshot={dashboardSnapshot} templateData={templateData} trends={trendData} />{dataState === "fallback" && <div className="data-banner">当前数据服务不可用，管理大屏不展示未核实的演示数据。</div>}</>;
-  return <div className="app-shell"><Sidebar view={view} onNavigate={navigate} identity={identity} /><div className="workspace">{view === "portfolio" && <Portfolio onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} identity={identity} templateData={templateData} />}{view === "project" && <ProjectDetail onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} projectId={selectedProjectId} identity={identity} />}{view === "report" && <WeeklyReport onNavigate={navigate} onDataChanged={refreshData} projectId={selectedProjectId} projectData={projectData} identity={identity} snapshot={dashboardSnapshot} />}{view === "pmo" && <PmoPage onNavigate={navigate} onDataChanged={refreshData} identity={identity} projectData={projectData} />}{view === "admin" && <AdminPage onNavigate={navigate} identity={identity} />}</div></div>;
+  return <div className="app-shell"><Sidebar view={view} onNavigate={navigate} identity={identity} /><div className="workspace">{view === "portfolio" && <Portfolio onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} identity={identity} templateData={templateData} weeklyReports={weeklyReportData} />}{view === "project" && <ProjectDetail onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} projectId={selectedProjectId} identity={identity} />}{view === "report" && <WeeklyReport onNavigate={navigate} onDataChanged={refreshData} projectId={selectedProjectId} projectData={projectData} identity={identity} snapshot={dashboardSnapshot} />}{view === "pmo" && <PmoPage onNavigate={navigate} onDataChanged={refreshData} identity={identity} projectData={projectData} />}{view === "admin" && <AdminPage onNavigate={navigate} identity={identity} />}</div></div>;
 }

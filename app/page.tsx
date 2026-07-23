@@ -297,6 +297,39 @@ function AppLogo({ dark = false }: { dark?: boolean }) {
   </div>;
 }
 
+function LoginScreen() {
+  return <main className="login-screen">
+    <section className="login-intro">
+      <AppLogo dark />
+      <div>
+        <span className="eyebrow">PORTFOLIO COMMAND CENTER</span>
+        <h1>统一节点口径，<br />提前识别项目偏差</h1>
+        <p>面向管理层、项目经理与 PMO 的统建项目进度监控平台。</p>
+      </div>
+      <div className="login-capabilities">
+        <span><b>01</b> 项目 × 节点态势矩阵</span>
+        <span><b>02</b> 预测预警与事后度量</span>
+        <span><b>03</b> 周报、措施与基线闭环</span>
+      </div>
+    </section>
+    <section className="login-panel">
+      <div className="login-card">
+        <span className="login-kicker">SECURE ACCESS</span>
+        <h2>登录工作台</h2>
+        <p>使用组织平台账号验证身份。登录后系统将按管理层、项目经理、PMO 或管理员角色自动授权。</p>
+        <a className="login-button" href="/signin-with-chatgpt?return_to=%2F">使用平台账号登录 <span>→</span></a>
+        <div className="login-role-grid">
+          <span><b>管理层</b><small>只读查看组合态势</small></span>
+          <span><b>项目经理</b><small>维护所属项目进度</small></span>
+          <span><b>PMO</b><small>治理规则与周度快照</small></span>
+          <span><b>管理员</b><small>维护账号权限</small></span>
+        </div>
+        <small className="login-note">平台不在浏览器保存密码；身份由登录服务验证。</small>
+      </div>
+    </section>
+  </main>;
+}
+
 function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = defaultTemplateData, trends = [] }: { onNavigate: Navigate; projectData?: ProjectData[]; snapshot: DashboardSnapshot | null; templateData?: TemplateData[]; trends?: TrendPoint[] }) {
   const [org, setOrg] = useState("全部组织");
   const [owner, setOwner] = useState("全部负责人");
@@ -610,7 +643,7 @@ function WorkspaceHeader({ title, subtitle, onNavigate, identity }: { title: str
     <div><h1>{title}</h1><p>{subtitle}</p></div>
     <div className="header-actions"><button className="icon-button" aria-label="搜索项目" onClick={() => onNavigate("portfolio")}>⌕</button><button className="icon-button notice" aria-label={`通知${unreadCount ? `，${unreadCount}条未读` : ""}`} aria-expanded={noticeOpen} onClick={() => { setNoticeOpen((value) => !value); setMenu(false); if (!noticeOpen) void loadNotifications(); }}>♢{unreadCount > 0 && <b>{unreadCount > 9 ? "9+" : unreadCount}</b>}</button><button className="user-button" onClick={() => { setMenu(!menu); setNoticeOpen(false); }}><span className="avatar">{displayName[0]}</span><span><strong>{displayName}</strong><small>{roleName}</small></span><em>⌄</em></button></div>
     {noticeOpen && <section className="notification-center"><div className="notification-head"><div><strong>通知中心</strong><span>{unreadCount} 条未读</span></div>{unreadCount > 0 && <button onClick={markAllNotificationsRead}>全部已读</button>}</div>{notificationError ? <div className="notification-error">! {notificationError}</div> : notificationRows.filter((row) => row.status !== "dismissed").length ? <div className="notification-list">{notificationRows.filter((row) => row.status !== "dismissed").slice(0, 20).map((notification) => <button className={`${notification.severity} ${notification.status}`} key={notification.id} onClick={() => openNotification(notification)}><span className="notification-symbol">{notification.severity === "critical" ? "■" : notification.severity === "warning" ? "▲" : "●"}</span><div><strong>{notification.title}</strong><p>{notification.message}</p><small>{notification.createdAt.replace("T"," ").slice(0,16)} · {notification.createdBy}</small></div>{notification.status === "unread" && <i />}</button>)}</div> : <div className="notification-empty">暂无通知</div>}<div className="notification-foot">{canGovern ? <button onClick={() => onNavigate("pmo")}>进入 PMO 待办</button> : <span>通知由 PMO 与系统工作流生成</span>}</div></section>}
-    {menu && <div className="user-menu">{canGovern && <button onClick={() => onNavigate("admin")}>用户与权限</button>}<button onClick={() => onNavigate("portfolio")}>项目工作台</button><button onClick={() => onNavigate("cockpit")}>打开管理大屏</button></div>}
+    {menu && <div className="user-menu">{canGovern && <button onClick={() => onNavigate("admin")}>用户与权限</button>}<button onClick={() => onNavigate("portfolio")}>项目工作台</button><button onClick={() => onNavigate("cockpit")}>打开管理大屏</button><a href="/signout-with-chatgpt?return_to=%2F">退出登录</a></div>}
   </header>;
 }
 
@@ -2329,7 +2362,9 @@ export default function Home() {
     useState<TemplateData[]>(defaultTemplateData);
   const [weeklyReportData, setWeeklyReportData] = useState<WeeklyReportRow[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState("P02");
-  const [dataState, setDataState] = useState<"loading" | "ready" | "fallback">("loading");
+  const [dataState, setDataState] = useState<
+    "loading" | "ready" | "fallback" | "unauthenticated"
+  >("loading");
   const navigate: Navigate = (next, projectId) => {
     if (projectId) setSelectedProjectId(projectId);
     setView(next);
@@ -2339,6 +2374,11 @@ export default function Home() {
   const refreshData = useCallback(async () => {
     try {
       const response = await fetch("/api/bootstrap", { cache: "no-store" });
+      if (response.status === 401) {
+        setIdentity(null);
+        setDataState("unauthenticated");
+        return;
+      }
       if (!response.ok) throw new Error("data unavailable");
       const data = (await response.json()) as {
         projects?: ProjectData[];
@@ -2386,6 +2426,7 @@ export default function Home() {
     return () => window.clearTimeout(timer);
   }, [refreshData]);
 
+  if (dataState === "unauthenticated") return <LoginScreen />;
   if (view === "cockpit") return <><Cockpit onNavigate={navigate} projectData={dashboardData} snapshot={dashboardSnapshot} templateData={templateData} trends={trendData} />{dataState === "fallback" && <div className="data-banner">当前数据服务不可用，管理大屏不展示未核实的演示数据。</div>}</>;
   return <div className="app-shell"><Sidebar view={view} onNavigate={navigate} identity={identity} /><div className="workspace">{view === "portfolio" && <Portfolio onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} identity={identity} templateData={templateData} weeklyReports={weeklyReportData} />}{view === "project" && <ProjectDetail onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} projectId={selectedProjectId} identity={identity} />}{view === "report" && <WeeklyReport onNavigate={navigate} onDataChanged={refreshData} projectId={selectedProjectId} projectData={projectData} identity={identity} snapshot={dashboardSnapshot} />}{view === "pmo" && <PmoPage onNavigate={navigate} onDataChanged={refreshData} identity={identity} projectData={projectData} />}{view === "admin" && <AdminPage onNavigate={navigate} identity={identity} />}</div></div>;
 }

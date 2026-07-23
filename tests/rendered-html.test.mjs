@@ -368,3 +368,19 @@ test("supports all required management heatmap filter dimensions", async () => {
   assert.match(page, /project\.type === projectType/);
   assert.match(page, /setPage\(0\)/);
 });
+
+test("shows a real authentication boundary instead of unauthenticated demo data", async () => {
+  const [page, auth] = await Promise.all([
+    readFile(new URL("app/page.tsx", templateRoot), "utf8"),
+    readFile(new URL("app/chatgpt-auth.ts", templateRoot), "utf8"),
+  ]);
+
+  assert.match(page, /function LoginScreen/);
+  assert.match(page, /response\.status === 401/);
+  assert.match(page, /setDataState\("unauthenticated"\)/);
+  assert.match(page, /\/signin-with-chatgpt\?return_to=%2F/);
+  assert.match(page, /\/signout-with-chatgpt\?return_to=%2F/);
+  assert.match(page, /身份由登录服务验证/);
+  assert.match(auth, /safeRelativeReturnPath/);
+  assert.match(auth, /isReservedAuthPath/);
+});

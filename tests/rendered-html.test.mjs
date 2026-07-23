@@ -176,12 +176,26 @@ test("serves management views from locked snapshots rather than mutable live row
 });
 
 test("persists the twelve-node standard template and project-level milestone governance", async () => {
-  const [schema, seed, templatesRoute, projectMilestonesRoute, projectRoute, page, css, migration] =
+  const [schema, seed, templatesRoute, candidatesRoute, promoteRoute, projectMilestonesRoute, projectRoute, page, css, migration] =
     await Promise.all([
       readFile(new URL("db/schema.ts", templateRoot), "utf8"),
       readFile(new URL("lib/seed.ts", templateRoot), "utf8"),
       readFile(
         new URL("app/api/milestone-templates/route.ts", templateRoot),
+        "utf8",
+      ),
+      readFile(
+        new URL(
+          "app/api/milestone-templates/candidates/route.ts",
+          templateRoot,
+        ),
+        "utf8",
+      ),
+      readFile(
+        new URL(
+          "app/api/milestone-templates/promote/route.ts",
+          templateRoot,
+        ),
         "utf8",
       ),
       readFile(
@@ -202,12 +216,26 @@ test("persists the twelve-node standard template and project-level milestone gov
   assert.match(seed, /M12/);
   assert.match(seed, /结项移交/);
   assert.match(templatesRoute, /milestone_template\.publish/);
+  assert.match(candidatesRoute, /canManagePortfolio/);
+  assert.match(candidatesRoute, /milestones\.custom, true/);
+  assert.match(candidatesRoute, /sourceProjectCount/);
+  assert.match(promoteRoute, /canManagePortfolio/);
+  assert.match(promoteRoute, /milestone_template\.promote/);
+  assert.match(promoteRoute, /active: false/);
+  assert.match(promoteRoute, /defaultWeight: 0/);
+  assert.match(promoteRoute, /applicable: false/);
+  assert.match(promoteRoute, /status: "na"/);
+  assert.match(promoteRoute, /syncExistingProjects/);
   assert.match(projectMilestonesRoute, /project_milestones\.update/);
   assert.match(projectMilestonesRoute, /project_milestone\.create_custom/);
   assert.match(projectRoute, /milestoneChunks/);
   assert.match(page, /项目节点治理/);
   assert.match(page, /启用权重/);
+  assert.match(page, /自定义节点候选池/);
+  assert.match(page, /提升为标准节点/);
+  assert.match(page, /同步到现有项目并默认标记为不适用、零权重/);
   assert.match(css, /--milestone-count/);
+  assert.match(css, /candidate-promotion-modal/);
   assert.match(migration, /CREATE TABLE `milestone_templates`/);
 });
 

@@ -1232,8 +1232,8 @@ function ProjectActivityPanel({
     "baseline_change.approve": "批准基线变更",
     "baseline_change.reject": "驳回基线变更",
     "project.update": "更新项目信息",
-    "project.milestones.update": "更新项目节点治理",
-    "milestone.create": "新增项目节点",
+    "project_milestones.update": "更新项目节点治理",
+    "project_milestone.create_custom": "新增项目自定义节点",
     "risk.create": "登记风险",
     "risk.update": "更新风险",
     "corrective_action.create": "新增纠偏措施",
@@ -2004,6 +2004,8 @@ function AdminPage({ onNavigate, identity }: { onNavigate: Navigate; identity: I
     "snapshot.reopen": "重新打开快照",
     "attachment.upload": "上传附件",
     "attachment.delete": "删除附件",
+    "milestone_template.publish": "发布标准节点模板",
+    "milestone_template.promote": "提升自定义节点",
   };
 
   const loadAdminData = useCallback(async () => {
@@ -2113,6 +2115,42 @@ function PmoPage({ onNavigate, onDataChanged, identity, projectData = projects }
     active: boolean;
     description: string;
   };
+  type TemplateCandidateSource = {
+    milestoneId: number;
+    projectId: string;
+    projectCode: string;
+    projectName: string;
+    ownerName: string;
+    name: string;
+    sequence: number;
+    weight: number;
+    critical: boolean;
+    applicable: boolean;
+    plannedStart: string;
+    plannedFinish: string;
+  };
+  type TemplateCandidate = {
+    key: string;
+    name: string;
+    sourceProjectCount: number;
+    sourceMilestoneCount: number;
+    criticalCount: number;
+    criticalRatio: number;
+    existingTemplate: {
+      id: number;
+      code: string;
+      name: string;
+      active: boolean;
+    } | null;
+    sources: TemplateCandidateSource[];
+  };
+  type PromotionDraft = {
+    code: string;
+    sequence: number;
+    critical: boolean;
+    description: string;
+    syncExistingProjects: boolean;
+  };
   const reportingPeriod = useMemo(() => currentReportingPeriod(), []);
   const [renderedAt] = useState(() => Date.now());
   const [locked, setLocked] = useState(false);
@@ -2132,9 +2170,45 @@ function PmoPage({ onNavigate, onDataChanged, identity, projectData = projects }
   const [templateRows, setTemplateRows] = useState<TemplateRow[]>([]);
   const [templateSaving, setTemplateSaving] = useState(false);
   const [templateMessage, setTemplateMessage] = useState("");
+  const [templateCandidates, setTemplateCandidates] = useState<
+    TemplateCandidate[]
+  >([]);
+  const [candidateLoading, setCandidateLoading] = useState(true);
+  const [promoteCandidate, setPromoteCandidate] =
+    useState<TemplateCandidate | null>(null);
+  const [promotionDraft, setPromotionDraft] = useState<PromotionDraft>({
+    code: "M13",
+    sequence: 13,
+    critical: false,
+    description: "",
+    syncExistingProjects: true,
+  });
+  const [promotionSaving, setPromotionSaving] = useState(false);
   const [reportRows, setReportRows] = useState<WeeklyReportRow[]>([]);
   const [notificationWorking, setNotificationWorking] = useState("");
   const [notificationMessage, setNotificationMessage] = useState("");
+
+  const loadTemplateCandidates = useCallback(async () => {
+    try {
+      const response = await fetch("/api/milestone-templates/candidates", {
+        cache: "no-store",
+      });
+      const result = (await response.json()) as {
+        candidates?: TemplateCandidate[];
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(result.error || "自定义节点候选池读取失败");
+      }
+      setTemplateCandidates(result.candidates ?? []);
+    } catch (error) {
+      setTemplateMessage(
+        error instanceof Error ? error.message : "自定义节点候选池读取失败",
+      );
+    } finally {
+      setCandidateLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     fetch("/api/bootstrap")
@@ -2168,6 +2242,24 @@ function PmoPage({ onNavigate, onDataChanged, identity, projectData = projects }
          setReportRows(data.weeklyReports ?? []);
        })
        .catch(() => undefined);
+    fetch("/api/milestone-templates/candidates", { cache: "no-store" })
+      .then(async (response) => {
+        const result = (await response.json()) as {
+          candidates?: TemplateCandidate[];
+          error?: string;
+        };
+        if (!response.ok) {
+          throw new Error(result.error || "自定义节点候选池读取失败");
+        }
+        return result.candidates ?? [];
+      })
+      .then((candidates) => setTemplateCandidates(candidates))
+      .catch((error: unknown) =>
+        setTemplateMessage(
+          error instanceof Error ? error.message : "自定义节点候选池读取失败",
+        ),
+      )
+      .finally(() => setCandidateLoading(false));
   }, [reportingPeriod.weekKey]);
 
   async function lockSnapshot() {
@@ -2303,7 +2395,7 @@ function PmoPage({ onNavigate, onDataChanged, identity, projectData = projects }
       };
       if (!response.ok) throw new Error(result.error || "节点模板发布失败");
       setTemplateRows(result.milestoneTemplates ?? templateRows);
-      setTemplateMessage("已发布新的标准节点模板，后续新建项目将使用最新口径。");
+      setTemplateMessage("✓ 已发布新的标准节点模板，后续新建项目将使用最新口径。");
       await onDataChanged();
     } catch (error) {
       setTemplateMessage(
@@ -2322,6 +2414,76 @@ function PmoPage({ onNavigate, onDataChanged, identity, projectData = projects }
       rows.map((row) => (row.id === id ? { ...row, [key]: value } : row)),
     );
     setTemplateMessage("");
+  }
+  function openCandidatePromotion(candidate: TemplateCandidate) {
+    const usedSequences = new Set(templateRows.map((row) => row.sequence));
+    const nextSequence =
+      Array.from({ length: 99 }, (_, index) => index + 1).find(
+        (sequence) => !usedSequences.has(sequence),
+      ) ?? 99;
+    const usedCodes = new Set(templateRows.map((row) => row.code.toUpperCase()));
+    const nextCode =
+      Array.from({ length: 99 }, (_, index) => `M${String(index + 1).padStart(2, "0")}`).find(
+        (code) => !usedCodes.has(code),
+      ) ?? `M${nextSequence}`;
+    setPromotionDraft({
+      code: nextCode,
+      sequence: nextSequence,
+      critical: candidate.criticalRatio >= 50,
+      description: `由${candidate.sourceProjectCount}个项目的自定义节点归并提升`,
+      syncExistingProjects: true,
+    });
+    setTemplateMessage("");
+    setPromoteCandidate(candidate);
+  }
+  async function promoteTemplateCandidate(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!promoteCandidate) return;
+    setPromotionSaving(true);
+    setTemplateMessage("");
+    try {
+      const response = await fetch("/api/milestone-templates/promote", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          candidateName: promoteCandidate.name,
+          code: promotionDraft.code,
+          sequence: promotionDraft.sequence,
+          critical: promotionDraft.critical,
+          description: promotionDraft.description,
+          sourceMilestoneIds: promoteCandidate.sources.map(
+            (source) => source.milestoneId,
+          ),
+          syncExistingProjects: promotionDraft.syncExistingProjects,
+        }),
+      });
+      const result = (await response.json()) as {
+        error?: string;
+        milestoneTemplate?: TemplateRow;
+        promotedMilestones?: number;
+        synchronizedProjects?: number;
+      };
+      if (!response.ok || !result.milestoneTemplate) {
+        throw new Error(result.error || "自定义节点提升失败");
+      }
+      setTemplateRows((rows) =>
+        [...rows, result.milestoneTemplate!].sort(
+          (left, right) => left.sequence - right.sequence,
+        ),
+      );
+      setTemplateMessage(
+        `✓ 已将“${promoteCandidate.name}”提升为未启用标准节点草稿，关联${result.promotedMilestones ?? 0}个来源节点、同步${result.synchronizedProjects ?? 0}个项目。`,
+      );
+      setPromoteCandidate(null);
+      setCandidateLoading(true);
+      await Promise.all([loadTemplateCandidates(), onDataChanged()]);
+    } catch (error) {
+      setTemplateMessage(
+        error instanceof Error ? error.message : "自定义节点提升失败",
+      );
+    } finally {
+      setPromotionSaving(false);
+    }
   }
   async function sendNotifications(
     projectIds: string[],
@@ -2488,7 +2650,19 @@ function PmoPage({ onNavigate, onDataChanged, identity, projectData = projects }
           <div className="approval-actions">{activeChange.status === "approved" || approved ? <div className="approved-note">✓ 已批准，当前基线已更新为 V{activeChange.versionTo}</div> : activeChange.status === "rejected" ? <div className="rejected-note">■ 已驳回：{activeChange.rejectionReason}</div> : <><button className="danger-outline" onClick={() => setShowReject(true)}>驳回申请</button><button className="primary-button" disabled={working} onClick={approveBaseline}>{working ? "正在审批…" : `批准并生成 V${activeChange.versionTo}`}</button></>}</div>
         </div> : <div className="empty-state">暂无基线变更申请</div>}
       </section>}
-      {tab === "节点模板" && <section className="content-card template-governance"><div className="card-title"><div><h2>标准节点模板</h2><p>统一维护节点编码、顺序、默认权重与关键节点标识；启用节点权重合计必须为100%</p></div><div className="template-publish"><span className={Math.abs(activeTemplateWeight - 100) < 0.01 ? "weight-ok" : "weight-error"}>启用权重 {activeTemplateWeight.toFixed(1)}%</span><button className="primary-button" disabled={templateSaving || Math.abs(activeTemplateWeight - 100) >= 0.01} onClick={saveTemplates}>{templateSaving ? "正在发布…" : "发布模板"}</button></div></div>{templateMessage && <div className={templateMessage.includes("已发布") ? "form-success" : "form-error"}>{templateMessage}</div>}<div className="template-grid"><div className="template-grid-head"><span>序号</span><span>编码</span><span>节点名称</span><span>权重</span><span>关键</span><span>启用</span><span>口径说明</span></div>{templateRows.map((row) => <div className={`template-grid-row ${row.active ? "" : "inactive"}`} key={row.id}><input aria-label={`${row.name}序号`} type="number" min="1" max="99" value={row.sequence} onChange={(event) => updateTemplate(row.id, "sequence", Number(event.target.value))} /><input aria-label={`${row.name}编码`} value={row.code} onChange={(event) => updateTemplate(row.id, "code", event.target.value.toUpperCase())} /><input aria-label={`${row.name}名称`} value={row.name} onChange={(event) => updateTemplate(row.id, "name", event.target.value)} /><label className="weight-input"><input aria-label={`${row.name}权重`} type="number" min="0" max="100" step="0.5" value={row.defaultWeight} onChange={(event) => updateTemplate(row.id, "defaultWeight", Number(event.target.value))} /><span>%</span></label><label className="template-check"><input type="checkbox" checked={row.critical} onChange={(event) => updateTemplate(row.id, "critical", event.target.checked)} /><span>关键</span></label><label className="template-check"><input type="checkbox" checked={row.active} onChange={(event) => updateTemplate(row.id, "active", event.target.checked)} /><span>启用</span></label><input aria-label={`${row.name}说明`} value={row.description} onChange={(event) => updateTemplate(row.id, "description", event.target.value)} /></div>)}</div><div className="template-footnote">项目可在本项目范围内标记节点不适用或追加零权重自定义节点；正式计划完成日调整仍须走基线变更审批。</div></section>}
+      {tab === "节点模板" && <>
+        <section className="content-card template-governance">
+          <div className="card-title"><div><h2>标准节点模板</h2><p>统一维护节点编码、顺序、默认权重与关键节点标识；启用节点权重合计必须为100%</p></div><div className="template-publish"><span className={Math.abs(activeTemplateWeight - 100) < 0.01 ? "weight-ok" : "weight-error"}>启用权重 {activeTemplateWeight.toFixed(1)}%</span><button className="primary-button" disabled={templateSaving || Math.abs(activeTemplateWeight - 100) >= 0.01} onClick={saveTemplates}>{templateSaving ? "正在发布…" : "发布模板"}</button></div></div>
+          {templateMessage && <div className={templateMessage.startsWith("✓") ? "form-success" : "form-error"}>{templateMessage}</div>}
+          <div className="template-grid"><div className="template-grid-head"><span>序号</span><span>编码</span><span>节点名称</span><span>权重</span><span>关键</span><span>启用</span><span>口径说明</span></div>{templateRows.map((row) => <div className={`template-grid-row ${row.active ? "" : "inactive"}`} key={row.id}><input aria-label={`${row.name}序号`} type="number" min="1" max="99" value={row.sequence} onChange={(event) => updateTemplate(row.id, "sequence", Number(event.target.value))} /><input aria-label={`${row.name}编码`} value={row.code} onChange={(event) => updateTemplate(row.id, "code", event.target.value.toUpperCase())} /><input aria-label={`${row.name}名称`} value={row.name} onChange={(event) => updateTemplate(row.id, "name", event.target.value)} /><label className="weight-input"><input aria-label={`${row.name}权重`} type="number" min="0" max="100" step="0.5" value={row.defaultWeight} onChange={(event) => updateTemplate(row.id, "defaultWeight", Number(event.target.value))} /><span>%</span></label><label className="template-check"><input type="checkbox" checked={row.critical} onChange={(event) => updateTemplate(row.id, "critical", event.target.checked)} /><span>关键</span></label><label className="template-check"><input type="checkbox" checked={row.active} onChange={(event) => updateTemplate(row.id, "active", event.target.checked)} /><span>启用</span></label><input aria-label={`${row.name}说明`} value={row.description} onChange={(event) => updateTemplate(row.id, "description", event.target.value)} /></div>)}</div>
+          <div className="template-footnote">项目可在本项目范围内标记节点不适用或追加零权重自定义节点；正式计划完成日调整仍须走基线变更审批。</div>
+        </section>
+        <section className="content-card template-candidate-pool">
+          <div className="card-title"><div><h2>自定义节点候选池</h2><p>按规范化名称归集各项目的未关联自定义节点，由PMO评估后提升为标准节点草稿</p></div><div className="candidate-pool-actions"><span className="count-badge">{templateCandidates.length} 个候选</span><button className="text-button" disabled={candidateLoading} onClick={() => { setCandidateLoading(true); void loadTemplateCandidates(); }}>{candidateLoading ? "刷新中…" : "刷新候选池"}</button></div></div>
+          {candidateLoading ? <div className="panel-loading">正在汇总项目自定义节点…</div> : templateCandidates.length ? <div className="candidate-list">{templateCandidates.map((candidate) => <article className={candidate.existingTemplate ? "duplicate" : ""} key={candidate.key}><div className="candidate-main"><span className="candidate-symbol">◇</span><div><h3>{candidate.name}</h3><p>{candidate.sources.slice(0, 3).map((source) => `${source.projectCode} ${source.projectName}`).join(" · ")}{candidate.sources.length > 3 ? ` 等${candidate.sources.length}个来源节点` : ""}</p></div></div><div className="candidate-stats"><span><strong>{candidate.sourceProjectCount}</strong>来源项目</span><span><strong>{candidate.sourceMilestoneCount}</strong>来源节点</span><span><strong>{candidate.criticalRatio}%</strong>关键占比</span></div>{candidate.existingTemplate ? <div className="candidate-duplicate">! 已存在 {candidate.existingTemplate.code} · {candidate.existingTemplate.name}</div> : <button className="outline-button" onClick={() => openCandidatePromotion(candidate)}>提升为标准节点</button>}</article>)}</div> : <div className="candidate-empty"><span>✓</span><div><strong>暂无待治理自定义节点</strong><p>项目新增自定义节点后会自动进入候选池，只有提升并正式发布的节点才进入全局矩阵。</p></div></div>}
+        </section>
+        {promoteCandidate && <div className="modal-backdrop" onClick={() => setPromoteCandidate(null)}><section className="create-modal candidate-promotion-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" type="button" onClick={() => setPromoteCandidate(null)}>×</button><span className="modal-kicker">MILESTONE PROMOTION</span><h2>提升“{promoteCandidate.name}”</h2><p>来源覆盖{promoteCandidate.sourceProjectCount}个项目、{promoteCandidate.sourceMilestoneCount}个节点。提升后先生成零权重、未启用草稿，不直接改变全局矩阵。</p><form onSubmit={promoteTemplateCandidate}><div className="promotion-source-list">{promoteCandidate.sources.map((source) => <div key={source.milestoneId}><span>{source.projectCode}</span><strong>{source.projectName}</strong><small>序号 {source.sequence} · 权重 {source.weight}% · {source.critical ? "关键节点" : "普通节点"}</small></div>)}</div><div className="modal-form-grid"><label>标准节点编码<input value={promotionDraft.code} onChange={(event) => setPromotionDraft((draft) => ({ ...draft, code: event.target.value.toUpperCase() }))} pattern="[A-Z][A-Z0-9_-]{1,19}" required /></label><label>标准节点序号<input type="number" min="1" max="99" value={promotionDraft.sequence} onChange={(event) => setPromotionDraft((draft) => ({ ...draft, sequence: Number(event.target.value) }))} required /></label></div><label className="promotion-description">口径说明<textarea value={promotionDraft.description} onChange={(event) => setPromotionDraft((draft) => ({ ...draft, description: event.target.value }))} placeholder="说明该节点的统一定义、完成标准和适用范围" /></label><div className="promotion-options"><label className="template-check"><input type="checkbox" checked={promotionDraft.critical} onChange={(event) => setPromotionDraft((draft) => ({ ...draft, critical: event.target.checked }))} /><span>作为关键节点草稿</span></label><label className="template-check"><input type="checkbox" checked={promotionDraft.syncExistingProjects} onChange={(event) => setPromotionDraft((draft) => ({ ...draft, syncExistingProjects: event.target.checked }))} /><span>同步到现有项目并默认标记为不适用、零权重</span></label></div><div className="promotion-safety-note"><strong>治理保护</strong><span>来源节点仅建立标准模板关联；其他项目新增节点保持“不适用 / 0权重 / NA”，不会改写批准基线或进度权重。</span></div><div className="modal-actions"><button type="button" className="outline-button" onClick={() => setPromoteCandidate(null)}>取消</button><button className="primary-button" disabled={promotionSaving}>{promotionSaving ? "正在提升…" : "确认提升为草稿"}</button></div></form></section></div>}
+      </>}
       {tab === "预警规则" && <RuleConfigPanel />}
     </div>
     {locked && <div className="toast"><span>✓</span><div><strong>第{reportingPeriod.week}周快照已锁定</strong><p>管理大屏已切换至最新数据。</p></div></div>}

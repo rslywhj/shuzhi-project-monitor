@@ -101,9 +101,26 @@ const scaleProjects = latest.body.projects.filter((project) =>
   project.id.startsWith("QA-SCALE-"),
 );
 assert(scaleProjects.length > 0, "未生成规模回归项目");
+const activeTemplates = latest.body.milestoneTemplates.filter(
+  (milestoneTemplate) => milestoneTemplate.active,
+);
 assert(
-  scaleProjects.every((project) => project.milestones.length === 12),
-  "规模回归项目未全部包含12个标准节点",
+  activeTemplates.length >= 12,
+  `启用的标准节点少于12个：${activeTemplates.length}`,
+);
+assert(
+  scaleProjects.every(
+    (project) =>
+      project.cells.length === activeTemplates.length &&
+      activeTemplates.every((milestoneTemplate) =>
+        project.milestones.some(
+          (milestone) =>
+            milestone.templateId === milestoneTemplate.id ||
+            milestone.name === milestoneTemplate.name,
+        ),
+      ),
+  ),
+  "规模回归项目未完整覆盖当前启用标准节点",
 );
 const sortedSamples = [...samples].sort((left, right) => left - right);
 const p95Ms = sortedSamples[Math.ceil(sortedSamples.length * 0.95) - 1];
@@ -118,7 +135,15 @@ console.log(
       baseUrl,
       projectCount: latest.body.projects.length,
       scaleProjectCount: scaleProjects.length,
-      milestonesPerScaleProject: 12,
+      activeMatrixColumns: activeTemplates.length,
+      milestoneRowsPerScaleProject: [
+        Math.min(
+          ...scaleProjects.map((project) => project.milestones.length),
+        ),
+        Math.max(
+          ...scaleProjects.map((project) => project.milestones.length),
+        ),
+      ],
       bootstrapBytes: Buffer.byteLength(latest.text),
       samplesMs: samples.map((value) => Number(value.toFixed(1))),
       p95Ms: Number(p95Ms.toFixed(1)),

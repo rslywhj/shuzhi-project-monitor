@@ -8,7 +8,13 @@ import {
   snapshots,
   weeklyReports,
 } from "@/db/schema";
-import { apiError, requiredString, safeNumber } from "@/lib/api-utils";
+import {
+  apiError,
+  requiredIsoDate,
+  requiredString,
+  requiredWeekKey,
+  safeNumber,
+} from "@/lib/api-utils";
 import { ensureSeeded } from "@/lib/seed";
 import {
   canWriteProject,
@@ -56,7 +62,7 @@ export async function POST(
     if (!canWriteProject(identity, project.ownerEmail)) return forbidden();
 
     const payload = (await request.json()) as WeeklyReportPayload;
-    const weekKey = requiredString(payload.weekKey, "填报周期");
+    const weekKey = requiredWeekKey(payload.weekKey, "填报周期");
     const [lockedSnapshot] = await db
       .select({ id: snapshots.id })
       .from(snapshots)
@@ -90,7 +96,9 @@ export async function POST(
         declaredProgress,
         variance,
         reason,
-        forecastFinish: payload.forecastFinish || null,
+        forecastFinish: payload.forecastFinish
+          ? requiredIsoDate(payload.forecastFinish, "项目预测完成日")
+          : null,
         submittedBy: identity.email,
       })
       .onConflictDoUpdate({
@@ -100,7 +108,9 @@ export async function POST(
           declaredProgress,
           variance,
           reason,
-          forecastFinish: payload.forecastFinish || null,
+          forecastFinish: payload.forecastFinish
+            ? requiredIsoDate(payload.forecastFinish, "项目预测完成日")
+            : null,
           status: "submitted",
           submittedBy: identity.email,
           submittedAt: sql`CURRENT_TIMESTAMP`,
@@ -124,7 +134,9 @@ export async function POST(
         .update(milestones)
         .set({
           completion,
-          forecastFinish: payload.milestone.forecastFinish || null,
+          forecastFinish: payload.milestone.forecastFinish
+            ? requiredIsoDate(payload.milestone.forecastFinish, "节点预测完成日")
+            : null,
           reason,
           updatedAt: sql`CURRENT_TIMESTAMP`,
         })
@@ -141,7 +153,7 @@ export async function POST(
         milestoneId,
         name: requiredString(payload.action.name, "措施名称"),
         owner: requiredString(payload.action.owner, "措施责任人"),
-        recoveryDate: requiredString(payload.action.recoveryDate, "预计恢复日期"),
+        recoveryDate: requiredIsoDate(payload.action.recoveryDate, "预计恢复日期"),
         detail: requiredString(payload.action.detail, "具体行动"),
         createdBy: identity.email,
       });

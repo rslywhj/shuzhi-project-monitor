@@ -1,4 +1,4 @@
-import { count, desc, eq, sql } from "drizzle-orm";
+import { count, desc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   auditLogs,
@@ -7,7 +7,7 @@ import {
   snapshots,
   weeklyReports,
 } from "@/db/schema";
-import { apiError, requiredString } from "@/lib/api-utils";
+import { apiError, requiredWeekKey } from "@/lib/api-utils";
 import { ensureSeeded } from "@/lib/seed";
 import {
   canManagePortfolio,
@@ -26,7 +26,7 @@ export async function POST(request: Request) {
     await ensureSeeded();
 
     const payload = (await request.json()) as { weekKey?: string; reopenReason?: string };
-    const weekKey = requiredString(payload.weekKey, "快照周期");
+    const weekKey = requiredWeekKey(payload.weekKey, "快照周期");
     const db = getDb();
 
     const [[projectTotal], [reportTotal], previous, projectRows, milestoneRows] =

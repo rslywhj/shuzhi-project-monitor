@@ -78,3 +78,24 @@ test("defines durable, authorized and auditable workflow APIs", async () => {
   assert.match(snapshotRoute, /snapshot\.lock/);
   assert.match(snapshotRoute, /重新锁定必须填写重新打开原因/);
 });
+
+test("secures public access and exposes real administration workflows", async () => {
+  const [auth, projectRoute, userRoute, ruleRoute, page] = await Promise.all([
+    readFile(new URL("lib/server-auth.ts", templateRoot), "utf8"),
+    readFile(new URL("app/api/projects/route.ts", templateRoot), "utf8"),
+    readFile(new URL("app/api/users/[email]/route.ts", templateRoot), "utf8"),
+    readFile(new URL("app/api/rule-configs/route.ts", templateRoot), "utf8"),
+    readFile(new URL("app/page.tsx", templateRoot), "utf8"),
+  ]);
+
+  assert.match(auth, /APP_ADMIN_EMAILS/);
+  assert.doesNotMatch(auth, /userCount === 0/);
+  assert.match(projectRoute, /节点权重合计必须为100%/);
+  assert.match(projectRoute, /project\.create/);
+  assert.match(userRoute, /canAdministerUsers/);
+  assert.match(userRoute, /不能停用或降级当前登录的管理员账号/);
+  assert.match(ruleRoute, /rule_config\.publish/);
+  assert.match(page, /新建统建项目/);
+  assert.match(page, /用户与角色/);
+  assert.match(page, /预警规则配置/);
+});

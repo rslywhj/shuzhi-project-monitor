@@ -1,4 +1,5 @@
-import { count, eq } from "drizzle-orm";
+import { env } from "cloudflare:workers";
+import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { users } from "@/db/schema";
 
@@ -34,19 +35,32 @@ export async function getRequestIdentity(request: Request): Promise<RequestIdent
   if (!email) return null;
 
   const db = getDb();
+  const configuredAdmins = String(
+    (env as unknown as Record<string, unknown>).APP_ADMIN_EMAILS ?? "",
+  )
+    .split(",")
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
   const [existing] = await db.select().from(users).where(eq(users.email, email)).limit(1);
   if (existing && !existing.active) return null;
   if (existing) {
+    const role =
+      configuredAdmins.includes(email) && existing.role !== "admin"
+        ? "admin"
+        : existing.role;
+    if (role !== existing.role) {
+      await db.update(users).set({ role }).where(eq(users.email, email));
+    }
     return {
       email: existing.email,
       displayName: existing.displayName,
-      role: existing.role,
+      role,
     };
   }
 
   const displayName = forwardedEmail ? decodeDisplayName(request, email) : "本地演示用户";
-  const [{ value: userCount }] = await db.select({ value: count() }).from(users);
-  const role: AppRole = isLocal || userCount === 0 ? "admin" : "manager";
+  const role: AppRole =
+    isLocal || configuredAdmins.includes(email) ? "admin" : "manager";
   await db.insert(users).values({ email, displayName, role }).onConflictDoNothing();
   return { email, displayName, role };
 }
@@ -61,6 +75,10 @@ export function canWriteProject(identity: RequestIdentity, ownerEmail: string) {
 
 export function canManagePortfolio(identity: RequestIdentity) {
   return identity.role === "admin" || identity.role === "pmo";
+}
+
+export function canAdministerUsers(identity: RequestIdentity) {
+  return identity.role === "admin";
 }
 
 export function unauthorized() {

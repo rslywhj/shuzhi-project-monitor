@@ -49,6 +49,27 @@ export const projects = sqliteTable(
   ],
 );
 
+export const milestoneTemplates = sqliteTable(
+  "milestone_templates",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    code: text("code").notNull(),
+    name: text("name").notNull(),
+    sequence: integer("sequence").notNull(),
+    defaultWeight: real("default_weight").notNull(),
+    critical: integer("critical", { mode: "boolean" }).notNull().default(false),
+    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    description: text("description").notNull().default(""),
+    createdBy: text("created_by").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("milestone_templates_code_idx").on(table.code),
+    uniqueIndex("milestone_templates_sequence_idx").on(table.sequence),
+  ],
+);
+
 export const milestones = sqliteTable(
   "milestones",
   {
@@ -56,10 +77,14 @@ export const milestones = sqliteTable(
     projectId: text("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
+    templateId: integer("template_id").references(() => milestoneTemplates.id, {
+      onDelete: "set null",
+    }),
     name: text("name").notNull(),
     sequence: integer("sequence").notNull(),
     weight: real("weight").notNull(),
     critical: integer("critical", { mode: "boolean" }).notNull().default(false),
+    custom: integer("custom", { mode: "boolean" }).notNull().default(false),
     applicable: integer("applicable", { mode: "boolean" }).notNull().default(true),
     plannedStart: text("planned_start").notNull(),
     plannedFinish: text("planned_finish").notNull(),

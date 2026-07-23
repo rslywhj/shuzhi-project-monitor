@@ -3,6 +3,7 @@ import { getDb } from "@/db";
 import {
   baselineChanges,
   correctiveActions,
+  milestoneTemplates,
   milestones,
   projects,
   risks,
@@ -32,6 +33,7 @@ export async function GET(request: Request) {
       baselineRows,
       snapshotRows,
       ruleRows,
+      templateRows,
     ] = await Promise.all([
       db.select().from(projects).orderBy(asc(projects.code)),
       db.select().from(milestones).orderBy(asc(milestones.projectId), asc(milestones.sequence)),
@@ -45,6 +47,10 @@ export async function GET(request: Request) {
         .limit(50),
       db.select().from(snapshots).orderBy(desc(snapshots.lockedAt)).limit(20),
       db.select().from(ruleConfigs).where(eq(ruleConfigs.active, true)).orderBy(desc(ruleConfigs.version)).limit(1),
+      db
+        .select()
+        .from(milestoneTemplates)
+        .orderBy(asc(milestoneTemplates.sequence)),
     ]);
 
     const projectMilestones = new Map<string, typeof milestoneRows>();
@@ -53,6 +59,16 @@ export async function GET(request: Request) {
       rows.push(milestone);
       projectMilestones.set(milestone.projectId, rows);
     }
+    const activeTemplates = templateRows.filter((template) => template.active);
+    const matrixCells = (rows: typeof milestoneRows) =>
+      activeTemplates.map(
+        (template) =>
+          rows.find(
+            (milestone) =>
+              milestone.templateId === template.id ||
+              milestone.name === template.name,
+          )?.status ?? "na",
+      );
     const openRiskCounts = new Map<string, number>();
     for (const risk of riskRows) {
       if (risk.status !== "closed") {
@@ -105,9 +121,7 @@ export async function GET(request: Request) {
               ? "中"
               : "低",
         baselineVersion: project.currentBaselineVersion,
-        cells: (snapshotMilestones.get(project.id) ?? []).map(
-          (row) => row.status,
-        ),
+        cells: matrixCells(snapshotMilestones.get(project.id) ?? []),
         milestones: snapshotMilestones.get(project.id) ?? [],
         updatedAt: project.updatedAt,
       }));
@@ -134,7 +148,7 @@ export async function GET(request: Request) {
               ? "中"
               : "低",
         baselineVersion: project.currentBaselineVersion,
-        cells: (projectMilestones.get(project.id) ?? []).map((row) => row.status),
+        cells: matrixCells(projectMilestones.get(project.id) ?? []),
         milestones: projectMilestones.get(project.id) ?? [],
         updatedAt: project.updatedAt,
         openRiskCount: openRiskCounts.get(project.id) ?? 0,
@@ -169,6 +183,7 @@ export async function GET(request: Request) {
         lockedAt: row.lockedAt,
       })),
       activeRule: ruleRows[0] ?? null,
+      milestoneTemplates: templateRows,
       generatedAt: new Date().toISOString(),
     });
   } catch (error) {

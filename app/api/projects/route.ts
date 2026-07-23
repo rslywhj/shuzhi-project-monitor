@@ -1,5 +1,10 @@
 import { getDb } from "@/db";
-import { auditLogs, milestones, projects } from "@/db/schema";
+import {
+  auditLogs,
+  milestoneTemplates,
+  milestones,
+  projects,
+} from "@/db/schema";
 import {
   ApiRequestError,
   apiError,
@@ -113,16 +118,25 @@ export async function POST(request: Request) {
       type: requiredString(payload.type, "项目类型"),
       riskLevel: payload.riskLevel ?? ("low" as const),
     };
+    const templateRows = await db.select().from(milestoneTemplates);
+    const templateByName = new Map(
+      templateRows.map((row) => [row.name, row.id]),
+    );
+    const milestoneValues = parsedMilestones.map((row) => ({
+      ...row,
+      projectId: project.id,
+      templateId: templateByName.get(row.name) ?? null,
+      custom: !templateByName.has(row.name),
+      forecastFinish: row.plannedFinish,
+      status: row.applicable ? ("green" as const) : ("na" as const),
+    }));
+    const milestoneChunks = Array.from(
+      { length: Math.ceil(milestoneValues.length / 4) },
+      (_, index) => milestoneValues.slice(index * 4, index * 4 + 4),
+    );
     await db.batch([
       db.insert(projects).values(project),
-      db.insert(milestones).values(
-        parsedMilestones.map((row) => ({
-          ...row,
-          projectId: project.id,
-          forecastFinish: row.plannedFinish,
-          status: row.applicable ? ("green" as const) : ("na" as const),
-        })),
-      ),
+      ...milestoneChunks.map((rows) => db.insert(milestones).values(rows)),
       db.insert(auditLogs).values({
         actorEmail: identity.email,
         action: "project.create",

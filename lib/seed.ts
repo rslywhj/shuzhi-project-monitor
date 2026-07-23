@@ -1,11 +1,27 @@
-import { count } from "drizzle-orm";
+import { and, count, eq, isNull } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   baselineChanges,
+  milestoneTemplates,
   milestones,
   projects,
   ruleConfigs,
 } from "@/db/schema";
+
+const standardMilestoneTemplates = [
+  ["M01", "立项启动", 5, false, "完成项目立项、组织与治理机制确认"],
+  ["M02", "需求调研", 5, false, "完成业务现状、用户旅程与需求素材收集"],
+  ["M03", "需求确认", 8, false, "冻结首期范围并完成需求签字确认"],
+  ["M04", "方案设计", 7, false, "完成业务、应用、数据与技术方案设计"],
+  ["M05", "方案评审", 10, false, "通过架构、安全及业务联合评审"],
+  ["M06", "开发完成", 15, true, "完成约定范围开发并达到提测条件"],
+  ["M07", "测试验证", 10, false, "完成系统、性能及安全测试"],
+  ["M08", "联调测试", 10, false, "完成上下游系统联调与问题闭环"],
+  ["M09", "试运行", 5, false, "完成试运行验证与上线准备"],
+  ["M10", "用户验收", 10, true, "完成用户验收及遗留问题确认"],
+  ["M11", "上线切换", 10, true, "完成生产上线、切换和运行观察"],
+  ["M12", "结项移交", 5, false, "完成项目结项、资料归档和运维移交"],
+] as const;
 
 const milestoneNames = [
   "立项启动",
@@ -42,6 +58,40 @@ function chunks<T>(rows: T[], size: number) {
 
 export async function ensureSeeded() {
   const db = getDb();
+  await db
+    .insert(milestoneTemplates)
+    .values(
+      standardMilestoneTemplates.map(
+        ([code, name, defaultWeight, critical, description], index) => ({
+          code,
+          name,
+          sequence: index + 1,
+          defaultWeight,
+          critical,
+          description,
+          createdBy: "system",
+        }),
+      ),
+    )
+    .onConflictDoNothing();
+  const templateRows = await db.select().from(milestoneTemplates);
+  const [{ value: unlinkedMilestones }] = await db
+    .select({ value: count() })
+    .from(milestones)
+    .where(isNull(milestones.templateId));
+  if (unlinkedMilestones > 0) {
+    for (const template of templateRows) {
+      await db
+        .update(milestones)
+        .set({ templateId: template.id })
+        .where(
+          and(
+            isNull(milestones.templateId),
+            eq(milestones.name, template.name),
+          ),
+        );
+    }
+  }
   const [{ value }] = await db.select({ value: count() }).from(projects);
   if (value > 0) return;
 
@@ -65,6 +115,9 @@ export async function ensureSeeded() {
     await db.insert(projects).values(rows).onConflictDoNothing();
   }
 
+  const templateByName = new Map(
+    templateRows.map((template) => [template.name, template.id]),
+  );
   const milestoneRows = seedProjects.flatMap((project, projectIndex) =>
     milestoneNames.map((name, index) => {
       const status = project[11][index];
@@ -74,6 +127,7 @@ export async function ensureSeeded() {
       const finishDay = 10 + index;
       return {
         projectId: project[0],
+        templateId: templateByName.get(name) ?? null,
         name,
         sequence: index + 1,
         weight: [5, 10, 10, 20, 20, 20, 15][index],

@@ -1,7 +1,8 @@
-import { desc, eq } from "drizzle-orm";
+import { asc, desc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { snapshots } from "@/db/schema";
+import { milestoneTemplates, snapshots } from "@/db/schema";
 import { apiError } from "@/lib/api-utils";
+import { ensureSeeded } from "@/lib/seed";
 import { getRequestIdentity, unauthorized } from "@/lib/server-auth";
 
 export const dynamic = "force-dynamic";
@@ -28,12 +29,14 @@ type SnapshotMilestone = {
   completion: number;
   deviationDays: number;
   critical: boolean;
+  templateId?: number | null;
 };
 
 export async function GET(request: Request) {
   try {
     const identity = await getRequestIdentity(request);
     if (!identity) return unauthorized();
+    await ensureSeeded();
     const url = new URL(request.url);
     const org = url.searchParams.get("org")?.trim();
     const status = url.searchParams.get("status")?.trim();
@@ -43,7 +46,8 @@ export async function GET(request: Request) {
       Math.max(1, Number(url.searchParams.get("pageSize") ?? 10) || 10),
     );
 
-    const [snapshot] = await getDb()
+    const db = getDb();
+    const [snapshot] = await db
       .select()
       .from(snapshots)
       .where(eq(snapshots.status, "locked"))
@@ -68,6 +72,11 @@ export async function GET(request: Request) {
       rows.push(milestone);
       milestoneMap.set(milestone.projectId, rows);
     }
+    const templates = await db
+      .select()
+      .from(milestoneTemplates)
+      .where(eq(milestoneTemplates.active, true))
+      .orderBy(asc(milestoneTemplates.sequence));
     const filtered = (payload.projects ?? []).filter(
       (project) =>
         (!org || project.org === org) &&
@@ -75,7 +84,11 @@ export async function GET(request: Request) {
     );
     const rows = filtered
       .slice((page - 1) * pageSize, page * pageSize)
-      .map((project) => ({
+      .map((project) => {
+        const projectMilestones = (milestoneMap.get(project.id) ?? []).sort(
+          (a, b) => a.sequence - b.sequence,
+        );
+        return {
         id: project.id,
         code: project.code,
         name: project.name,
@@ -86,10 +99,17 @@ export async function GET(request: Request) {
         status: project.status,
         planProgress: project.planProgress,
         actualProgress: project.actualProgress,
-        milestones: (milestoneMap.get(project.id) ?? []).sort(
-          (a, b) => a.sequence - b.sequence,
+        cells: templates.map(
+          (template) =>
+            projectMilestones.find(
+              (milestone) =>
+                milestone.templateId === template.id ||
+                milestone.name === template.name,
+            )?.status ?? "na",
         ),
-      }));
+        milestones: projectMilestones,
+      };
+      });
     return Response.json({
       snapshot: {
         id: snapshot.id,

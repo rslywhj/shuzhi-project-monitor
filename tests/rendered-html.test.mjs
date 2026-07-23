@@ -169,3 +169,39 @@ test("serves management views from locked snapshots rather than mutable live row
   assert.match(page, /dashboardSnapshot/);
   assert.match(page, /当前锁定快照口径/);
 });
+
+test("persists the twelve-node standard template and project-level milestone governance", async () => {
+  const [schema, seed, templatesRoute, projectMilestonesRoute, projectRoute, page, css, migration] =
+    await Promise.all([
+      readFile(new URL("db/schema.ts", templateRoot), "utf8"),
+      readFile(new URL("lib/seed.ts", templateRoot), "utf8"),
+      readFile(
+        new URL("app/api/milestone-templates/route.ts", templateRoot),
+        "utf8",
+      ),
+      readFile(
+        new URL("app/api/projects/[id]/milestones/route.ts", templateRoot),
+        "utf8",
+      ),
+      readFile(new URL("app/api/projects/route.ts", templateRoot), "utf8"),
+      readFile(new URL("app/page.tsx", templateRoot), "utf8"),
+      readFile(new URL("app/globals.css", templateRoot), "utf8"),
+      readFile(
+        new URL("drizzle/0004_square_justin_hammer.sql", templateRoot),
+        "utf8",
+      ),
+    ]);
+
+  assert.match(schema, /export const milestoneTemplates/);
+  assert.match(schema, /baseline_changes_one_pending_project_idx/);
+  assert.match(seed, /M12/);
+  assert.match(seed, /结项移交/);
+  assert.match(templatesRoute, /milestone_template\.publish/);
+  assert.match(projectMilestonesRoute, /project_milestones\.update/);
+  assert.match(projectMilestonesRoute, /project_milestone\.create_custom/);
+  assert.match(projectRoute, /milestoneChunks/);
+  assert.match(page, /项目节点治理/);
+  assert.match(page, /启用权重/);
+  assert.match(css, /--milestone-count/);
+  assert.match(migration, /CREATE TABLE `milestone_templates`/);
+});

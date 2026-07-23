@@ -11,12 +11,56 @@ type MilestoneData = {
   id: number;
   name: string;
   sequence: number;
+  weight: number;
+  status: Status;
+  completion: number;
+  plannedStart: string;
   plannedFinish: string;
+  forecastFinish: string | null;
+  actualFinish: string | null;
+  deviationDays: number;
+  reason: string;
   applicable: boolean;
   critical: boolean;
+  custom: boolean;
 };
 
-const milestones = ["立项启动", "需求确认", "方案评审", "开发完成", "联调测试", "用户验收", "上线切换"];
+const milestones = [
+  "立项启动",
+  "需求调研",
+  "需求确认",
+  "方案设计",
+  "方案评审",
+  "开发完成",
+  "测试验证",
+  "联调测试",
+  "试运行",
+  "用户验收",
+  "上线切换",
+  "结项移交",
+];
+const standardTemplateWeights = [5, 5, 8, 7, 10, 15, 10, 10, 5, 10, 10, 5];
+const standardCriticalSequences = new Set([6, 10, 11]);
+type TemplateData = {
+  id: number;
+  code: string;
+  name: string;
+  sequence: number;
+  defaultWeight: number;
+  critical: boolean;
+  active: boolean;
+  description: string;
+};
+const defaultTemplateData: TemplateData[] = milestones.map((name, index) => ({
+  id: index + 1,
+  code: `M${String(index + 1).padStart(2, "0")}`,
+  name,
+  sequence: index + 1,
+  defaultWeight: standardTemplateWeights[index],
+  critical: standardCriticalSequences.has(index + 1),
+  active: true,
+  description: "",
+}));
 
 const projects = [
   { id: "P01", name: "司库管理系统", owner: "王嘉", org: "财务数智组", type: "核心系统", score: 92, status: "green" as Status, plan: 72, actual: 74, declared: 74, risk: "低", cells: ["green","green","green","green","green","green","yellow"] as Status[] },
@@ -81,11 +125,15 @@ function AppLogo({ dark = false }: { dark?: boolean }) {
   </div>;
 }
 
-function Cockpit({ onNavigate, projectData = projects, snapshot }: { onNavigate: Navigate; projectData?: ProjectData[]; snapshot: DashboardSnapshot | null }) {
+function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = defaultTemplateData }: { onNavigate: Navigate; projectData?: ProjectData[]; snapshot: DashboardSnapshot | null; templateData?: TemplateData[] }) {
   const [org, setOrg] = useState("全部组织");
   const [health, setHealth] = useState("全部状态");
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState<{ project: ProjectData; index: number } | null>(null);
+  const matrixMilestones = templateData
+    .filter((template) => template.active)
+    .sort((left, right) => left.sequence - right.sequence)
+    .map((template) => template.name);
   const matching = useMemo(
     () =>
       projectData.filter(
@@ -167,8 +215,8 @@ function Cockpit({ onNavigate, projectData = projects, snapshot }: { onNavigate:
 
     <section className="cockpit-main">
       <div className="heatmap-panel">
-        <div className="heatmap-table">
-          <div className="heatmap-head"><div className="project-col">项目 / 健康度</div>{milestones.map((m, i) => <div key={m}><span>0{i + 1}</span>{m}</div>)}</div>
+        <div className="heatmap-table" style={{ "--milestone-count": matrixMilestones.length } as React.CSSProperties}>
+          <div className="heatmap-head"><div className="project-col">项目 / 健康度</div>{matrixMilestones.map((m, i) => <div key={`${m}-${i}`}><span>{String(i + 1).padStart(2, "0")}</span>{m}</div>)}</div>
           {filtered.map((p) => <div className="heatmap-row" key={p.id}>
             <button className="project-cell" onClick={() => onNavigate("project", p.id)}>
               <StatusPill status={p.status} compact /><span><strong>{p.name}</strong><small>{p.owner} · {p.org}</small></span><b>{p.score}</b>
@@ -215,7 +263,7 @@ function Cockpit({ onNavigate, projectData = projects, snapshot }: { onNavigate:
       <aside className="detail-drawer" onClick={e => e.stopPropagation()}>
         <button className="drawer-close" onClick={() => setSelected(null)} aria-label="关闭">×</button>
         <span className="drawer-kicker">节点运行详情</span>
-        <h2>{selected.project.name}</h2><p>{milestones[selected.index]} · 第 {selected.index + 1} 阶段</p>
+        <h2>{selected.project.name}</h2><p>{matrixMilestones[selected.index]} · 第 {selected.index + 1} 阶段</p>
         <div className="drawer-status"><StatusPill status={selected.project.cells[selected.index]} /><strong>{selected.project.cells[selected.index] === "red" ? "预计延期 12 天" : selected.project.cells[selected.index] === "yellow" ? "预计延期 4 天" : "按计划推进"}</strong></div>
         <div className="drawer-grid"><div><small>计划完成</small><strong>2026-07-16</strong></div><div><small>预测完成</small><strong>2026-07-28</strong></div><div><small>节点权重</small><strong>20%</strong></div><div><small>当前完成度</small><strong>68%</strong></div></div>
         <div className="cause-card"><span>偏差归因</span><p>核心供应商接口规范确认晚于计划，影响开发联调窗口；已安排专项工作组并行处理。</p></div>
@@ -263,7 +311,7 @@ function WorkspaceHeader({ title, subtitle, onNavigate, identity }: { title: str
   </header>;
 }
 
-function Portfolio({ onNavigate, onDataChanged, projectData = projects, identity }: { onNavigate: Navigate; onDataChanged: () => Promise<void>; projectData?: ProjectData[]; identity: Identity | null }) {
+function Portfolio({ onNavigate, onDataChanged, projectData = projects, identity, templateData = defaultTemplateData }: { onNavigate: Navigate; onDataChanged: () => Promise<void>; projectData?: ProjectData[]; identity: Identity | null; templateData?: TemplateData[] }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("全部");
   const [page, setPage] = useState(0);
@@ -295,8 +343,9 @@ function Portfolio({ onNavigate, onDataChanged, projectData = projects, identity
     setCreating(true);
     setCreateError("");
     const form = new FormData(event.currentTarget);
-    const names = milestones;
-    const weights = [5, 10, 10, 20, 20, 20, 15];
+    const activeTemplates = templateData
+      .filter((template) => template.active)
+      .sort((left, right) => left.sequence - right.sequence);
     try {
       const response = await fetch("/api/projects", {
         method: "POST",
@@ -309,11 +358,11 @@ function Portfolio({ onNavigate, onDataChanged, projectData = projects, identity
           org: form.get("org"),
           type: form.get("type"),
           riskLevel: form.get("riskLevel"),
-          milestones: names.map((name, index) => ({
-            name,
-            sequence: index + 1,
-            weight: weights[index],
-            critical: index === 3 || index === 6,
+          milestones: activeTemplates.map((template, index) => ({
+            name: template.name,
+            sequence: template.sequence,
+            weight: template.defaultWeight,
+            critical: template.critical,
             applicable: true,
             plannedStart: `${8 + index > 12 ? "2027" : "2026"}-${String(((7 + index) % 12) + 1).padStart(2, "0")}-01`,
             plannedFinish: `${8 + index > 12 ? "2027" : "2026"}-${String(((7 + index) % 12) + 1).padStart(2, "0")}-20`,
@@ -355,7 +404,7 @@ function Portfolio({ onNavigate, onDataChanged, projectData = projects, identity
         <div className="pagination"><span>共 {matching.length} 条，每页 10 条</span><div><button disabled={safePage === 0} onClick={() => setPage((current) => Math.max(0, current - 1))}>‹</button>{Array.from({ length: pageCount }, (_, index) => <button key={index} className={safePage === index ? "active" : ""} onClick={() => setPage(index)}>{index + 1}</button>)}<button disabled={safePage === pageCount - 1} onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))}>›</button></div></div>
       </section>
     </div>
-    {showCreate && <div className="modal-backdrop" onClick={() => setShowCreate(false)}><section className="create-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowCreate(false)}>×</button><span className="modal-kicker">PROJECT SETUP</span><h2>新建统建项目</h2><p>创建后自动套用7个标准节点，节点权重合计100%。</p><form onSubmit={createProject}><div className="modal-form-grid"><label>项目编码<input name="code" placeholder="例如 P11" required /></label><label>项目名称<input name="name" placeholder="请输入项目名称" required /></label><label>项目经理<input name="ownerName" placeholder="姓名" required /></label><label>项目经理邮箱<input name="ownerEmail" type="email" placeholder="name@example.com" required /></label><label>所属组织<input name="org" placeholder="例如 财务数智组" required /></label><label>项目类型<select name="type"><option>核心系统</option><option>业务平台</option><option>数据平台</option><option>技术底座</option></select></label><label>初始风险<select name="riskLevel"><option value="low">低风险</option><option value="medium">中风险</option><option value="high">高风险</option></select></label></div><div className="template-summary"><strong>标准节点模板</strong><span>{milestones.join(" → ")}</span></div>{createError && <div className="form-error" role="alert">! {createError}</div>}<div className="modal-actions"><button type="button" className="outline-button" onClick={() => setShowCreate(false)}>取消</button><button type="submit" className="primary-button" disabled={creating}>{creating ? "正在创建…" : "创建项目"}</button></div></form></section></div>}
+    {showCreate && <div className="modal-backdrop" onClick={() => setShowCreate(false)}><section className="create-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowCreate(false)}>×</button><span className="modal-kicker">PROJECT SETUP</span><h2>新建统建项目</h2><p>创建后自动套用{templateData.filter((template) => template.active).length}个当前启用的标准节点，节点权重合计100%。</p><form onSubmit={createProject}><div className="modal-form-grid"><label>项目编码<input name="code" placeholder="例如 P11" required /></label><label>项目名称<input name="name" placeholder="请输入项目名称" required /></label><label>项目经理<input name="ownerName" placeholder="姓名" required /></label><label>项目经理邮箱<input name="ownerEmail" type="email" placeholder="name@example.com" required /></label><label>所属组织<input name="org" placeholder="例如 财务数智组" required /></label><label>项目类型<select name="type"><option>核心系统</option><option>业务平台</option><option>数据平台</option><option>技术底座</option></select></label><label>初始风险<select name="riskLevel"><option value="low">低风险</option><option value="medium">中风险</option><option value="high">高风险</option></select></label></div><div className="template-summary"><strong>标准节点模板</strong><span>{templateData.filter((template) => template.active).sort((left, right) => left.sequence - right.sequence).map((template) => template.name).join(" → ")}</span></div>{createError && <div className="form-error" role="alert">! {createError}</div>}<div className="modal-actions"><button type="button" className="outline-button" onClick={() => setShowCreate(false)}>取消</button><button type="submit" className="primary-button" disabled={creating}>{creating ? "正在创建…" : "创建项目"}</button></div></form></section></div>}
   </div>;
 }
 
@@ -564,6 +613,10 @@ function ProjectDetail({ onNavigate, onDataChanged, projectData = projects, proj
   const [baselineWorking, setBaselineWorking] = useState(false);
   const [baselineError, setBaselineError] = useState("");
   const [baselineSuccess, setBaselineSuccess] = useState(false);
+  const [showMilestoneGovernance, setShowMilestoneGovernance] = useState(false);
+  const [milestoneDraft, setMilestoneDraft] = useState<MilestoneData[]>([]);
+  const [milestoneWorking, setMilestoneWorking] = useState(false);
+  const [milestoneError, setMilestoneError] = useState("");
   const currentProject =
     projectData.find((project) => project.id === projectId) ??
     projectData[0] ??
@@ -577,6 +630,9 @@ function ProjectDetail({ onNavigate, onDataChanged, projectData = projects, proj
       identity.email === currentProject.ownerEmail);
   const adjustableMilestones =
     currentProject.milestones?.filter((milestone) => milestone.applicable) ?? [];
+  const displayMilestones = [...(currentProject.milestones ?? [])].sort(
+    (left, right) => left.sequence - right.sequence,
+  );
 
   async function requestBaselineChange(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -611,6 +667,96 @@ function ProjectDetail({ onNavigate, onDataChanged, projectData = projects, proj
       setBaselineWorking(false);
     }
   }
+  function openMilestoneGovernance() {
+    setMilestoneDraft(displayMilestones.map((row) => ({ ...row })));
+    setMilestoneError("");
+    setShowMilestoneGovernance(true);
+  }
+  function updateMilestoneDraft<K extends keyof MilestoneData>(
+    id: number,
+    key: K,
+    value: MilestoneData[K],
+  ) {
+    setMilestoneDraft((rows) =>
+      rows.map((row) => (row.id === id ? { ...row, [key]: value } : row)),
+    );
+    setMilestoneError("");
+  }
+  async function saveMilestoneGovernance() {
+    setMilestoneWorking(true);
+    setMilestoneError("");
+    try {
+      const response = await fetch(
+        `/api/projects/${currentProject.id}/milestones`,
+        {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            milestones: milestoneDraft.map((row) => ({
+              id: row.id,
+              name: row.name,
+              sequence: row.sequence,
+              weight: row.weight,
+              critical: row.critical,
+              applicable: row.applicable,
+            })),
+          }),
+        },
+      );
+      const result = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(result.error || "项目节点保存失败");
+      await onDataChanged();
+      setShowMilestoneGovernance(false);
+    } catch (error) {
+      setMilestoneError(
+        error instanceof Error ? error.message : "项目节点保存失败",
+      );
+    } finally {
+      setMilestoneWorking(false);
+    }
+  }
+  async function createCustomMilestone(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setMilestoneWorking(true);
+    setMilestoneError("");
+    const form = new FormData(event.currentTarget);
+    try {
+      const response = await fetch(
+        `/api/projects/${currentProject.id}/milestones`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            name: form.get("name"),
+            sequence: Number(form.get("sequence")),
+            critical: form.get("critical") === "on",
+            plannedStart: form.get("plannedStart"),
+            plannedFinish: form.get("plannedFinish"),
+          }),
+        },
+      );
+      const result = (await response.json()) as {
+        error?: string;
+        milestone?: MilestoneData;
+      };
+      if (!response.ok) throw new Error(result.error || "自定义节点创建失败");
+      if (result.milestone) {
+        setMilestoneDraft((rows) =>
+          [...rows, result.milestone!].sort(
+            (left, right) => left.sequence - right.sequence,
+          ),
+        );
+      }
+      event.currentTarget.reset();
+      await onDataChanged();
+    } catch (error) {
+      setMilestoneError(
+        error instanceof Error ? error.message : "自定义节点创建失败",
+      );
+    } finally {
+      setMilestoneWorking(false);
+    }
+  }
   return <div className="workspace-page">
     <WorkspaceHeader title="项目详情" subtitle={`项目台账 / ${currentProject.name}`} onNavigate={onNavigate} identity={identity} />
     <div className="page-content project-detail">
@@ -625,17 +771,18 @@ function ProjectDetail({ onNavigate, onDataChanged, projectData = projects, proj
       </section>
       <div className="tabs">{["节点计划","周报记录","风险与措施","基线版本","操作审计"].map(t => <button className={tab === t ? "active" : ""} onClick={() => setTab(t)} key={t}>{t}{t === "风险与措施" && <b>{(currentProject.openRiskCount ?? 0) + (currentProject.openActionCount ?? 0)}</b>}</button>)}</div>
       {tab === "节点计划" && <section className="content-card milestone-card">
-        <div className="card-title"><div><h2>项目节点计划</h2><p>当前基线 V{currentProject.baselineVersion ?? 1} · 原始基线永久保留　<span>正式调整须经 PMO 审批</span></p></div>{canUpdate && <button className="outline-button" disabled={!adjustableMilestones.length} onClick={() => setShowBaselineForm(true)}>申请基线变更</button>}</div>
+        <div className="card-title"><div><h2>项目节点计划</h2><p>当前基线 V{currentProject.baselineVersion ?? 1} · 原始基线永久保留　<span>正式调整须经 PMO 审批</span></p></div>{canUpdate && <div className="card-actions"><button className="outline-button" onClick={openMilestoneGovernance}>节点治理</button><button className="outline-button" disabled={!adjustableMilestones.length} onClick={() => setShowBaselineForm(true)}>申请基线变更</button></div>}</div>
         <div className="milestone-list">
-          {milestones.map((m, i) => {
-            const status = currentProject.cells[i] ?? "na"; const complete = [100,100,100,Math.max(68, currentProject.actual),25,0,0][i];
-            return <div className={`milestone-row ${expanded === i ? "expanded" : ""}`} key={m}>
+          {displayMilestones.map((milestone, i) => {
+            const status = milestone.applicable ? milestone.status : "na";
+            const effectiveFinish = milestone.actualFinish ?? milestone.forecastFinish;
+            return <div className={`milestone-row ${expanded === i ? "expanded" : ""}`} key={milestone.id}>
               <button className="milestone-main" onClick={() => setExpanded(expanded === i ? null : i)}>
-                <span className={`milestone-index ${status}`}>{i + 1}</span><span className="milestone-name"><strong>{m}</strong><small>{i === 3 || i === 6 ? "◆ 关键节点" : "标准节点"} · 权重 {i === 3 ? 20 : i === 6 ? 15 : 10}%</small></span>
-                <span><small>计划完成</small><strong>2026-{String(3 + i).padStart(2,"0")}-{10 + i}</strong></span><span><small>预测 / 实际</small><strong className={status === "red" ? "red-text" : ""}>{status === "na" ? "—" : `2026-${String(3+i).padStart(2,"0")}-${12+i}`}</strong></span>
-                <span className="milestone-complete"><b>{complete}%</b><ProgressBar value={complete} tone={status} /></span><StatusPill status={status} /><em>{expanded === i ? "⌃" : "⌄"}</em>
+                <span className={`milestone-index ${status}`}>{milestone.sequence}</span><span className="milestone-name"><strong>{milestone.name}</strong><small>{milestone.critical ? "◆ 关键节点" : milestone.custom ? "自定义节点" : "标准节点"} · 权重 {milestone.weight}%</small></span>
+                <span><small>计划完成</small><strong>{milestone.plannedFinish}</strong></span><span><small>预测 / 实际</small><strong className={status === "red" ? "red-text" : ""}>{status === "na" ? "—" : effectiveFinish ?? "未填报"}</strong></span>
+                <span className="milestone-complete"><b>{milestone.completion}%</b><ProgressBar value={milestone.completion} tone={status} /></span><StatusPill status={status} /><em>{expanded === i ? "⌃" : "⌄"}</em>
               </button>
-              {expanded === i && <div className="milestone-expand"><div><span>偏差说明</span><p>供应商接口规范确认晚于计划，开发工作量增加，预测较批准基线延期 12 天。</p></div><div><span>纠偏措施</span><p>接口联调专项攻坚 · 责任人 李程 · 恢复目标 07月28日</p></div><button>查看完整记录 →</button></div>}
+              {expanded === i && <div className="milestone-expand"><div><span>偏差说明</span><p>{milestone.reason || (milestone.deviationDays ? `当前相对批准基线偏差 ${milestone.deviationDays} 天。` : "当前无偏差说明。")}</p></div><div><span>节点口径</span><p>{milestone.applicable ? `${milestone.custom ? "项目自定义" : "标准模板"} · ${milestone.critical ? "关键节点" : "普通节点"} · 计划 ${milestone.plannedStart} 至 ${milestone.plannedFinish}` : "该节点已标记为不适用，不进入项目进度计算。"}</p></div><button onClick={() => setTab("操作审计")}>查看完整记录 →</button></div>}
             </div>;
           })}
         </div>
@@ -643,6 +790,7 @@ function ProjectDetail({ onNavigate, onDataChanged, projectData = projects, proj
       {tab === "风险与措施" && <RiskActionPanel projectId={currentProject.id} canEdit={canUpdate} onDataChanged={onDataChanged} />}
       {tab !== "节点计划" && tab !== "风险与措施" && <section className="content-card placeholder-panel"><div className="placeholder-icon">{tab === "基线版本" ? "≋" : "◎"}</div><h2>{tab}</h2><p>该模块已纳入原型信息架构，可从主流程中的对应入口继续体验。</p><button className="primary-button" onClick={() => tab === "基线版本" ? onNavigate("pmo") : onNavigate("report", currentProject.id)}>进入演示流程</button></section>}
     </div>
+    {showMilestoneGovernance && <div className="modal-backdrop" onClick={() => setShowMilestoneGovernance(false)}><section className="create-modal milestone-governance-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowMilestoneGovernance(false)}>×</button><span className="modal-kicker">PROJECT MILESTONE GOVERNANCE</span><h2>项目节点治理</h2><p>{currentProject.name} · 可调整节点顺序、权重、关键标识及适用性；计划完成日须通过基线变更调整。</p><div className="project-milestone-grid"><div className="project-milestone-head"><span>序号</span><span>节点名称</span><span>权重</span><span>关键</span><span>适用</span><span>来源</span></div>{milestoneDraft.map((row) => <div className={`project-milestone-row ${row.applicable ? "" : "inactive"}`} key={row.id}><input type="number" min="1" max="99" value={row.sequence} onChange={(event) => updateMilestoneDraft(row.id, "sequence", Number(event.target.value))} /><input value={row.name} onChange={(event) => updateMilestoneDraft(row.id, "name", event.target.value)} /><label className="weight-input"><input type="number" min="0" max="100" step="0.5" value={row.weight} onChange={(event) => updateMilestoneDraft(row.id, "weight", Number(event.target.value))} /><span>%</span></label><label className="template-check"><input type="checkbox" checked={row.critical} onChange={(event) => updateMilestoneDraft(row.id, "critical", event.target.checked)} /><span>关键</span></label><label className="template-check"><input type="checkbox" checked={row.applicable} onChange={(event) => updateMilestoneDraft(row.id, "applicable", event.target.checked)} /><span>适用</span></label><span className={row.custom ? "custom-source" : "standard-source"}>{row.custom ? "自定义" : "标准"}</span></div>)}</div><div className="governance-summary"><span>节点 {milestoneDraft.length} 个</span><span>适用 {milestoneDraft.filter((row) => row.applicable).length} 个</span><strong className={Math.abs(milestoneDraft.reduce((sum, row) => sum + Number(row.weight || 0), 0) - 100) < 0.01 ? "weight-ok" : "weight-error"}>权重合计 {milestoneDraft.reduce((sum, row) => sum + Number(row.weight || 0), 0).toFixed(1)}%</strong></div>{milestoneError && <div className="form-error">! {milestoneError}</div>}<form className="custom-milestone-form" onSubmit={createCustomMilestone}><h3>追加项目自定义节点</h3><div className="modal-form-grid"><label>节点名称<input name="name" required /></label><label>节点序号<input name="sequence" type="number" min="1" max="99" required /></label><label>计划开始日<input name="plannedStart" type="date" required /></label><label>计划完成日<input name="plannedFinish" type="date" required /></label></div><label className="template-check custom-critical"><input name="critical" type="checkbox" /><span>标记为关键节点</span></label><button className="outline-button" disabled={milestoneWorking}>＋ 新增零权重节点</button></form><div className="modal-actions"><button className="outline-button" onClick={() => setShowMilestoneGovernance(false)}>取消</button><button className="primary-button" disabled={milestoneWorking || Math.abs(milestoneDraft.reduce((sum, row) => sum + Number(row.weight || 0), 0) - 100) >= 0.01} onClick={saveMilestoneGovernance}>{milestoneWorking ? "正在保存…" : "保存节点治理"}</button></div></section></div>}
     {showBaselineForm && <div className="modal-backdrop" onClick={() => setShowBaselineForm(false)}><section className="create-modal baseline-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowBaselineForm(false)}>×</button><span className="modal-kicker">BASELINE CHANGE</span><h2>申请基线变更</h2><p>{currentProject.name} · 当前批准基线 V{currentProject.baselineVersion ?? 1}</p><form onSubmit={requestBaselineChange}><div className="modal-form-grid"><label>调整节点<select name="milestoneId" required>{adjustableMilestones.map((milestone) => <option key={milestone.id} value={milestone.id}>{milestone.name}（当前 {milestone.plannedFinish}）</option>)}</select></label><label>新计划完成日<input name="to" type="date" required /></label></div><label className="full-label">变更原因<textarea name="reason" minLength={10} required placeholder="说明触发原因、决策依据和不可通过纠偏消化的原因" /></label><label className="full-label">影响评估<textarea name="impact" minLength={10} required placeholder="说明对总体工期、成本、范围、资源和年度目标的影响" /></label>{baselineError && <div className="form-error" role="alert">! {baselineError}</div>}<div className="modal-actions"><button type="button" className="outline-button" onClick={() => setShowBaselineForm(false)}>取消</button><button className="primary-button" disabled={baselineWorking}>{baselineWorking ? "正在提交…" : "提交 PMO 审批"}</button></div></form></section></div>}
     {baselineSuccess && <div className="toast"><span>✓</span><div><strong>基线变更申请已提交</strong><p>PMO 审批前当前批准基线保持不变。</p></div></div>}
   </div>;
@@ -910,6 +1058,16 @@ function PmoPage({ onNavigate, onDataChanged, identity, projectData = projects }
       days: number;
     }>;
   };
+  type TemplateRow = {
+    id: number;
+    code: string;
+    name: string;
+    sequence: number;
+    defaultWeight: number;
+    critical: boolean;
+    active: boolean;
+    description: string;
+  };
   const [locked, setLocked] = useState(false);
   const [snapshotId, setSnapshotId] = useState<number | null>(null);
   const [snapshotVersion, setSnapshotVersion] = useState(1);
@@ -924,6 +1082,9 @@ function PmoPage({ onNavigate, onDataChanged, identity, projectData = projects }
   const [rejectReason, setRejectReason] = useState("");
   const [working, setWorking] = useState(false);
   const [operationError, setOperationError] = useState("");
+  const [templateRows, setTemplateRows] = useState<TemplateRow[]>([]);
+  const [templateSaving, setTemplateSaving] = useState(false);
+  const [templateMessage, setTemplateMessage] = useState("");
 
   useEffect(() => {
     fetch("/api/bootstrap")
@@ -934,6 +1095,7 @@ function PmoPage({ onNavigate, onDataChanged, identity, projectData = projects }
       .then((data: {
         snapshots?: SnapshotRow[];
         baselineChanges?: BaselineRow[];
+        milestoneTemplates?: TemplateRow[];
       }) => {
         const rows = data.snapshots ?? [];
         setSnapshotRows(rows);
@@ -951,6 +1113,7 @@ function PmoPage({ onNavigate, onDataChanged, identity, projectData = projects }
           setChangeId(change.id);
           setApproved(change.status === "approved");
         }
+        setTemplateRows(data.milestoneTemplates ?? []);
       })
       .catch(() => undefined);
   }, []);
@@ -1073,6 +1236,41 @@ function PmoPage({ onNavigate, onDataChanged, identity, projectData = projects }
       setWorking(false);
     }
   }
+  async function saveTemplates() {
+    setTemplateSaving(true);
+    setTemplateMessage("");
+    try {
+      const response = await fetch("/api/milestone-templates", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ templates: templateRows }),
+      });
+      const result = (await response.json()) as {
+        error?: string;
+        milestoneTemplates?: TemplateRow[];
+      };
+      if (!response.ok) throw new Error(result.error || "节点模板发布失败");
+      setTemplateRows(result.milestoneTemplates ?? templateRows);
+      setTemplateMessage("已发布新的标准节点模板，后续新建项目将使用最新口径。");
+      await onDataChanged();
+    } catch (error) {
+      setTemplateMessage(
+        error instanceof Error ? error.message : "节点模板发布失败",
+      );
+    } finally {
+      setTemplateSaving(false);
+    }
+  }
+  function updateTemplate<K extends keyof TemplateRow>(
+    id: number,
+    key: K,
+    value: TemplateRow[K],
+  ) {
+    setTemplateRows((rows) =>
+      rows.map((row) => (row.id === id ? { ...row, [key]: value } : row)),
+    );
+    setTemplateMessage("");
+  }
   const activeChange =
     baselineRows.find((change) => change.id === changeId) ?? baselineRows[0];
   const pendingChanges = baselineRows.filter(
@@ -1093,6 +1291,9 @@ function PmoPage({ onNavigate, onDataChanged, identity, projectData = projects }
     0,
     snapshotProjectCount - submittedProjectCount,
   );
+  const activeTemplateWeight = templateRows
+    .filter((row) => row.active)
+    .reduce((sum, row) => sum + Number(row.defaultWeight || 0), 0);
   return <div className="workspace-page">
     <WorkspaceHeader title="PMO 管理中心" subtitle="统一规则、治理数据、锁定管理口径" onNavigate={onNavigate} identity={identity} />
     <div className="page-content pmo-page">
@@ -1127,7 +1328,7 @@ function PmoPage({ onNavigate, onDataChanged, identity, projectData = projects }
           <div className="approval-actions">{activeChange.status === "approved" || approved ? <div className="approved-note">✓ 已批准，当前基线已更新为 V{activeChange.versionTo}</div> : activeChange.status === "rejected" ? <div className="rejected-note">■ 已驳回：{activeChange.rejectionReason}</div> : <><button className="danger-outline" onClick={() => setShowReject(true)}>驳回申请</button><button className="primary-button" disabled={working} onClick={approveBaseline}>{working ? "正在审批…" : `批准并生成 V${activeChange.versionTo}`}</button></>}</div>
         </div> : <div className="empty-state">暂无基线变更申请</div>}
       </section>}
-      {tab === "节点模板" && <section className="content-card placeholder-panel"><div className="placeholder-icon">▦</div><h2>节点模板</h2><p>统一节点模板包含7个标准节点、权重及关键节点标识，项目可标记不适用或申请新增。</p><button className="primary-button" onClick={() => onNavigate("portfolio")}>新建项目并套用模板</button></section>}
+      {tab === "节点模板" && <section className="content-card template-governance"><div className="card-title"><div><h2>标准节点模板</h2><p>统一维护节点编码、顺序、默认权重与关键节点标识；启用节点权重合计必须为100%</p></div><div className="template-publish"><span className={Math.abs(activeTemplateWeight - 100) < 0.01 ? "weight-ok" : "weight-error"}>启用权重 {activeTemplateWeight.toFixed(1)}%</span><button className="primary-button" disabled={templateSaving || Math.abs(activeTemplateWeight - 100) >= 0.01} onClick={saveTemplates}>{templateSaving ? "正在发布…" : "发布模板"}</button></div></div>{templateMessage && <div className={templateMessage.includes("已发布") ? "form-success" : "form-error"}>{templateMessage}</div>}<div className="template-grid"><div className="template-grid-head"><span>序号</span><span>编码</span><span>节点名称</span><span>权重</span><span>关键</span><span>启用</span><span>口径说明</span></div>{templateRows.map((row) => <div className={`template-grid-row ${row.active ? "" : "inactive"}`} key={row.id}><input aria-label={`${row.name}序号`} type="number" min="1" max="99" value={row.sequence} onChange={(event) => updateTemplate(row.id, "sequence", Number(event.target.value))} /><input aria-label={`${row.name}编码`} value={row.code} onChange={(event) => updateTemplate(row.id, "code", event.target.value.toUpperCase())} /><input aria-label={`${row.name}名称`} value={row.name} onChange={(event) => updateTemplate(row.id, "name", event.target.value)} /><label className="weight-input"><input aria-label={`${row.name}权重`} type="number" min="0" max="100" step="0.5" value={row.defaultWeight} onChange={(event) => updateTemplate(row.id, "defaultWeight", Number(event.target.value))} /><span>%</span></label><label className="template-check"><input type="checkbox" checked={row.critical} onChange={(event) => updateTemplate(row.id, "critical", event.target.checked)} /><span>关键</span></label><label className="template-check"><input type="checkbox" checked={row.active} onChange={(event) => updateTemplate(row.id, "active", event.target.checked)} /><span>启用</span></label><input aria-label={`${row.name}说明`} value={row.description} onChange={(event) => updateTemplate(row.id, "description", event.target.value)} /></div>)}</div><div className="template-footnote">项目可在本项目范围内标记节点不适用或追加零权重自定义节点；正式计划完成日调整仍须走基线变更审批。</div></section>}
       {tab === "预警规则" && <RuleConfigPanel />}
     </div>
     {locked && <div className="toast"><span>✓</span><div><strong>第30周快照已锁定</strong><p>管理大屏已切换至最新数据。</p></div></div>}
@@ -1141,6 +1342,8 @@ export default function Home() {
   const [dashboardData, setDashboardData] = useState<ProjectData[]>(projects);
   const [dashboardSnapshot, setDashboardSnapshot] =
     useState<DashboardSnapshot | null>(null);
+  const [templateData, setTemplateData] =
+    useState<TemplateData[]>(defaultTemplateData);
   const [selectedProjectId, setSelectedProjectId] = useState("P02");
   const [dataState, setDataState] = useState<"loading" | "ready" | "fallback">("loading");
   const navigate: Navigate = (next, projectId) => {
@@ -1158,6 +1361,7 @@ export default function Home() {
         identity?: Identity;
         dashboardProjects?: ProjectData[];
         dashboardSnapshot?: DashboardSnapshot | null;
+        milestoneTemplates?: TemplateData[];
       };
       if (data.projects?.length) setProjectData(data.projects);
       if (data.dashboardProjects?.length) {
@@ -1166,6 +1370,9 @@ export default function Home() {
         setDashboardData(data.projects);
       }
       setDashboardSnapshot(data.dashboardSnapshot ?? null);
+      if (data.milestoneTemplates?.length) {
+        setTemplateData(data.milestoneTemplates);
+      }
       if (data.identity) setIdentity(data.identity);
       setDataState("ready");
     } catch {
@@ -1178,6 +1385,6 @@ export default function Home() {
     return () => window.clearTimeout(timer);
   }, [refreshData]);
 
-  if (view === "cockpit") return <><Cockpit onNavigate={navigate} projectData={dashboardData} snapshot={dashboardSnapshot} />{dataState === "fallback" && <div className="data-banner">当前显示离线演示数据，数据服务恢复后将自动同步。</div>}</>;
-  return <div className="app-shell"><Sidebar view={view} onNavigate={navigate} identity={identity} /><div className="workspace">{view === "portfolio" && <Portfolio onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} identity={identity} />}{view === "project" && <ProjectDetail onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} projectId={selectedProjectId} identity={identity} />}{view === "report" && <WeeklyReport onNavigate={navigate} onDataChanged={refreshData} projectId={selectedProjectId} projectData={projectData} identity={identity} />}{view === "pmo" && <PmoPage onNavigate={navigate} onDataChanged={refreshData} identity={identity} projectData={projectData} />}{view === "admin" && <AdminPage onNavigate={navigate} identity={identity} />}</div></div>;
+  if (view === "cockpit") return <><Cockpit onNavigate={navigate} projectData={dashboardData} snapshot={dashboardSnapshot} templateData={templateData} />{dataState === "fallback" && <div className="data-banner">当前显示离线演示数据，数据服务恢复后将自动同步。</div>}</>;
+  return <div className="app-shell"><Sidebar view={view} onNavigate={navigate} identity={identity} /><div className="workspace">{view === "portfolio" && <Portfolio onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} identity={identity} templateData={templateData} />}{view === "project" && <ProjectDetail onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} projectId={selectedProjectId} identity={identity} />}{view === "report" && <WeeklyReport onNavigate={navigate} onDataChanged={refreshData} projectId={selectedProjectId} projectData={projectData} identity={identity} />}{view === "pmo" && <PmoPage onNavigate={navigate} onDataChanged={refreshData} identity={identity} projectData={projectData} />}{view === "admin" && <AdminPage onNavigate={navigate} identity={identity} />}</div></div>;
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import PortfolioTrends from "./portfolio-trends";
 
 type HealthStatus = "green" | "yellow" | "red";
 type Identity = {
@@ -121,6 +122,15 @@ export default function PortfolioAnalytics({
     });
     return params.toString();
   }, [filters]);
+  const trendFilters = useMemo(
+    () => ({
+      org: filters.org,
+      type: filters.type,
+      owner: filters.owner,
+      status: filters.status,
+    }),
+    [filters.org, filters.owner, filters.status, filters.type],
+  );
 
   const loadAnalytics = useCallback(async () => {
     setLoading(true);
@@ -459,6 +469,10 @@ export default function PortfolioAnalytics({
             </section>
           </>
         )}
+        <PortfolioTrends
+          filters={trendFilters}
+          onOpenProject={(projectId) => onNavigate("project", projectId)}
+        />
       </div>
     </div>
   );

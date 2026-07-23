@@ -7,6 +7,9 @@ const maxP95Ms = Number(process.env.MAX_BOOTSTRAP_P95_MS ?? 3000);
 const maxAnalyticsP95Ms = Number(
   process.env.MAX_ANALYTICS_P95_MS ?? maxP95Ms,
 );
+const maxTrendP95Ms = Number(
+  process.env.MAX_TREND_P95_MS ?? maxP95Ms,
+);
 
 const template = [
   ["立项启动", 5, false],
@@ -167,6 +170,30 @@ assert(
   `analytics P95 ${analyticsP95Ms.toFixed(1)}ms 超过阈值 ${maxAnalyticsP95Ms}ms`,
 );
 
+const trendSamples = [];
+let trends;
+for (let index = 0; index < 5; index += 1) {
+  trends = await readJson("/api/portfolio/analytics/trends?weeks=12", {
+    cache: "no-store",
+  });
+  assert.equal(trends.response.status, 200, JSON.stringify(trends.body));
+  assert(Array.isArray(trends.body.points), "跨周期趋势未返回points数组");
+  assert(
+    Array.isArray(trends.body.chronicBottlenecks),
+    "跨周期趋势未返回持续瓶颈数组",
+  );
+  trendSamples.push(trends.elapsedMs);
+}
+const sortedTrendSamples = [...trendSamples].sort(
+  (left, right) => left - right,
+);
+const trendP95Ms =
+  sortedTrendSamples[Math.ceil(sortedTrendSamples.length * 0.95) - 1];
+assert(
+  trendP95Ms <= maxTrendP95Ms,
+  `trends P95 ${trendP95Ms.toFixed(1)}ms 超过阈值 ${maxTrendP95Ms}ms`,
+);
+
 console.log(
   JSON.stringify(
     {
@@ -192,6 +219,11 @@ console.log(
       ),
       analyticsP95Ms: Number(analyticsP95Ms.toFixed(1)),
       analyticsThresholdMs: maxAnalyticsP95Ms,
+      trendWeeks: trends.body.points.length,
+      trendBytes: Buffer.byteLength(trends.text),
+      trendSamplesMs: trendSamples.map((value) => Number(value.toFixed(1))),
+      trendP95Ms: Number(trendP95Ms.toFixed(1)),
+      trendThresholdMs: maxTrendP95Ms,
     },
     null,
     2,

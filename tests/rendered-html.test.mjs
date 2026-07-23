@@ -240,6 +240,10 @@ test("supports dynamic weekly drafts, immutable baselines and real project activ
   assert.match(page, /已恢复本周服务器草稿/);
   assert.match(page, /暂无已锁定周度快照/);
   assert.match(page, /ProjectActivityPanel/);
+  assert.match(page, /function WeeklyProgressChart/);
+  assert.match(page, /周度系统计算进度与项目经理申报进度曲线/);
+  assert.match(page, /report\.status !== "draft"/);
+  assert.match(page, /\.slice\(-12\)/);
 });
 
 test("closes project maintenance, account lifecycle and dynamic PMO operations", async () => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type Status = "green" | "yellow" | "red" | "na";
 type View = "cockpit" | "portfolio" | "project" | "report" | "pmo" | "admin";
@@ -287,6 +287,118 @@ function StatusPill({ status, compact = false }: { status: Status; compact?: boo
 function ProgressBar({ value, tone = "blue" }: { value: number; tone?: string }) {
   return <div className="progress-track" aria-label={`完成度 ${value}%`}>
     <span className={`progress-fill ${tone}`} style={{ width: `${value}%` }} />
+  </div>;
+}
+
+function WeeklyProgressChart({ reports }: { reports: WeeklyReportRow[] }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const chartReports = useMemo(
+    () =>
+      [...reports]
+        .filter((report) => report.status !== "draft")
+        .sort((left, right) => left.weekKey.localeCompare(right.weekKey))
+        .slice(-12),
+    [reports],
+  );
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || chartReports.length === 0) return;
+    const draw = () => {
+      const container = canvas.parentElement;
+      if (!container) return;
+      const width = Math.max(620, container.clientWidth);
+      const height = 188;
+      const ratio = window.devicePixelRatio || 1;
+      canvas.width = width * ratio;
+      canvas.height = height * ratio;
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
+      const context = canvas.getContext("2d");
+      if (!context) return;
+      context.scale(ratio, ratio);
+      context.clearRect(0, 0, width, height);
+      const padding = { left: 38, right: 18, top: 16, bottom: 32 };
+      const chartWidth = width - padding.left - padding.right;
+      const chartHeight = height - padding.top - padding.bottom;
+      const xFor = (index: number) =>
+        padding.left +
+        (chartReports.length === 1
+          ? chartWidth / 2
+          : (chartWidth * index) / (chartReports.length - 1));
+      const yFor = (value: number) =>
+        padding.top + chartHeight * (1 - Math.max(0, Math.min(100, value)) / 100);
+
+      context.font = "9px Arial";
+      context.textAlign = "right";
+      context.textBaseline = "middle";
+      for (let value = 0; value <= 100; value += 25) {
+        const y = yFor(value);
+        context.strokeStyle = "#e9edf3";
+        context.lineWidth = 1;
+        context.beginPath();
+        context.moveTo(padding.left, y);
+        context.lineTo(width - padding.right, y);
+        context.stroke();
+        context.fillStyle = "#9aa4b3";
+        context.fillText(`${value}%`, padding.left - 7, y);
+      }
+
+      const drawSeries = (
+        readValue: (report: WeeklyReportRow) => number,
+        color: string,
+      ) => {
+        context.strokeStyle = color;
+        context.lineWidth = 2;
+        context.lineJoin = "round";
+        context.lineCap = "round";
+        context.beginPath();
+        chartReports.forEach((report, index) => {
+          const x = xFor(index);
+          const y = yFor(readValue(report));
+          if (index === 0) context.moveTo(x, y);
+          else context.lineTo(x, y);
+        });
+        context.stroke();
+        chartReports.forEach((report, index) => {
+          context.fillStyle = "#fff";
+          context.strokeStyle = color;
+          context.lineWidth = 2;
+          context.beginPath();
+          context.arc(xFor(index), yFor(readValue(report)), 3.5, 0, Math.PI * 2);
+          context.fill();
+          context.stroke();
+        });
+      };
+      drawSeries((report) => report.systemProgress, "#1b64f2");
+      drawSeries((report) => report.declaredProgress, "#17a875");
+
+      context.fillStyle = "#8792a4";
+      context.font = "8px Arial";
+      context.textAlign = "center";
+      context.textBaseline = "top";
+      chartReports.forEach((report, index) => {
+        context.fillText(
+          report.weekKey.replace(/^\d{4}-/, ""),
+          xFor(index),
+          height - padding.bottom + 10,
+        );
+      });
+    };
+    draw();
+    window.addEventListener("resize", draw);
+    return () => window.removeEventListener("resize", draw);
+  }, [chartReports]);
+
+  if (chartReports.length === 0) return null;
+  return <div className="weekly-progress-chart">
+    <div className="chart-head">
+      <div><strong>周度进度曲线</strong><small>最近{chartReports.length}个正式填报周期</small></div>
+      <div className="chart-legend"><span className="system">系统计算进度</span><span className="declared">经理申报进度</span></div>
+    </div>
+    <div className="weekly-progress-visual">
+      <canvas ref={canvasRef} aria-label="周度系统计算进度与项目经理申报进度曲线" role="img" />
+    </div>
   </div>;
 }
 
@@ -1010,7 +1122,7 @@ function ProjectActivityPanel({
     };
     return <section className="content-card activity-card">
       <div className="card-title"><div><h2>周报记录</h2><p>系统计算值、经理申报值和差异说明均永久留痕</p></div><button className="text-button" onClick={loadActivity}>刷新</button></div>
-      {data.weeklyReports.length ? <div className="weekly-history-table">
+      {data.weeklyReports.length ? <><WeeklyProgressChart reports={data.weeklyReports} /><div className="weekly-history-table">
         <div className="table-head"><span>周期</span><span>系统进度</span><span>申报进度</span><span>差异</span><span>状态</span><span>提交人</span><span>更新时间</span></div>
         {data.weeklyReports.map((report) => <article className="table-row" key={report.id}>
           <span><strong>{report.weekKey}</strong><small>{report.forecastFinish ? `预测完成 ${report.forecastFinish}` : "未填项目预测日"}</small></span>
@@ -1023,7 +1135,7 @@ function ProjectActivityPanel({
           {report.reason && <p>{report.reason}</p>}
           {data.attachments.some((attachment) => attachment.weekKey === report.weekKey) && <div className="history-attachments"><strong>支撑附件</strong>{data.attachments.filter((attachment) => attachment.weekKey === report.weekKey).map((attachment) => <a key={attachment.id} href={`/api/attachments/${attachment.id}`} target="_blank" rel="noreferrer"><span>↧</span>{attachment.filename}<small>{formatFileSize(attachment.sizeBytes)}</small></a>)}</div>}
         </article>)}
-      </div> : <div className="empty-state">暂无周报记录</div>}
+      </div></> : <div className="empty-state">暂无周报记录</div>}
     </section>;
   }
 

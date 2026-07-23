@@ -481,3 +481,33 @@ test("offers a filterable list and milestone heatmap in the desktop workspace", 
   assert.match(css, /--portfolio-milestone-count/);
   assert.match(css, /portfolio-heat-cell\.na/);
 });
+
+test("supports atomic Excel project import with template download and row-level preview", async () => {
+  const [route, page, css, packageJson] = await Promise.all([
+    readFile(new URL("app/api/projects/import/route.ts", templateRoot), "utf8"),
+    readFile(new URL("app/page.tsx", templateRoot), "utf8"),
+    readFile(new URL("app/globals.css", templateRoot), "utf8"),
+    readFile(new URL("package.json", templateRoot), "utf8"),
+  ]);
+
+  assert.match(route, /canManagePortfolio/);
+  assert.match(route, /MAX_PROJECTS = 100/);
+  assert.match(route, /MAX_MILESTONES = 2_000/);
+  assert.match(route, /json_each\(\?\)/);
+  assert.match(route, /client\.batch/);
+  assert.match(route, /project\.import/);
+  assert.match(route, /baseline_versions/);
+  assert.match(route, /未写入任何项目/);
+  assert.match(page, /read-excel-file\/browser/);
+  assert.match(page, /write-excel-file\/browser/);
+  assert.match(page, /Excel批量导入/);
+  assert.match(page, /下载导入模板/);
+  assert.match(page, /导入预检/);
+  assert.match(page, /任何一行失败都不会创建项目/);
+  assert.match(page, /工作表“\$\{sheetName\}”缺少列/);
+  assert.match(css, /project-import-modal/);
+  assert.match(css, /import-error-table/);
+  assert.match(css, /import-success-state/);
+  assert.match(packageJson, /"read-excel-file"/);
+  assert.match(packageJson, /"write-excel-file"/);
+});

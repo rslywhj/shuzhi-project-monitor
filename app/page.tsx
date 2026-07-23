@@ -788,14 +788,582 @@ function WorkspaceHeader({ title, subtitle, onNavigate, identity }: { title: str
   </header>;
 }
 
+type ProjectImportRow = {
+  rowNumber: number;
+  code: unknown;
+  name: unknown;
+  ownerName: unknown;
+  ownerEmail: unknown;
+  org: unknown;
+  type: unknown;
+  riskLevel: unknown;
+};
+
+type MilestoneImportRow = {
+  rowNumber: number;
+  projectCode: unknown;
+  templateCode: unknown;
+  name: unknown;
+  sequence: unknown;
+  weight: unknown;
+  critical: unknown;
+  applicable: unknown;
+  plannedStart: unknown;
+  plannedFinish: unknown;
+};
+
+type ProjectImportPayload = {
+  mode: "preview" | "commit";
+  projects: ProjectImportRow[];
+  milestones: MilestoneImportRow[];
+};
+
+type ProjectImportIssue = {
+  sheet: "项目清单" | "节点计划";
+  row: number;
+  field: string;
+  message: string;
+};
+
+type ProjectImportPreviewRow = {
+  code: string;
+  name: string;
+  ownerName: string;
+  org: string;
+  type: string;
+  riskLevel: "low" | "medium" | "high";
+  milestoneCount: number;
+  customMilestoneCount: number;
+  applicableMilestoneCount: number;
+  totalWeight: number;
+  plannedStart: string;
+  plannedFinish: string;
+};
+
+type ProjectImportResult = {
+  valid: boolean;
+  mode: "preview" | "commit";
+  batchId?: string;
+  created?: number;
+  summary: {
+    projectCount: number;
+    milestoneCount: number;
+    standardMilestoneCount: number;
+    customMilestoneCount: number;
+    activeTemplateCount: number;
+  };
+  errors: ProjectImportIssue[];
+  errorCount: number;
+  projects?: ProjectImportPreviewRow[];
+  error?: string;
+};
+
+const projectImportHeaders = [
+  "项目编码",
+  "项目名称",
+  "项目经理姓名",
+  "项目经理邮箱",
+  "所属组织",
+  "项目类型",
+  "初始风险",
+] as const;
+
+const milestoneImportHeaders = [
+  "项目编码",
+  "节点编码",
+  "节点名称",
+  "节点序号",
+  "权重",
+  "关键节点",
+  "是否适用",
+  "计划开始日",
+  "计划完成日",
+] as const;
+
+function hasExcelValue(value: unknown) {
+  return (
+    value !== null &&
+    value !== undefined &&
+    !(typeof value === "string" && value.trim() === "")
+  );
+}
+
+function normalizeExcelValue(value: unknown) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().slice(0, 10);
+  }
+  return value ?? "";
+}
+
+function readImportSheet(
+  data: unknown[][],
+  sheetName: "项目清单" | "节点计划",
+  requiredHeaders: readonly string[],
+) {
+  if (!data.length) {
+    throw new Error(`工作表“${sheetName}”为空。`);
+  }
+  const headerCells = data[0].map((value) =>
+    String(normalizeExcelValue(value)).trim(),
+  );
+  const indexes = new Map(
+    headerCells.map((header, index) => [header.normalize("NFKC"), index]),
+  );
+  const missing = requiredHeaders.filter(
+    (header) => !indexes.has(header.normalize("NFKC")),
+  );
+  if (missing.length) {
+    throw new Error(
+      `工作表“${sheetName}”缺少列：${missing.join("、")}。请使用最新模板。`,
+    );
+  }
+  return data
+    .slice(1)
+    .map((row, index) => ({
+      rowNumber: index + 2,
+      row,
+      value: (header: string) =>
+        normalizeExcelValue(
+          row[indexes.get(header.normalize("NFKC")) as number],
+        ),
+    }))
+    .filter(({ row }) => row.some(hasExcelValue));
+}
+
+async function parseProjectImportWorkbook(file: File) {
+  const { default: readExcelFile } = await import("read-excel-file/browser");
+  const sheets = await readExcelFile(file);
+  const projectSheet = sheets.find((sheet) => sheet.sheet.trim() === "项目清单");
+  const milestoneSheet = sheets.find(
+    (sheet) => sheet.sheet.trim() === "节点计划",
+  );
+  const missingSheets = [
+    !projectSheet ? "项目清单" : "",
+    !milestoneSheet ? "节点计划" : "",
+  ].filter(Boolean);
+  if (missingSheets.length) {
+    throw new Error(
+      `缺少工作表：${missingSheets.join("、")}。请下载最新模板后重试。`,
+    );
+  }
+  const projectRows = readImportSheet(
+    projectSheet!.data as unknown[][],
+    "项目清单",
+    projectImportHeaders,
+  );
+  const milestoneRows = readImportSheet(
+    milestoneSheet!.data as unknown[][],
+    "节点计划",
+    milestoneImportHeaders,
+  );
+  return {
+    projects: projectRows.map(({ rowNumber, value }) => ({
+      rowNumber,
+      code: value("项目编码"),
+      name: value("项目名称"),
+      ownerName: value("项目经理姓名"),
+      ownerEmail: value("项目经理邮箱"),
+      org: value("所属组织"),
+      type: value("项目类型"),
+      riskLevel: value("初始风险"),
+    })),
+    milestones: milestoneRows.map(({ rowNumber, value }) => ({
+      rowNumber,
+      projectCode: value("项目编码"),
+      templateCode: value("节点编码"),
+      name: value("节点名称"),
+      sequence: value("节点序号"),
+      weight: value("权重"),
+      critical: value("关键节点"),
+      applicable: value("是否适用"),
+      plannedStart: value("计划开始日"),
+      plannedFinish: value("计划完成日"),
+    })),
+  };
+}
+
+async function downloadProjectImportTemplate(templateData: TemplateData[]) {
+  const { default: writeExcelFile } = await import("write-excel-file/browser");
+  const activeTemplates = templateData
+    .filter((template) => template.active)
+    .sort((left, right) => left.sequence - right.sequence);
+  const projectData = [
+    [...projectImportHeaders],
+    ["", "", "", "", "", "", "低"],
+  ];
+  const milestoneData = [
+    [...milestoneImportHeaders],
+    ...activeTemplates.map((template) => [
+      "",
+      template.code,
+      template.name,
+      template.sequence,
+      template.defaultWeight,
+      template.critical ? "是" : "否",
+      "是",
+      "",
+      "",
+    ]),
+  ];
+  const instructionData = [
+    ["序号", "填写说明"],
+    ["1", "项目清单：一个项目填写一行，项目编码必须唯一，仅支持新建项目。"],
+    [
+      "2",
+      `节点计划：每个项目必须覆盖当前${activeTemplates.length}个启用标准节点；复制整组标准节点行并填写项目编码及日期。`,
+    ],
+    ["3", "权重填写数字5代表5%，同一项目全部节点权重合计必须为100。"],
+    [
+      "4",
+      "自定义节点可追加在标准节点之后：节点编码留空，填写节点名称、序号、权重及日期。",
+    ],
+    ["5", "日期统一使用YYYY-MM-DD；计划完成日不得早于计划开始日。"],
+    ["6", "关键节点、是否适用支持填写“是/否”；初始风险支持“低/中/高”。"],
+    [
+      "7",
+      "先在系统执行导入预检；只有全部校验通过后才能确认导入。导入过程不会覆盖已有项目。",
+    ],
+    ["", ""],
+    ["当前标准节点", "编码 / 名称 / 默认权重 / 关键节点"],
+    ...activeTemplates.map((template) => [
+      String(template.sequence),
+      `${template.code} / ${template.name} / ${template.defaultWeight}% / ${template.critical ? "关键" : "普通"}`,
+    ]),
+  ];
+  await writeExcelFile([
+    {
+      sheet: "项目清单",
+      data: projectData,
+      columns: [
+        { width: 15 },
+        { width: 26 },
+        { width: 16 },
+        { width: 28 },
+        { width: 22 },
+        { width: 18 },
+        { width: 12 },
+      ],
+      stickyRowsCount: 1,
+    },
+    {
+      sheet: "节点计划",
+      data: milestoneData,
+      columns: [
+        { width: 15 },
+        { width: 12 },
+        { width: 22 },
+        { width: 11 },
+        { width: 10 },
+        { width: 12 },
+        { width: 12 },
+        { width: 16 },
+        { width: 16 },
+      ],
+      stickyRowsCount: 1,
+    },
+    {
+      sheet: "填写说明",
+      data: instructionData,
+      columns: [{ width: 16 }, { width: 84 }],
+      stickyRowsCount: 1,
+    },
+  ]).toFile("统建项目批量导入模板.xlsx");
+}
+
+function ProjectImportModal({
+  templateData,
+  onClose,
+  onImported,
+}: {
+  templateData: TemplateData[];
+  onClose: () => void;
+  onImported: () => Promise<void>;
+}) {
+  const [fileName, setFileName] = useState("");
+  const [payload, setPayload] = useState<Omit<ProjectImportPayload, "mode"> | null>(
+    null,
+  );
+  const [result, setResult] = useState<ProjectImportResult | null>(null);
+  const [phase, setPhase] = useState<
+    "idle" | "reading" | "previewing" | "ready" | "committing" | "success"
+  >("idle");
+  const [operationError, setOperationError] = useState("");
+  const [downloading, setDownloading] = useState(false);
+
+  async function requestImport(
+    mode: "preview" | "commit",
+    rows: Omit<ProjectImportPayload, "mode">,
+  ) {
+    const response = await fetch("/api/projects/import", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mode, ...rows }),
+    });
+    const responseResult = (await response.json()) as ProjectImportResult;
+    if (!response.ok && response.status !== 422) {
+      throw new Error(responseResult.error || "批量导入服务暂不可用。");
+    }
+    return responseResult;
+  }
+
+  async function selectWorkbook(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setFileName(file.name);
+    setPayload(null);
+    setResult(null);
+    setOperationError("");
+    if (!file.name.toLowerCase().endsWith(".xlsx")) {
+      setPhase("idle");
+      setOperationError("仅支持.xlsx格式，请使用系统模板。");
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setPhase("idle");
+      setOperationError("文件不能超过10MB。");
+      return;
+    }
+    try {
+      setPhase("reading");
+      const rows = await parseProjectImportWorkbook(file);
+      setPayload(rows);
+      setPhase("previewing");
+      const preview = await requestImport("preview", rows);
+      setResult(preview);
+      setPhase(preview.valid ? "ready" : "idle");
+    } catch (error) {
+      setPhase("idle");
+      setOperationError(
+        error instanceof Error ? error.message : "Excel文件解析失败。",
+      );
+    }
+  }
+
+  async function commitImport() {
+    if (!payload || !result?.valid) return;
+    setOperationError("");
+    setPhase("committing");
+    try {
+      const committed = await requestImport("commit", payload);
+      setResult(committed);
+      if (!committed.valid) {
+        setPhase("idle");
+        return;
+      }
+      await onImported();
+      setPhase("success");
+    } catch (error) {
+      setPhase("ready");
+      setOperationError(
+        error instanceof Error ? error.message : "确认导入失败。",
+      );
+    }
+  }
+
+  async function downloadTemplate() {
+    setDownloading(true);
+    setOperationError("");
+    try {
+      await downloadProjectImportTemplate(templateData);
+    } catch (error) {
+      setOperationError(
+        error instanceof Error ? error.message : "模板下载失败。",
+      );
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  const busy =
+    phase === "reading" ||
+    phase === "previewing" ||
+    phase === "committing";
+  const currentStep =
+    phase === "success" ? 3 : result?.valid ? 2 : fileName ? 1 : 0;
+
+  return (
+    <div className="modal-backdrop" onClick={busy ? undefined : onClose}>
+      <section
+        className="create-modal project-import-modal"
+        onClick={(event) => event.stopPropagation()}
+        aria-busy={busy}
+        aria-labelledby="project-import-title"
+      >
+        <button
+          className="modal-close"
+          onClick={onClose}
+          disabled={busy}
+          aria-label="关闭批量导入"
+        >
+          ×
+        </button>
+        <span className="modal-kicker">EXCEL BATCH IMPORT</span>
+        <h2 id="project-import-title">Excel批量导入项目</h2>
+        <p>本地解析文件、服务端逐行预检、事务化一次写入；任何一行失败都不会创建项目。</p>
+
+        <div className="import-stepper" aria-label="导入步骤">
+          {["上传文件", "导入预检", "完成导入"].map((label, index) => (
+            <div
+              key={label}
+              className={`${currentStep >= index + 1 ? "done" : ""} ${currentStep === index ? "active" : ""}`}
+            >
+              <span>{phase === "success" || currentStep > index + 1 ? "✓" : index + 1}</span>
+              <strong>{label}</strong>
+            </div>
+          ))}
+        </div>
+
+        {phase !== "success" && (
+          <label className={`import-dropzone ${busy ? "busy" : ""}`}>
+            <input
+              type="file"
+              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              onChange={selectWorkbook}
+              disabled={busy}
+            />
+            <span className="import-file-symbol">⇧</span>
+            <strong>
+              {phase === "reading"
+                ? "正在解析Excel文件…"
+                : phase === "previewing"
+                  ? "正在执行导入预检…"
+                  : fileName || "点击选择.xlsx文件"}
+            </strong>
+            <small>
+              {fileName
+                ? "重新选择文件将覆盖当前预检结果"
+                : "文件仅在浏览器解析为结构化数据，不上传原始Excel；最大10MB"}
+            </small>
+          </label>
+        )}
+
+        {result?.summary && phase !== "success" && (
+          <div className="import-summary">
+            <div><small>项目</small><strong>{result.summary.projectCount}</strong></div>
+            <div><small>全部节点</small><strong>{result.summary.milestoneCount}</strong></div>
+            <div><small>标准节点</small><strong>{result.summary.standardMilestoneCount}</strong></div>
+            <div><small>自定义节点</small><strong>{result.summary.customMilestoneCount}</strong></div>
+          </div>
+        )}
+
+        {result && !result.valid && (
+          <section className="import-validation-panel invalid">
+            <div className="import-validation-head">
+              <div>
+                <strong>导入预检未通过</strong>
+                <small>共发现{result.errorCount}项问题，修正Excel后重新选择文件。</small>
+              </div>
+              <span>阻止导入</span>
+            </div>
+            <div className="import-error-table">
+              <div><span>工作表</span><span>行号</span><span>字段</span><span>问题说明</span></div>
+              {result.errors.map((issue, index) => (
+                <div key={`${issue.sheet}-${issue.row}-${issue.field}-${index}`}>
+                  <span>{issue.sheet}</span>
+                  <span>{issue.row}</span>
+                  <span>{issue.field}</span>
+                  <span>{issue.message}</span>
+                </div>
+              ))}
+              {result.errorCount > result.errors.length && (
+                <p>仅展示前{result.errors.length}项，请先修正后再次预检。</p>
+              )}
+            </div>
+          </section>
+        )}
+
+        {result?.valid && phase !== "success" && (
+          <section className="import-validation-panel valid">
+            <div className="import-validation-head">
+              <div>
+                <strong>导入预检通过</strong>
+                <small>结构、必填项、标准节点覆盖和权重均已校验，可确认导入。</small>
+              </div>
+              <span>可导入</span>
+            </div>
+            <div className="import-preview-table">
+              <div><span>项目</span><span>负责人 / 组织</span><span>节点</span><span>计划周期</span><span>权重</span></div>
+              {result.projects?.slice(0, 20).map((project) => (
+                <div key={project.code}>
+                  <span><strong>{project.name}</strong><small>{project.code} · {project.type}</small></span>
+                  <span><strong>{project.ownerName}</strong><small>{project.org}</small></span>
+                  <span>{project.milestoneCount}<small>{project.customMilestoneCount ? `含${project.customMilestoneCount}个自定义` : "全部标准"}</small></span>
+                  <span>{project.plannedStart}<small>至 {project.plannedFinish}</small></span>
+                  <span>{project.totalWeight}%</span>
+                </div>
+              ))}
+              {(result.projects?.length ?? 0) > 20 && (
+                <p>另有{(result.projects?.length ?? 0) - 20}个项目将在确认后一次导入。</p>
+              )}
+            </div>
+          </section>
+        )}
+
+        {phase === "success" && result && (
+          <section className="import-success-state">
+            <span>✓</span>
+            <h3>批量导入完成</h3>
+            <p>已创建{result.created}个项目、{result.summary.milestoneCount}个节点，并生成原始基线V1。</p>
+            <dl>
+              <div><dt>导入批次</dt><dd>{result.batchId}</dd></div>
+              <div><dt>标准 / 自定义节点</dt><dd>{result.summary.standardMilestoneCount} / {result.summary.customMilestoneCount}</dd></div>
+            </dl>
+          </section>
+        )}
+
+        {operationError && (
+          <div className="form-error" role="alert">! {operationError}</div>
+        )}
+
+        <div className="modal-actions import-modal-actions">
+          {phase !== "success" && (
+            <button
+              type="button"
+              className="outline-button template-download-button"
+              onClick={downloadTemplate}
+              disabled={busy || downloading}
+            >
+              {downloading ? "正在生成…" : "下载导入模板"}
+            </button>
+          )}
+          <button
+            type="button"
+            className="outline-button"
+            onClick={onClose}
+            disabled={busy}
+          >
+            {phase === "success" ? "完成" : "取消"}
+          </button>
+          {phase !== "success" && (
+            <button
+              type="button"
+              className="primary-button"
+              onClick={commitImport}
+              disabled={phase !== "ready" || !result?.valid}
+            >
+              {phase === "committing" ? "正在事务导入…" : "确认导入"}
+            </button>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function Portfolio({ onNavigate, onDataChanged, projectData = projects, identity, templateData = defaultTemplateData, weeklyReports = [] }: { onNavigate: Navigate; onDataChanged: () => Promise<void>; projectData?: ProjectData[]; identity: Identity | null; templateData?: TemplateData[]; weeklyReports?: WeeklyReportRow[] }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("全部");
   const [displayMode, setDisplayMode] = useState<"table" | "heatmap">("table");
   const [page, setPage] = useState(0);
   const [showCreate, setShowCreate] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [templateDownloading, setTemplateDownloading] = useState(false);
   const [createError, setCreateError] = useState("");
+  const [portfolioError, setPortfolioError] = useState("");
+  const canManagePortfolio =
+    identity?.role === "pmo" || identity?.role === "admin";
   const matching = useMemo(
     () =>
       projectData.filter(
@@ -872,6 +1440,19 @@ function Portfolio({ onNavigate, onDataChanged, projectData = projects, identity
       setCreating(false);
     }
   }
+  async function downloadImportTemplate() {
+    setTemplateDownloading(true);
+    setPortfolioError("");
+    try {
+      await downloadProjectImportTemplate(templateData);
+    } catch (error) {
+      setPortfolioError(
+        error instanceof Error ? error.message : "导入模板生成失败。",
+      );
+    } finally {
+      setTemplateDownloading(false);
+    }
+  }
   return <div className="workspace-page">
     <WorkspaceHeader title="项目组合总览" subtitle={`以统一口径监控 ${counts.all} 个统建项目的进度与健康状态`} onNavigate={onNavigate} identity={identity} />
     <div className="page-content">
@@ -883,7 +1464,20 @@ function Portfolio({ onNavigate, onDataChanged, projectData = projects, identity
         <div className="summary-card wide"><div><small>{reportingWeek} 周报完成率</small><strong>{reportCompletion}%</strong></div><ProgressBar value={reportCompletion} /><span>{submittedProjects} / {counts.all}</span></div>
       </div>
       <section className="content-card">
-        <div className="table-toolbar"><div><h2>{displayMode === "table" ? "项目清单" : "项目节点热力矩阵"}</h2><span>当前批准基线口径</span></div><div className="toolbar-actions"><label className="search"><span>⌕</span><input placeholder="搜索项目名称" value={query} onChange={e => { setQuery(e.target.value); setPage(0); }} /></label><select value={status} onChange={e => { setStatus(e.target.value); setPage(0); }}><option>全部</option><option>正常</option><option>预警</option><option>严重</option></select><div className="view-switch" aria-label="项目视图"><button className={displayMode === "table" ? "active" : ""} onClick={() => setDisplayMode("table")}>列表</button><button className={displayMode === "heatmap" ? "active" : ""} onClick={() => setDisplayMode("heatmap")}>节点热力</button></div>{(identity?.role === "pmo" || identity?.role === "admin") && <button className="primary-button" onClick={() => setShowCreate(true)}>＋ 新建项目</button>}</div></div>
+        <div className="table-toolbar">
+          <div><h2>{displayMode === "table" ? "项目清单" : "项目节点热力矩阵"}</h2><span>当前批准基线口径</span></div>
+          <div className="toolbar-actions">
+            <label className="search"><span>⌕</span><input placeholder="搜索项目名称" value={query} onChange={e => { setQuery(e.target.value); setPage(0); }} /></label>
+            <select value={status} onChange={e => { setStatus(e.target.value); setPage(0); }}><option>全部</option><option>正常</option><option>预警</option><option>严重</option></select>
+            <div className="view-switch" aria-label="项目视图"><button className={displayMode === "table" ? "active" : ""} onClick={() => setDisplayMode("table")}>列表</button><button className={displayMode === "heatmap" ? "active" : ""} onClick={() => setDisplayMode("heatmap")}>节点热力</button></div>
+            {canManagePortfolio && <div className="portfolio-import-actions">
+              <button className="outline-button" onClick={downloadImportTemplate} disabled={templateDownloading}>{templateDownloading ? "正在生成…" : "下载导入模板"}</button>
+              <button className="outline-button import-button" onClick={() => setShowImport(true)}>⇧ Excel批量导入</button>
+              <button className="primary-button" onClick={() => setShowCreate(true)}>＋ 新建项目</button>
+            </div>}
+          </div>
+        </div>
+        {portfolioError && <div className="portfolio-operation-error" role="alert">! {portfolioError}<button onClick={() => setPortfolioError("")}>×</button></div>}
         {displayMode === "table" ? <div className="project-table">
           <div className="table-head"><span>项目名称</span><span>健康状态</span><span>项目经理</span><span>计划 / 实际</span><span>进度偏差</span><span>风险</span><span>更新时间</span><span /></div>
           {filtered.map(p => <div className="table-row" key={p.id}>
@@ -898,6 +1492,7 @@ function Portfolio({ onNavigate, onDataChanged, projectData = projects, identity
       </section>
     </div>
     {showCreate && <div className="modal-backdrop" onClick={() => setShowCreate(false)}><section className="create-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowCreate(false)}>×</button><span className="modal-kicker">PROJECT SETUP</span><h2>新建统建项目</h2><p>创建后自动套用{templateData.filter((template) => template.active).length}个当前启用的标准节点，节点权重合计100%。</p><form onSubmit={createProject}><div className="modal-form-grid"><label>项目编码<input name="code" placeholder="例如 P11" required /></label><label>项目名称<input name="name" placeholder="请输入项目名称" required /></label><label>项目经理<input name="ownerName" placeholder="姓名" required /></label><label>项目经理邮箱<input name="ownerEmail" type="email" placeholder="name@example.com" required /></label><label>所属组织<input name="org" placeholder="例如 财务数智组" required /></label><label>项目类型<select name="type"><option>核心系统</option><option>业务平台</option><option>数据平台</option><option>技术底座</option></select></label><label>初始风险<select name="riskLevel"><option value="low">低风险</option><option value="medium">中风险</option><option value="high">高风险</option></select></label></div><div className="template-summary"><strong>标准节点模板</strong><span>{templateData.filter((template) => template.active).sort((left, right) => left.sequence - right.sequence).map((template) => template.name).join(" → ")}</span></div>{createError && <div className="form-error" role="alert">! {createError}</div>}<div className="modal-actions"><button type="button" className="outline-button" onClick={() => setShowCreate(false)}>取消</button><button type="submit" className="primary-button" disabled={creating}>{creating ? "正在创建…" : "创建项目"}</button></div></form></section></div>}
+    {showImport && canManagePortfolio && <ProjectImportModal templateData={templateData} onClose={() => setShowImport(false)} onImported={onDataChanged} />}
   </div>;
 }
 

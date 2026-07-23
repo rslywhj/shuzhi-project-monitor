@@ -49,6 +49,56 @@ export const projects = sqliteTable(
   ],
 );
 
+export const notifications = sqliteTable(
+  "notifications",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    recipientEmail: text("recipient_email").notNull(),
+    projectId: text("project_id").references(() => projects.id, {
+      onDelete: "cascade",
+    }),
+    type: text("type", {
+      enum: [
+        "report_reminder",
+        "red_escalation",
+        "baseline_decision",
+        "system",
+      ],
+    }).notNull(),
+    severity: text("severity", {
+      enum: ["info", "warning", "critical"],
+    })
+      .notNull()
+      .default("info"),
+    title: text("title").notNull(),
+    message: text("message").notNull(),
+    actionView: text("action_view", {
+      enum: ["portfolio", "project", "report", "pmo", "admin"],
+    }).notNull(),
+    referenceKey: text("reference_key").notNull().default(""),
+    status: text("status", { enum: ["unread", "read", "dismissed"] })
+      .notNull()
+      .default("unread"),
+    createdBy: text("created_by").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    readAt: text("read_at"),
+  },
+  (table) => [
+    uniqueIndex("notifications_dedup_idx").on(
+      table.recipientEmail,
+      table.projectId,
+      table.type,
+      table.referenceKey,
+    ),
+    index("notifications_recipient_status_idx").on(
+      table.recipientEmail,
+      table.status,
+      table.createdAt,
+    ),
+    index("notifications_project_idx").on(table.projectId),
+  ],
+);
+
 export const milestoneTemplates = sqliteTable(
   "milestone_templates",
   {

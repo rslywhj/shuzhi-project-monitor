@@ -258,7 +258,7 @@ test("closes project maintenance, account lifecycle and dynamic PMO operations",
   assert.match(userRoute, /typeof payload\.active === "boolean"/);
   assert.match(page, /reportingPeriod\.weekKey/);
   assert.doesNotMatch(page, /body: JSON\.stringify\(\{ weekKey: "2026-W30" \}\)/);
-  assert.match(page, /由当前周报、差异校验和审批队列实时生成/);
+  assert.match(page, /由当前周报、红灯状态、差异校验和审批队列实时生成/);
   assert.match(page, /项目进度快照-/);
   assert.match(snapshotRead, /payload: JSON\.parse/);
 });
@@ -305,4 +305,54 @@ test("persists weekly report attachments in R2 and removes dead prototype contro
   assert.doesNotMatch(page, /支撑附件（后续开放）/);
   assert.doesNotMatch(page, /<strong>95\.5%<\/strong>/);
   assert.doesNotMatch(page, /退出演示账号/);
+});
+
+test("delivers recipient-scoped notifications, report reminders and red escalation", async () => {
+  const [
+    schema,
+    migration,
+    notificationRoute,
+    notificationItemRoute,
+    reminderRoute,
+    baselineApproveRoute,
+    baselineRejectRoute,
+    page,
+  ] = await Promise.all([
+    readFile(new URL("db/schema.ts", templateRoot), "utf8"),
+    readFile(new URL("drizzle/0007_soft_scream.sql", templateRoot), "utf8"),
+    readFile(new URL("app/api/notifications/route.ts", templateRoot), "utf8"),
+    readFile(
+      new URL("app/api/notifications/[id]/route.ts", templateRoot),
+      "utf8",
+    ),
+    readFile(
+      new URL("app/api/notifications/reminders/route.ts", templateRoot),
+      "utf8",
+    ),
+    readFile(
+      new URL("app/api/baseline-changes/[id]/approve/route.ts", templateRoot),
+      "utf8",
+    ),
+    readFile(
+      new URL("app/api/baseline-changes/[id]/reject/route.ts", templateRoot),
+      "utf8",
+    ),
+    readFile(new URL("app/page.tsx", templateRoot), "utf8"),
+  ]);
+
+  assert.match(schema, /export const notifications/);
+  assert.match(schema, /notifications_dedup_idx/);
+  assert.match(migration, /CREATE TABLE `notifications`/);
+  assert.match(notificationRoute, /eq\(notifications\.recipientEmail, identity\.email\)/);
+  assert.match(notificationItemRoute, /eq\(notifications\.recipientEmail, identity\.email\)/);
+  assert.match(reminderRoute, /canManagePortfolio/);
+  assert.match(reminderRoute, /project\.status !== "red"/);
+  assert.match(reminderRoute, /notification\.remind_report/);
+  assert.match(reminderRoute, /notification\.escalate_red/);
+  assert.match(baselineApproveRoute, /type: "baseline_decision"/);
+  assert.match(baselineRejectRoute, /type: "baseline_decision"/);
+  assert.match(page, /通知中心/);
+  assert.match(page, /全部已读/);
+  assert.match(page, /催报缺报/);
+  assert.match(page, /升级红灯/);
 });

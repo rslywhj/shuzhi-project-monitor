@@ -1,6 +1,6 @@
 import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { auditLogs, baselineChanges } from "@/db/schema";
+import { auditLogs, baselineChanges, notifications } from "@/db/schema";
 import { ApiRequestError, apiError, requiredString } from "@/lib/api-utils";
 import {
   canManagePortfolio,
@@ -69,6 +69,20 @@ export async function POST(
         reason,
       }),
     });
+    await db
+      .insert(notifications)
+      .values({
+        recipientEmail: existing.requestedBy,
+        projectId: existing.projectId,
+        type: "baseline_decision",
+        severity: "warning",
+        title: `基线变更已驳回：${existing.projectId}`,
+        message: `基线变更申请已驳回：${reason}`,
+        actionView: "project",
+        referenceKey: `rejected:${changeId}`,
+        createdBy: identity.email,
+      })
+      .onConflictDoNothing();
     return Response.json({ change });
   } catch (error) {
     return apiError(error);

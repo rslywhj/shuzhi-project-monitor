@@ -50,6 +50,13 @@
       "when": 1784803661699,
       "tag": "0006_faithful_black_cat",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1784805111497,
+      "tag": "0007_soft_scream",
+      "breakpoints": true
     }
   ]
 }

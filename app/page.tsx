@@ -144,6 +144,25 @@ type AttachmentData = {
   uploadedBy: string;
   createdAt: string;
 };
+type NotificationData = {
+  id: number;
+  recipientEmail: string;
+  projectId: string | null;
+  type:
+    | "report_reminder"
+    | "red_escalation"
+    | "baseline_decision"
+    | "system";
+  severity: "info" | "warning" | "critical";
+  title: string;
+  message: string;
+  actionView: Exclude<View, "cockpit">;
+  referenceKey: string;
+  status: "unread" | "read" | "dismissed";
+  createdBy: string;
+  createdAt: string;
+  readAt: string | null;
+};
 type BaselineMilestone = {
   milestoneId?: number;
   templateId?: number | null;
@@ -498,6 +517,9 @@ function Sidebar({ view, onNavigate, identity }: { view: View; onNavigate: Navig
 
 function WorkspaceHeader({ title, subtitle, onNavigate, identity }: { title: string; subtitle: string; onNavigate: Navigate; identity: Identity | null }) {
   const [menu, setMenu] = useState(false);
+  const [noticeOpen, setNoticeOpen] = useState(false);
+  const [notificationRows, setNotificationRows] = useState<NotificationData[]>([]);
+  const [notificationError, setNotificationError] = useState("");
   const roleNames: Record<Role, string> = {
     executive: "管理层",
     manager: "项目经理",
@@ -507,9 +529,69 @@ function WorkspaceHeader({ title, subtitle, onNavigate, identity }: { title: str
   const displayName = identity?.displayName || "登录用户";
   const roleName = identity ? roleNames[identity.role] : "身份加载中";
   const canGovern = identity?.role === "admin" || identity?.role === "pmo";
+  const unreadCount = notificationRows.filter(
+    (notification) => notification.status === "unread",
+  ).length;
+  const loadNotifications = useCallback(async () => {
+    if (!identity) return;
+    const response = await fetch("/api/notifications", { cache: "no-store" });
+    const result = (await response.json()) as {
+      notifications?: NotificationData[];
+      error?: string;
+    };
+    if (!response.ok) {
+      throw new Error(result.error || "通知读取失败");
+    }
+    setNotificationRows(result.notifications ?? []);
+    setNotificationError("");
+  }, [identity]);
+  useEffect(() => {
+    if (!identity) return;
+    const timer = window.setTimeout(() => {
+      loadNotifications().catch((error) =>
+        setNotificationError(
+          error instanceof Error ? error.message : "通知读取失败",
+        ),
+      );
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [identity, loadNotifications]);
+  async function openNotification(notification: NotificationData) {
+    if (notification.status === "unread") {
+      const response = await fetch(`/api/notifications/${notification.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ status: "read" }),
+      });
+      if (response.ok) {
+        setNotificationRows((rows) =>
+          rows.map((row) =>
+            row.id === notification.id ? { ...row, status: "read" } : row,
+          ),
+        );
+      }
+    }
+    setNoticeOpen(false);
+    onNavigate(notification.actionView, notification.projectId ?? undefined);
+  }
+  async function markAllNotificationsRead() {
+    const response = await fetch("/api/notifications", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ status: "read" }),
+    });
+    if (response.ok) {
+      setNotificationRows((rows) =>
+        rows.map((row) =>
+          row.status === "unread" ? { ...row, status: "read" } : row,
+        ),
+      );
+    }
+  }
   return <header className="workspace-header">
     <div><h1>{title}</h1><p>{subtitle}</p></div>
-    <div className="header-actions"><button className="icon-button" aria-label="搜索项目" onClick={() => onNavigate("portfolio")}>⌕</button>{canGovern && <button className="icon-button notice" aria-label="查看PMO待办" onClick={() => onNavigate("pmo")}>♢<i /></button>}<button className="user-button" onClick={() => setMenu(!menu)}><span className="avatar">{displayName[0]}</span><span><strong>{displayName}</strong><small>{roleName}</small></span><em>⌄</em></button></div>
+    <div className="header-actions"><button className="icon-button" aria-label="搜索项目" onClick={() => onNavigate("portfolio")}>⌕</button><button className="icon-button notice" aria-label={`通知${unreadCount ? `，${unreadCount}条未读` : ""}`} aria-expanded={noticeOpen} onClick={() => { setNoticeOpen((value) => !value); setMenu(false); if (!noticeOpen) void loadNotifications(); }}>♢{unreadCount > 0 && <b>{unreadCount > 9 ? "9+" : unreadCount}</b>}</button><button className="user-button" onClick={() => { setMenu(!menu); setNoticeOpen(false); }}><span className="avatar">{displayName[0]}</span><span><strong>{displayName}</strong><small>{roleName}</small></span><em>⌄</em></button></div>
+    {noticeOpen && <section className="notification-center"><div className="notification-head"><div><strong>通知中心</strong><span>{unreadCount} 条未读</span></div>{unreadCount > 0 && <button onClick={markAllNotificationsRead}>全部已读</button>}</div>{notificationError ? <div className="notification-error">! {notificationError}</div> : notificationRows.filter((row) => row.status !== "dismissed").length ? <div className="notification-list">{notificationRows.filter((row) => row.status !== "dismissed").slice(0, 20).map((notification) => <button className={`${notification.severity} ${notification.status}`} key={notification.id} onClick={() => openNotification(notification)}><span className="notification-symbol">{notification.severity === "critical" ? "■" : notification.severity === "warning" ? "▲" : "●"}</span><div><strong>{notification.title}</strong><p>{notification.message}</p><small>{notification.createdAt.replace("T"," ").slice(0,16)} · {notification.createdBy}</small></div>{notification.status === "unread" && <i />}</button>)}</div> : <div className="notification-empty">暂无通知</div>}<div className="notification-foot">{canGovern ? <button onClick={() => onNavigate("pmo")}>进入 PMO 待办</button> : <span>通知由 PMO 与系统工作流生成</span>}</div></section>}
     {menu && <div className="user-menu">{canGovern && <button onClick={() => onNavigate("admin")}>用户与权限</button>}<button onClick={() => onNavigate("portfolio")}>项目工作台</button><button onClick={() => onNavigate("cockpit")}>打开管理大屏</button></div>}
   </header>;
 }
@@ -1855,6 +1937,8 @@ function PmoPage({ onNavigate, onDataChanged, identity, projectData = projects }
   const [templateSaving, setTemplateSaving] = useState(false);
   const [templateMessage, setTemplateMessage] = useState("");
   const [reportRows, setReportRows] = useState<WeeklyReportRow[]>([]);
+  const [notificationWorking, setNotificationWorking] = useState("");
+  const [notificationMessage, setNotificationMessage] = useState("");
 
   useEffect(() => {
     fetch("/api/bootstrap")
@@ -2043,6 +2127,46 @@ function PmoPage({ onNavigate, onDataChanged, identity, projectData = projects }
     );
     setTemplateMessage("");
   }
+  async function sendNotifications(
+    projectIds: string[],
+    kind: "report_reminder" | "red_escalation",
+  ) {
+    if (!projectIds.length) return;
+    const operationKey = `${kind}:${projectIds.join(",")}`;
+    setNotificationWorking(operationKey);
+    setNotificationMessage("");
+    setOperationError("");
+    try {
+      const response = await fetch("/api/notifications/reminders", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          projectIds,
+          weekKey: reportingPeriod.weekKey,
+          kind,
+        }),
+      });
+      const result = (await response.json()) as {
+        error?: string;
+        sent?: number;
+        projects?: number;
+      };
+      if (!response.ok) {
+        throw new Error(result.error || "通知发送失败");
+      }
+      setNotificationMessage(
+        kind === "red_escalation"
+          ? `已升级 ${result.projects ?? projectIds.length} 个红色项目，生成 ${result.sent ?? 0} 条站内通知。`
+          : `已催报 ${result.projects ?? projectIds.length} 个项目，生成 ${result.sent ?? 0} 条站内通知。`,
+      );
+    } catch (error) {
+      setOperationError(
+        error instanceof Error ? error.message : "通知发送失败",
+      );
+    } finally {
+      setNotificationWorking("");
+    }
+  }
   async function exportSnapshot(snapshot: SnapshotRow) {
     setOperationError("");
     try {
@@ -2096,6 +2220,9 @@ function PmoPage({ onNavigate, onDataChanged, identity, projectData = projects }
   const missingProjects = projectData.filter(
     (project) => !submittedProjectIds.has(project.id),
   );
+  const redProjects = projectData.filter(
+    (project) => project.status === "red",
+  );
   const varianceReports = submittedReports.filter(
     (report) => Math.abs(report.variance) > 5,
   );
@@ -2140,12 +2267,13 @@ function PmoPage({ onNavigate, onDataChanged, identity, projectData = projects }
         </section>
         {showReopen && <section className="content-card reopen-panel"><div><h3>重新打开第{reportingPeriod.week}周快照</h3><p>重新打开后该周期允许修订，下一次锁定将生成不可覆盖的新版本。</p></div><textarea value={reopenReason} onChange={(event) => setReopenReason(event.target.value)} placeholder="请说明重新打开原因、修订范围及授权依据" /><div><button className="outline-button" onClick={() => setShowReopen(false)}>取消</button><button className="danger-outline" disabled={working || reopenReason.trim().length < 5} onClick={reopenSnapshot}>{working ? "正在处理…" : "确认重新打开"}</button></div></section>}
         {operationError && <div className="form-error" role="alert">! {operationError}</div>}
+        {notificationMessage && <div className="form-success">{notificationMessage}</div>}
         <div className="pmo-grid">
           <section className="content-card quality-panel"><div className="card-title"><div><h2>锁定前数据检查</h2><p>{reportingPeriod.weekKey} · 系统自动检查完整性、时效性与规则异常</p></div><span className="quality-score">{currentCompleteness}分</span></div>
             <div className="quality-items"><div className={missingProjectCount ? "warn" : "ok"}><span>{missingProjectCount ? "!" : "✓"}</span><div><strong>周报提交</strong><small>{submittedProjectCount} / {snapshotProjectCount} 已完成</small></div><b>{currentCompleteness}%</b></div><div className="ok"><span>✓</span><div><strong>关键字段完整性</strong><small>正式提交数据均已通过服务端必填校验</small></div><b>已校验</b></div><div className={missingProjectCount ? "warn" : "ok"}><span>{missingProjectCount ? "!" : "✓"}</span><div><strong>待补交项目</strong><small>{missingProjectCount}个项目尚未正式提交本周周报</small></div><b>{missingProjectCount} 项</b></div><div className={varianceReports.length ? "warn" : "ok"}><span>{varianceReports.length ? "!" : "✓"}</span><div><strong>申报偏差异常</strong><small>申报进度与计算值相差超过5pp</small></div><b>{varianceReports.length} 项</b></div></div>
           </section>
-          <section className="content-card"><div className="card-title"><div><h2>待处理事项</h2><p>由当前周报、差异校验和审批队列实时生成</p></div><span className="count-badge">{missingProjects.length + varianceReports.length + pendingChanges.length} 项</span></div>
-            <div className="todo-list">{missingProjects.slice(0, 2).map((project) => <div key={`missing-${project.id}`}><span className="todo-icon red">!</span><div><strong>{project.name}</strong><p>尚未提交第{reportingPeriod.week}周正式进度</p></div><button onClick={() => onNavigate("project", project.id)}>查看</button></div>)}{varianceReports.slice(0, 2).map((report) => { const project = projectData.find((item) => item.id === report.projectId); return <div key={`variance-${report.id}`}><span className="todo-icon yellow">▲</span><div><strong>{project?.name ?? report.projectId}</strong><p>申报进度与计算值相差 {Math.abs(report.variance).toFixed(1)}pp</p></div><button onClick={() => onNavigate("project", report.projectId)}>核验</button></div>; })}{pendingChanges.slice(0, 2).map((change) => <div key={`change-${change.id}`}><span className="todo-icon blue">≋</span><div><strong>{projectData.find((project) => project.id === change.projectId)?.name ?? change.projectId}</strong><p>基线变更 V{change.versionFrom} → V{change.versionTo} 待审批</p></div><button onClick={() => { setChangeId(change.id); setTab("基线变更"); }}>审批</button></div>)}{missingProjects.length + varianceReports.length + pendingChanges.length === 0 && <div className="todo-empty"><span className="todo-icon blue">✓</span><div><strong>当前没有待处理事项</strong><p>本周数据已达到锁定前检查要求</p></div></div>}</div>
+          <section className="content-card"><div className="card-title"><div><h2>待处理事项</h2><p>由当前周报、红灯状态、差异校验和审批队列实时生成</p></div><div className="todo-batch-actions">{missingProjects.length > 0 && <button disabled={Boolean(notificationWorking)} onClick={() => sendNotifications(missingProjects.map((project) => project.id), "report_reminder")}>{notificationWorking.startsWith("report_reminder:") ? "催报中…" : `催报缺报 ${missingProjects.length} 项`}</button>}{redProjects.length > 0 && <button className="red" disabled={Boolean(notificationWorking)} onClick={() => sendNotifications(redProjects.map((project) => project.id), "red_escalation")}>{notificationWorking.startsWith("red_escalation:") ? "升级中…" : `升级红灯 ${redProjects.length} 项`}</button>}<span className="count-badge">{missingProjects.length + redProjects.length + varianceReports.length + pendingChanges.length} 项</span></div></div>
+            <div className="todo-list">{missingProjects.slice(0, 2).map((project) => <div key={`missing-${project.id}`}><span className="todo-icon red">!</span><div><strong>{project.name}</strong><p>尚未提交第{reportingPeriod.week}周正式进度</p></div><button disabled={Boolean(notificationWorking)} onClick={() => sendNotifications([project.id], "report_reminder")}>催报</button></div>)}{redProjects.slice(0, 2).map((project) => <div key={`red-${project.id}`}><span className="todo-icon red">■</span><div><strong>{project.name}</strong><p>项目综合状态红色，需升级至管理与治理角色</p></div><button disabled={Boolean(notificationWorking)} onClick={() => sendNotifications([project.id], "red_escalation")}>升级</button></div>)}{varianceReports.slice(0, 2).map((report) => { const project = projectData.find((item) => item.id === report.projectId); return <div key={`variance-${report.id}`}><span className="todo-icon yellow">▲</span><div><strong>{project?.name ?? report.projectId}</strong><p>申报进度与计算值相差 {Math.abs(report.variance).toFixed(1)}pp</p></div><button onClick={() => onNavigate("project", report.projectId)}>核验</button></div>; })}{pendingChanges.slice(0, 2).map((change) => <div key={`change-${change.id}`}><span className="todo-icon blue">≋</span><div><strong>{projectData.find((project) => project.id === change.projectId)?.name ?? change.projectId}</strong><p>基线变更 V{change.versionFrom} → V{change.versionTo} 待审批</p></div><button onClick={() => { setChangeId(change.id); setTab("基线变更"); }}>审批</button></div>)}{missingProjects.length + redProjects.length + varianceReports.length + pendingChanges.length === 0 && <div className="todo-empty"><span className="todo-icon blue">✓</span><div><strong>当前没有待处理事项</strong><p>本周数据已达到锁定前检查要求</p></div></div>}</div>
           </section>
         </div>
         <section className="content-card history-card"><div className="card-title"><div><h2>历史快照</h2><p>已锁定版本不可覆盖，导出文件包含当时的完整项目与节点数据</p></div><button className="outline-button" disabled={!snapshotRows.length} onClick={() => snapshotRows[0] && exportSnapshot(snapshotRows[0])}>导出最新快照</button></div>

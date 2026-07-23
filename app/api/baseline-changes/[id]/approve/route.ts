@@ -5,6 +5,7 @@ import {
   baselineChanges,
   baselineVersions,
   milestones,
+  notifications,
   projects,
 } from "@/db/schema";
 import { apiError } from "@/lib/api-utils";
@@ -196,6 +197,20 @@ export async function POST(
         versionTo: change.versionTo,
       }),
     });
+    await db
+      .insert(notifications)
+      .values({
+        recipientEmail: change.requestedBy,
+        projectId: change.projectId,
+        type: "baseline_decision",
+        severity: "info",
+        title: `基线变更已批准：${change.projectId}`,
+        message: `基线变更申请已批准，当前批准基线已更新为 V${change.versionTo}。`,
+        actionView: "project",
+        referenceKey: `approved:${changeId}`,
+        createdBy: identity.email,
+      })
+      .onConflictDoNothing();
     const health = await recalculateProjectHealth(change.projectId);
 
     return Response.json({

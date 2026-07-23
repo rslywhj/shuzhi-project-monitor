@@ -205,3 +205,39 @@ test("persists the twelve-node standard template and project-level milestone gov
   assert.match(css, /--milestone-count/);
   assert.match(migration, /CREATE TABLE `milestone_templates`/);
 });
+
+test("supports dynamic weekly drafts, immutable baselines and real project activity", async () => {
+  const [schema, migration, reportRoute, activityRoute, snapshotRoute, health, trends, page] =
+    await Promise.all([
+      readFile(new URL("db/schema.ts", templateRoot), "utf8"),
+      readFile(new URL("drizzle/0005_lethal_ogun.sql", templateRoot), "utf8"),
+      readFile(
+        new URL("app/api/projects/[id]/weekly-reports/route.ts", templateRoot),
+        "utf8",
+      ),
+      readFile(
+        new URL("app/api/projects/[id]/activity/route.ts", templateRoot),
+        "utf8",
+      ),
+      readFile(new URL("app/api/snapshots/lock/route.ts", templateRoot), "utf8"),
+      readFile(new URL("lib/health.ts", templateRoot), "utf8"),
+      readFile(new URL("app/api/dashboard/trends/route.ts", templateRoot), "utf8"),
+      readFile(new URL("app/page.tsx", templateRoot), "utf8"),
+    ]);
+
+  assert.match(schema, /export const baselineVersions/);
+  assert.match(schema, /draftJson/);
+  assert.match(migration, /CREATE TABLE `baseline_versions`/);
+  assert.match(migration, /ALTER TABLE `weekly_reports` ADD `draft_json`/);
+  assert.match(reportRoute, /weekly_report\.save_draft/);
+  assert.match(reportRoute, /submitMode === "draft"/);
+  assert.match(activityRoute, /baselineVersions/);
+  assert.match(activityRoute, /auditLogs/);
+  assert.match(snapshotRoute, /ne\(weeklyReports\.status, "draft"\)/);
+  assert.match(health, /ne\(weeklyReports\.status, "draft"\)/);
+  assert.match(trends, /\.slice\(0, 12\)/);
+  assert.match(page, /已自动切换到下一填报周期/);
+  assert.match(page, /已恢复本周服务器草稿/);
+  assert.match(page, /暂无已锁定周度快照/);
+  assert.match(page, /ProjectActivityPanel/);
+});

@@ -2,11 +2,72 @@ import { and, count, eq, isNull } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   baselineChanges,
+  baselineVersions,
   milestoneTemplates,
   milestones,
   projects,
   ruleConfigs,
 } from "@/db/schema";
+
+async function ensureBaselineVersionRows(db: ReturnType<typeof getDb>) {
+  const [projectRows, versionRows] = await Promise.all([
+    db.select().from(projects),
+    db
+      .select({
+        projectId: baselineVersions.projectId,
+        version: baselineVersions.version,
+      })
+      .from(baselineVersions),
+  ]);
+  const existingKeys = new Set(
+    versionRows.map((row) => `${row.projectId}:${row.version}`),
+  );
+  const projectsWithMissingVersions = projectRows.filter(
+    (project) =>
+      !existingKeys.has(`${project.id}:1`) ||
+      !existingKeys.has(`${project.id}:${project.currentBaselineVersion}`),
+  );
+  if (!projectsWithMissingVersions.length) return;
+  const milestoneRows = await db.select().from(milestones);
+  for (const project of projectsWithMissingVersions) {
+    const projectMilestones = milestoneRows
+      .filter((milestone) => milestone.projectId === project.id)
+      .sort((left, right) => left.sequence - right.sequence)
+      .map((milestone) => ({
+        milestoneId: milestone.id,
+        templateId: milestone.templateId,
+        name: milestone.name,
+        sequence: milestone.sequence,
+        plannedStart: milestone.plannedStart,
+        plannedFinish: milestone.plannedFinish,
+        weight: milestone.weight,
+        critical: milestone.critical,
+        applicable: milestone.applicable,
+      }));
+    const versions =
+      project.currentBaselineVersion === 1
+        ? [1]
+        : [1, project.currentBaselineVersion];
+    for (const version of versions) {
+      const key = `${project.id}:${version}`;
+      if (existingKeys.has(key)) continue;
+      await db
+        .insert(baselineVersions)
+        .values({
+          projectId: project.id,
+          version,
+          kind:
+            project.currentBaselineVersion === 1
+              ? "original"
+              : "legacy",
+          milestoneJson: JSON.stringify(projectMilestones),
+          createdBy: "system",
+        })
+        .onConflictDoNothing();
+      existingKeys.add(key);
+    }
+  }
+}
 
 const standardMilestoneTemplates = [
   ["M01", "立项启动", 5, false, "完成项目立项、组织与治理机制确认"],
@@ -93,7 +154,10 @@ export async function ensureSeeded() {
     }
   }
   const [{ value }] = await db.select({ value: count() }).from(projects);
-  if (value > 0) return;
+  if (value > 0) {
+    await ensureBaselineVersionRows(db);
+    return;
+  }
 
   const projectRows = seedProjects.map((p) => ({
         id: p[0],
@@ -172,4 +236,5 @@ export async function ensureSeeded() {
     impact: "较原始基线累计延期23天；不影响年度总体目标；项目成本预计增加3.2%。",
     requestedBy: "p02@projects.internal",
   }).onConflictDoNothing();
+  await ensureBaselineVersionRows(db);
 }

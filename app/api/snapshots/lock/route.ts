@@ -1,4 +1,4 @@
-import { count, desc, eq } from "drizzle-orm";
+import { and, count, desc, eq, ne } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   auditLogs,
@@ -44,7 +44,12 @@ export async function POST(request: Request) {
         db
           .select({ value: count() })
           .from(weeklyReports)
-          .where(eq(weeklyReports.weekKey, weekKey)),
+          .where(
+            and(
+              eq(weeklyReports.weekKey, weekKey),
+              ne(weeklyReports.status, "draft"),
+            ),
+          ),
         db
           .select()
           .from(snapshots)

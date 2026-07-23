@@ -90,17 +90,151 @@ type DashboardSnapshot = {
   completeness: number;
   lockedAt: string;
 };
+type TrendPoint = {
+  weekKey: string;
+  version: number;
+  green: number;
+  yellow: number;
+  red: number;
+  planProgress: number;
+  actualProgress: number;
+  completeness: number;
+};
+type WeeklyReportRow = {
+  id: number;
+  projectId: string;
+  weekKey: string;
+  systemProgress: number;
+  declaredProgress: number;
+  variance: number;
+  reason: string;
+  forecastFinish: string | null;
+  status: "draft" | "submitted" | "locked";
+  submittedBy: string;
+  submittedAt: string;
+  draft?: WeeklyReportDraft | null;
+};
+type WeeklyReportDraft = {
+  submitMode?: "draft" | "submitted";
+  weekKey?: string;
+  declaredProgress?: number;
+  reason?: string;
+  forecastFinish?: string;
+  milestone?: {
+    sequence?: number;
+    completion?: number;
+    forecastFinish?: string;
+    actualFinish?: string;
+  };
+  action?: {
+    name?: string;
+    owner?: string;
+    recoveryDate?: string;
+    detail?: string;
+  };
+};
+type BaselineMilestone = {
+  milestoneId?: number;
+  templateId?: number | null;
+  name: string;
+  sequence: number;
+  plannedStart: string;
+  plannedFinish: string;
+  weight: number;
+  critical: boolean;
+  applicable: boolean;
+};
+type BaselineVersionRow = {
+  id: number;
+  projectId: string;
+  version: number;
+  kind: "original" | "approved" | "legacy";
+  changeId: number | null;
+  createdBy: string;
+  createdAt: string;
+  milestones: BaselineMilestone[] | null;
+};
+type BaselineChangeRow = {
+  id: number;
+  versionFrom: number;
+  versionTo: number;
+  reason: string;
+  impact: string;
+  status: "pending" | "approved" | "rejected";
+  requestedBy: string;
+  requestedAt: string;
+  approvedBy: string | null;
+  approvedAt: string | null;
+  rejectedBy: string | null;
+  rejectedAt: string | null;
+  rejectionReason: string;
+  changes: Array<{
+    milestone?: string;
+    milestoneId?: number;
+    from?: string;
+    to?: string;
+    days?: number;
+  }> | null;
+};
+type ProjectAuditRow = {
+  id: number;
+  actorEmail: string;
+  action: string;
+  entityType: string;
+  entityId: string;
+  createdAt: string;
+  detail: unknown;
+};
+type ProjectActivityData = {
+  weeklyReports: WeeklyReportRow[];
+  baselineVersions: BaselineVersionRow[];
+  baselineChanges: BaselineChangeRow[];
+  auditLogs: ProjectAuditRow[];
+};
 
 const statusLabel: Record<Status, string> = { green: "正常", yellow: "预警", red: "严重", na: "不适用" };
 const statusSymbol: Record<Status, string> = { green: "●", yellow: "▲", red: "■", na: "—" };
-const trend = [
-  { w: "W17", g: 29, y: 10, r: 5 }, { w: "W18", g: 30, y: 9, r: 5 },
-  { w: "W19", g: 31, y: 9, r: 4 }, { w: "W20", g: 30, y: 10, r: 4 },
-  { w: "W21", g: 32, y: 8, r: 4 }, { w: "W22", g: 31, y: 8, r: 5 },
-  { w: "W23", g: 33, y: 7, r: 4 }, { w: "W24", g: 32, y: 8, r: 4 },
-  { w: "W25", g: 31, y: 9, r: 4 }, { w: "W26", g: 32, y: 8, r: 4 },
-  { w: "W27", g: 33, y: 7, r: 4 }, { w: "W28", g: 31, y: 8, r: 5 },
-];
+
+function shanghaiDateParts(value = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(value);
+  const get = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((part) => part.type === type)?.value ?? 0);
+  return { year: get("year"), month: get("month"), day: get("day") };
+}
+
+function currentReportingPeriod(offsetDays = 0) {
+  const parts = shanghaiDateParts();
+  const date = new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
+  date.setUTCDate(date.getUTCDate() + offsetDays);
+  const day = date.getUTCDay() || 7;
+  const thursday = new Date(date);
+  thursday.setUTCDate(date.getUTCDate() + 4 - day);
+  const isoYear = thursday.getUTCFullYear();
+  const yearStart = new Date(Date.UTC(isoYear, 0, 1));
+  const week = Math.ceil(
+    ((thursday.getTime() - yearStart.getTime()) / 86_400_000 + 1) / 7,
+  );
+  const friday = new Date(date);
+  friday.setUTCDate(date.getUTCDate() + (5 - day));
+  return {
+    weekKey: `${isoYear}-W${String(week).padStart(2, "0")}`,
+    year: isoYear,
+    week,
+    fridayLabel: `${String(friday.getUTCMonth() + 1).padStart(2, "0")}月${String(friday.getUTCDate()).padStart(2, "0")}日`,
+  };
+}
+
+function daysBetween(from: string, to: string) {
+  return Math.round(
+    (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) /
+      86_400_000,
+  );
+}
 
 function Icon({ children }: { children: React.ReactNode }) {
   return <span className="icon" aria-hidden="true">{children}</span>;
@@ -125,7 +259,7 @@ function AppLogo({ dark = false }: { dark?: boolean }) {
   </div>;
 }
 
-function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = defaultTemplateData }: { onNavigate: Navigate; projectData?: ProjectData[]; snapshot: DashboardSnapshot | null; templateData?: TemplateData[] }) {
+function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = defaultTemplateData, trends = [] }: { onNavigate: Navigate; projectData?: ProjectData[]; snapshot: DashboardSnapshot | null; templateData?: TemplateData[]; trends?: TrendPoint[] }) {
   const [org, setOrg] = useState("全部组织");
   const [health, setHealth] = useState("全部状态");
   const [page, setPage] = useState(0);
@@ -163,6 +297,44 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
   const snapshotTime = snapshot?.lockedAt
     ? snapshot.lockedAt.replace("T", " ").slice(5, 16)
     : "等待 PMO 锁定";
+  const attentionProjects = [...projectData]
+    .filter((project) => project.status === "red" || project.status === "yellow")
+    .sort((left, right) => left.score - right.score)
+    .slice(0, 3);
+  const todayParts = shanghaiDateParts();
+  const today = `${todayParts.year}-${String(todayParts.month).padStart(2, "0")}-${String(todayParts.day).padStart(2, "0")}`;
+  const nextWeek = new Date(`${today}T00:00:00Z`);
+  nextWeek.setUTCDate(nextWeek.getUTCDate() + 7);
+  const nextWeekDate = nextWeek.toISOString().slice(0, 10);
+  const upcomingMilestones = projectData
+    .flatMap((project) =>
+      (project.milestones ?? [])
+        .filter(
+          (milestone) =>
+            milestone.applicable &&
+            milestone.completion < 100 &&
+            milestone.plannedFinish >= today &&
+            milestone.plannedFinish <= nextWeekDate,
+        )
+        .map((milestone) => ({ project, milestone })),
+    )
+    .sort((left, right) =>
+      left.milestone.plannedFinish.localeCompare(right.milestone.plannedFinish),
+    )
+    .slice(0, 3);
+  const firstTrend = trends[0];
+  const latestTrend = trends.at(-1);
+  const greenShareChange =
+    firstTrend && latestTrend
+      ? ((latestTrend.green / Math.max(1, latestTrend.green + latestTrend.yellow + latestTrend.red)) -
+          (firstTrend.green / Math.max(1, firstTrend.green + firstTrend.yellow + firstTrend.red))) *
+        100
+      : null;
+  const selectedMilestone = selected
+    ? selected.project.milestones?.find(
+        (milestone) => milestone.name === matrixMilestones[selected.index],
+      )
+    : undefined;
 
   useEffect(() => {
     if (pageCount <= 1) return;
@@ -188,9 +360,9 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
     </header>
 
     <section className="metric-grid">
-      <div className="metric-card total"><span>统建项目总数</span><strong>{total}</strong><small>本周新增 2 个</small></div>
+      <div className="metric-card total"><span>统建项目总数</span><strong>{total}</strong><small>统一节点口径监控</small></div>
       <div className="metric-card green"><span>绿色 · 正常</span><strong>{green}</strong><small>{total ? ((green / total) * 100).toFixed(1) : "0.0"}% 项目受控</small></div>
-      <div className="metric-card yellow"><span>黄色 · 预警</span><strong>{yellow}</strong><small>较上周 +1</small></div>
+      <div className="metric-card yellow"><span>黄色 · 预警</span><strong>{yellow}</strong><small>需提前干预</small></div>
       <div className="metric-card red"><span>红色 · 严重</span><strong>{red}</strong><small>需管理层关注</small></div>
       <div className="metric-card progress"><span>组合总体进度</span><div className="metric-progress"><strong>{actualProgress.toFixed(1)}%</strong><em>计划 {planProgress.toFixed(1)}%</em></div><ProgressBar value={actualProgress} /><small className={progressGap < 0 ? "negative" : "positive"}>{progressGap < 0 ? "落后" : "领先"}计划 {Math.abs(progressGap).toFixed(1)} 个百分点</small></div>
       <div className="metric-card quality"><span>周报完成率</span><strong>{snapshot?.completeness ?? 0}%</strong><small>当前锁定快照口径</small></div>
@@ -221,11 +393,13 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
             <button className="project-cell" onClick={() => onNavigate("project", p.id)}>
               <StatusPill status={p.status} compact /><span><strong>{p.name}</strong><small>{p.owner} · {p.org}</small></span><b>{p.score}</b>
             </button>
-            {p.cells.map((status, index) => {
-              const day = status === "red" ? (index + 3) : status === "yellow" ? (index + 1) : 0;
-              return <button key={index} className={`heat-cell ${status}`} onClick={() => setSelected({ project: p, index })} aria-label={`${p.name} ${milestones[index]} ${statusLabel[status]}`}>
+            {matrixMilestones.map((milestoneName, index) => {
+              const status = p.cells[index] ?? "na";
+              const milestone = p.milestones?.find((row) => row.name === milestoneName);
+              const deviation = milestone?.deviationDays ?? 0;
+              return <button key={`${milestoneName}-${index}`} className={`heat-cell ${status}`} onClick={() => setSelected({ project: p, index })} aria-label={`${p.name} ${milestoneName} ${statusLabel[status]}`}>
                 <span className="cell-symbol">{statusSymbol[status]}</span>
-                <small>{status === "na" ? "N/A" : status === "green" ? `${Math.min(100, 28 + index * 14)}%` : `+${day}天`}</small>
+                <small>{status === "na" ? "N/A" : deviation > 0 ? `+${deviation}天` : `${milestone?.completion ?? 0}%`}</small>
               </button>;
             })}
           </div>)}
@@ -235,22 +409,32 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
 
       <aside className="attention-panel">
         <div className="attention-head"><div><span className="section-index">02</span><h2>重点关注</h2></div><button>查看全部</button></div>
-        <div className="alert-card primary">
-          <div className="rank">01</div><div><StatusPill status="red" /><h3>智慧采购平台</h3><p>开发完成节点预计延期 12 天</p><span>责任人 李程 · 恢复目标 07/28</span></div><b>-15%</b>
-        </div>
-        <div className="alert-card"><div className="rank">02</div><div><h3>财务共享中心二期</h3><p>联调测试连续两周未达预期</p><span>高风险 2项 · 措施逾期 1项</span></div><b>-15%</b></div>
-        <div className="alert-card"><div className="rank">03</div><div><h3>统一门户升级项目</h3><p>用户验收关键节点延期 6 天</p><span>责任人 高远 · 待管理决策</span></div><b>-13%</b></div>
+        {attentionProjects.length ? attentionProjects.map((project, index) => {
+          const issue = [...(project.milestones ?? [])]
+            .filter((milestone) => milestone.applicable)
+            .sort((left, right) => {
+              const rank = { red: 3, yellow: 2, green: 1, na: 0 };
+              return rank[right.status] - rank[left.status] || right.deviationDays - left.deviationDays;
+            })[0];
+          return <button className={`alert-card ${index === 0 ? "primary" : ""}`} key={project.id} onClick={() => onNavigate("project", project.id)}>
+            <div className="rank">{String(index + 1).padStart(2, "0")}</div><div><StatusPill status={project.status} /><h3>{project.name}</h3><p>{issue ? `${issue.name}${issue.deviationDays > 0 ? `预计延期 ${issue.deviationDays} 天` : "需要重点关注"}` : "综合健康度触发预警"}</p><span>责任人 {project.owner} · 风险 {project.risk}</span></div><b>{project.actual - project.plan > 0 ? "+" : ""}{(project.actual - project.plan).toFixed(1)}pp</b>
+          </button>;
+        }) : <div className="dark-empty-state">当前无红黄项目</div>}
         <div className="upcoming">
           <h3><Icon>◷</Icon> 未来7日关键节点</h3>
-          <ul><li><span>07/24</span><b>合同管理 · 方案评审</b><em>3天</em></li><li><span>07/26</span><b>主数据治理 · 用户验收</b><em>5天</em></li><li><span>07/28</span><b>司库系统 · 上线切换</b><em>7天</em></li></ul>
+          {upcomingMilestones.length ? <ul>{upcomingMilestones.map(({ project, milestone }) => <li key={`${project.id}-${milestone.id}`}><span>{milestone.plannedFinish.slice(5).replace("-", "/")}</span><b>{project.name} · {milestone.name}</b><em>{daysBetween(today, milestone.plannedFinish)}天</em></li>)}</ul> : <div className="dark-empty-inline">未来7日无到期节点</div>}
         </div>
       </aside>
     </section>
 
     <section className="trend-section">
       <div className="trend-card">
-        <div className="mini-head"><div><span className="section-index">03</span><h2>近12周健康趋势</h2></div><span className="trend-up">↗ 绿色项目占比提升 4.6%</span></div>
-        <div className="stacked-chart">{trend.map(t => <div className="week" key={t.w}><div className="bar" title={`${t.w}: 绿${t.g} 黄${t.y} 红${t.r}`}><i className="red" style={{height:`${t.r*3}px`}}/><i className="yellow" style={{height:`${t.y*3}px`}}/><i className="green" style={{height:`${t.g*2}px`}}/></div><small>{t.w}</small></div>)}</div>
+        <div className="mini-head"><div><span className="section-index">03</span><h2>近12周健康趋势</h2></div>{greenShareChange !== null && <span className={greenShareChange >= 0 ? "trend-up" : "trend-down"}>{greenShareChange >= 0 ? "↗" : "↘"} 绿色项目占比{greenShareChange >= 0 ? "提升" : "下降"} {Math.abs(greenShareChange).toFixed(1)}%</span>}</div>
+        {trends.length ? <div className="stacked-chart">{trends.map((point) => {
+          const maxCount = Math.max(1, ...trends.map((row) => row.green + row.yellow + row.red));
+          const unit = 68 / maxCount;
+          return <div className="week" key={point.weekKey}><div className="bar" title={`${point.weekKey}: 绿${point.green} 黄${point.yellow} 红${point.red}`}><i className="red" style={{height:`${point.red * unit}px`}}/><i className="yellow" style={{height:`${point.yellow * unit}px`}}/><i className="green" style={{height:`${point.green * unit}px`}}/></div><small>{point.weekKey.slice(-3)}</small></div>;
+        })}</div> : <div className="dark-empty-state trend-empty">暂无已锁定周度快照，锁定后将生成趋势</div>}
       </div>
       <div className="variance-card">
         <div className="mini-head"><div><span className="section-index">04</span><h2>计划 / 实际进度</h2></div><span>组合口径</span></div>
@@ -264,10 +448,9 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
         <button className="drawer-close" onClick={() => setSelected(null)} aria-label="关闭">×</button>
         <span className="drawer-kicker">节点运行详情</span>
         <h2>{selected.project.name}</h2><p>{matrixMilestones[selected.index]} · 第 {selected.index + 1} 阶段</p>
-        <div className="drawer-status"><StatusPill status={selected.project.cells[selected.index]} /><strong>{selected.project.cells[selected.index] === "red" ? "预计延期 12 天" : selected.project.cells[selected.index] === "yellow" ? "预计延期 4 天" : "按计划推进"}</strong></div>
-        <div className="drawer-grid"><div><small>计划完成</small><strong>2026-07-16</strong></div><div><small>预测完成</small><strong>2026-07-28</strong></div><div><small>节点权重</small><strong>20%</strong></div><div><small>当前完成度</small><strong>68%</strong></div></div>
-        <div className="cause-card"><span>偏差归因</span><p>核心供应商接口规范确认晚于计划，影响开发联调窗口；已安排专项工作组并行处理。</p></div>
-        <div className="action-card"><div><span>纠偏措施</span><StatusPill status="yellow" /></div><h3>接口联调专项攻坚</h3><p>责任人：李程　·　恢复目标：07月28日</p><ProgressBar value={60} tone="yellow" /></div>
+        <div className="drawer-status"><StatusPill status={selected.project.cells[selected.index] ?? "na"} /><strong>{selectedMilestone?.deviationDays ? `${selectedMilestone.deviationDays > 0 ? "延期" : "提前"} ${Math.abs(selectedMilestone.deviationDays)} 天` : selectedMilestone ? "按计划推进" : "该节点不适用"}</strong></div>
+        <div className="drawer-grid"><div><small>计划完成</small><strong>{selectedMilestone?.plannedFinish ?? "—"}</strong></div><div><small>预测 / 实际</small><strong>{selectedMilestone?.actualFinish ?? selectedMilestone?.forecastFinish ?? "未填报"}</strong></div><div><small>节点权重</small><strong>{selectedMilestone?.applicable ? `${selectedMilestone.weight}%` : "N/A"}</strong></div><div><small>当前完成度</small><strong>{selectedMilestone?.applicable ? `${selectedMilestone.completion}%` : "N/A"}</strong></div></div>
+        <div className="cause-card"><span>偏差归因</span><p>{selectedMilestone?.reason || (selectedMilestone ? "当前暂无偏差说明。" : "项目未启用该标准节点。")}</p></div>
         <button className="drawer-primary" onClick={() => onNavigate("project", selected.project.id)}>进入项目详情 <span>→</span></button>
       </aside>
     </div>}
@@ -397,7 +580,7 @@ function Portfolio({ onNavigate, onDataChanged, projectData = projects, identity
             <button className="project-name" onClick={() => onNavigate("project", p.id)}><i>{p.id}</i><span><strong>{p.name}</strong><small>{p.org} · {p.type}</small></span></button>
             <span><StatusPill status={p.status} /></span><span className="owner"><i>{p.owner[0]}</i>{p.owner}</span>
             <span className="dual-progress"><b>{p.actual}%</b><ProgressBar value={p.actual} tone={p.status} /><small>计划 {p.plan}%</small></span>
-            <span className={p.actual - p.plan < -5 ? "negative" : "positive"}>{p.actual - p.plan > 0 ? "+" : ""}{p.actual - p.plan} pp</span>
+            <span className={p.actual - p.plan < -5 ? "negative" : "positive"}>{p.actual - p.plan > 0 ? "+" : ""}{(p.actual - p.plan).toFixed(1)} pp</span>
             <span className={`risk ${p.risk === "高" ? "high" : p.risk === "中" ? "medium" : "low"}`}>{p.risk}风险</span><span>{p.updatedAt ? p.updatedAt.replace("T", " ").slice(5, 16) : "演示数据"}</span><button className="more" aria-label="更多">•••</button>
           </div>)}
         </div>
@@ -606,6 +789,151 @@ function RiskActionPanel({ projectId, canEdit, onDataChanged }: { projectId: str
   </section>;
 }
 
+function ProjectActivityPanel({
+  projectId,
+  tab,
+}: {
+  projectId: string;
+  tab: "周报记录" | "基线版本" | "操作审计";
+}) {
+  const [data, setData] = useState<ProjectActivityData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [expandedVersion, setExpandedVersion] = useState<number | null>(null);
+
+  const loadActivity = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch(
+        `/api/projects/${encodeURIComponent(projectId)}/activity`,
+        { cache: "no-store" },
+      );
+      const result = (await response.json()) as ProjectActivityData & {
+        error?: string;
+      };
+      if (!response.ok) throw new Error(result.error || "项目活动数据读取失败");
+      setData(result);
+    } catch (activityError) {
+      setError(
+        activityError instanceof Error
+          ? activityError.message
+          : "项目活动数据读取失败",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void loadActivity(), 0);
+    return () => window.clearTimeout(timer);
+  }, [loadActivity]);
+
+  if (loading) {
+    return <section className="content-card"><div className="panel-loading">正在读取{tab}…</div></section>;
+  }
+  if (error || !data) {
+    return <section className="content-card activity-error"><div className="form-error" role="alert">! {error || "项目活动数据不可用"}</div><button className="outline-button" onClick={loadActivity}>重新加载</button></section>;
+  }
+
+  if (tab === "周报记录") {
+    const reportStatus = {
+      draft: "草稿",
+      submitted: "已提交",
+      locked: "已锁定",
+    };
+    return <section className="content-card activity-card">
+      <div className="card-title"><div><h2>周报记录</h2><p>系统计算值、经理申报值和差异说明均永久留痕</p></div><button className="text-button" onClick={loadActivity}>刷新</button></div>
+      {data.weeklyReports.length ? <div className="weekly-history-table">
+        <div className="table-head"><span>周期</span><span>系统进度</span><span>申报进度</span><span>差异</span><span>状态</span><span>提交人</span><span>更新时间</span></div>
+        {data.weeklyReports.map((report) => <article className="table-row" key={report.id}>
+          <span><strong>{report.weekKey}</strong><small>{report.forecastFinish ? `预测完成 ${report.forecastFinish}` : "未填项目预测日"}</small></span>
+          <span>{report.systemProgress.toFixed(1)}%</span>
+          <span>{report.declaredProgress.toFixed(1)}%</span>
+          <span className={Math.abs(report.variance) > 5 ? "red-text" : ""}>{report.variance > 0 ? "+" : ""}{report.variance.toFixed(1)}pp</span>
+          <span className={`report-status ${report.status}`}>{reportStatus[report.status]}</span>
+          <span>{report.submittedBy}</span>
+          <time>{report.submittedAt.replace("T", " ").slice(0, 16)}</time>
+          {report.reason && <p>{report.reason}</p>}
+        </article>)}
+      </div> : <div className="empty-state">暂无周报记录</div>}
+    </section>;
+  }
+
+  if (tab === "基线版本") {
+    const original =
+      data.baselineVersions.find((row) => row.version === 1) ??
+      data.baselineVersions.at(-1);
+    const originalById = new Map(
+      (original?.milestones ?? [])
+        .filter((milestone) => milestone.milestoneId !== undefined)
+        .map((milestone) => [milestone.milestoneId!, milestone]),
+    );
+    const originalByName = new Map(
+      (original?.milestones ?? []).map((milestone) => [
+        milestone.name,
+        milestone,
+      ]),
+    );
+    const originalFor = (milestone: BaselineMilestone) =>
+      (milestone.milestoneId !== undefined
+        ? originalById.get(milestone.milestoneId)
+        : undefined) ?? originalByName.get(milestone.name);
+    const kindNames = {
+      original: "原始基线",
+      approved: "批准基线",
+      legacy: "历史迁移",
+    };
+    return <section className="content-card activity-card">
+      <div className="card-title"><div><h2>基线版本</h2><p>V1 原始基线不可覆盖，批准调整生成新版本</p></div><span className="count-badge">{data.baselineVersions.length} 个版本</span></div>
+      {data.baselineVersions.length ? <div className="baseline-version-list">{data.baselineVersions.map((version) => {
+        const milestonesForVersion = version.milestones ?? [];
+        const changedCount = milestonesForVersion.filter((milestone) => {
+          const base = originalFor(milestone);
+          return base && base.plannedFinish !== milestone.plannedFinish;
+        }).length;
+        return <article className="baseline-version" key={version.id}>
+          <button className="baseline-version-head" onClick={() => setExpandedVersion(expandedVersion === version.version ? null : version.version)}>
+            <span className={`version-badge ${version.kind}`}>V{version.version}</span>
+            <span><strong>{kindNames[version.kind]}</strong><small>{version.createdBy} · {version.createdAt.replace("T", " ").slice(0, 16)}</small></span>
+            <span>{version.version === 1 ? "冻结的原始计划" : `相对原始基线变更 ${changedCount} 个节点`}</span>
+            <em>{expandedVersion === version.version ? "⌃" : "⌄"}</em>
+          </button>
+          {expandedVersion === version.version && <div className="baseline-node-table">
+            <div className="table-head"><span>节点</span><span>计划开始</span><span>计划完成</span><span>相对 V1</span><span>权重</span></div>
+            {milestonesForVersion.map((milestone) => {
+              const base = originalFor(milestone);
+              const delta = base ? daysBetween(base.plannedFinish, milestone.plannedFinish) : 0;
+              return <div className="table-row" key={`${version.id}-${milestone.milestoneId ?? milestone.name}`}><span>{milestone.sequence}. {milestone.name}{milestone.critical ? " ◆" : ""}</span><span>{milestone.plannedStart}</span><span>{milestone.plannedFinish}</span><span className={delta > 0 ? "red-text" : delta < 0 ? "green-text" : ""}>{delta === 0 ? "未变化" : `${delta > 0 ? "+" : ""}${delta}天`}</span><span>{milestone.applicable ? `${milestone.weight}%` : "不适用"}</span></div>;
+            })}
+          </div>}
+        </article>;
+      })}</div> : <div className="empty-state">暂无基线版本</div>}
+      {data.baselineChanges.length > 0 && <div className="baseline-change-history"><h3>变更申请记录</h3>{data.baselineChanges.map((change) => <div key={change.id}><span className={`change-status ${change.status}`}>{change.status === "pending" ? "待审批" : change.status === "approved" ? "已批准" : "已驳回"}</span><strong>V{change.versionFrom} → V{change.versionTo}</strong><p>{change.reason}</p><small>{change.requestedBy} · {change.requestedAt.replace("T", " ").slice(0, 16)}</small></div>)}</div>}
+    </section>;
+  }
+
+  const actionNames: Record<string, string> = {
+    "weekly_report.save_draft": "保存周报草稿",
+    "weekly_report.submit": "提交周报",
+    "baseline_change.request": "申请基线变更",
+    "baseline_change.approve": "批准基线变更",
+    "baseline_change.reject": "驳回基线变更",
+    "project.update": "更新项目信息",
+    "project.milestones.update": "更新项目节点治理",
+    "milestone.create": "新增项目节点",
+    "risk.create": "登记风险",
+    "risk.update": "更新风险",
+    "corrective_action.create": "新增纠偏措施",
+    "corrective_action.update": "更新纠偏措施",
+  };
+  return <section className="content-card activity-card">
+    <div className="card-title"><div><h2>操作审计</h2><p>项目、节点、风险、措施与基线关键操作统一追踪</p></div><button className="text-button" onClick={loadActivity}>刷新</button></div>
+    {data.auditLogs.length ? <div className="project-audit-timeline">{data.auditLogs.map((row) => <article key={row.id}><span className="audit-dot" /><div><strong>{actionNames[row.action] ?? row.action}</strong><p>{row.actorEmail} · {row.entityType} / {row.entityId}</p></div><time>{row.createdAt.replace("T", " ").slice(0, 16)}</time></article>)}</div> : <div className="empty-state">暂无项目操作记录</div>}
+  </section>;
+}
+
 function ProjectDetail({ onNavigate, onDataChanged, projectData = projects, projectId, identity }: { onNavigate: Navigate; onDataChanged: () => Promise<void>; projectData?: ProjectData[]; projectId: string; identity: Identity | null }) {
   const [tab, setTab] = useState("节点计划");
   const [expanded, setExpanded] = useState<number | null>(3);
@@ -621,7 +949,9 @@ function ProjectDetail({ onNavigate, onDataChanged, projectData = projects, proj
     projectData.find((project) => project.id === projectId) ??
     projectData[0] ??
     projects[0];
-  const variance = currentProject.actual - currentProject.plan;
+  const variance = Number(
+    (currentProject.actual - currentProject.plan).toFixed(1),
+  );
   const canUpdate =
     identity?.role === "admin" ||
     identity?.role === "pmo" ||
@@ -788,7 +1118,7 @@ function ProjectDetail({ onNavigate, onDataChanged, projectData = projects, proj
         </div>
       </section>}
       {tab === "风险与措施" && <RiskActionPanel projectId={currentProject.id} canEdit={canUpdate} onDataChanged={onDataChanged} />}
-      {tab !== "节点计划" && tab !== "风险与措施" && <section className="content-card placeholder-panel"><div className="placeholder-icon">{tab === "基线版本" ? "≋" : "◎"}</div><h2>{tab}</h2><p>该模块已纳入原型信息架构，可从主流程中的对应入口继续体验。</p><button className="primary-button" onClick={() => tab === "基线版本" ? onNavigate("pmo") : onNavigate("report", currentProject.id)}>进入演示流程</button></section>}
+      {(tab === "周报记录" || tab === "基线版本" || tab === "操作审计") && <ProjectActivityPanel projectId={currentProject.id} tab={tab} />}
     </div>
     {showMilestoneGovernance && <div className="modal-backdrop" onClick={() => setShowMilestoneGovernance(false)}><section className="create-modal milestone-governance-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowMilestoneGovernance(false)}>×</button><span className="modal-kicker">PROJECT MILESTONE GOVERNANCE</span><h2>项目节点治理</h2><p>{currentProject.name} · 可调整节点顺序、权重、关键标识及适用性；计划完成日须通过基线变更调整。</p><div className="project-milestone-grid"><div className="project-milestone-head"><span>序号</span><span>节点名称</span><span>权重</span><span>关键</span><span>适用</span><span>来源</span></div>{milestoneDraft.map((row) => <div className={`project-milestone-row ${row.applicable ? "" : "inactive"}`} key={row.id}><input type="number" min="1" max="99" value={row.sequence} onChange={(event) => updateMilestoneDraft(row.id, "sequence", Number(event.target.value))} /><input value={row.name} onChange={(event) => updateMilestoneDraft(row.id, "name", event.target.value)} /><label className="weight-input"><input type="number" min="0" max="100" step="0.5" value={row.weight} onChange={(event) => updateMilestoneDraft(row.id, "weight", Number(event.target.value))} /><span>%</span></label><label className="template-check"><input type="checkbox" checked={row.critical} onChange={(event) => updateMilestoneDraft(row.id, "critical", event.target.checked)} /><span>关键</span></label><label className="template-check"><input type="checkbox" checked={row.applicable} onChange={(event) => updateMilestoneDraft(row.id, "applicable", event.target.checked)} /><span>适用</span></label><span className={row.custom ? "custom-source" : "standard-source"}>{row.custom ? "自定义" : "标准"}</span></div>)}</div><div className="governance-summary"><span>节点 {milestoneDraft.length} 个</span><span>适用 {milestoneDraft.filter((row) => row.applicable).length} 个</span><strong className={Math.abs(milestoneDraft.reduce((sum, row) => sum + Number(row.weight || 0), 0) - 100) < 0.01 ? "weight-ok" : "weight-error"}>权重合计 {milestoneDraft.reduce((sum, row) => sum + Number(row.weight || 0), 0).toFixed(1)}%</strong></div>{milestoneError && <div className="form-error">! {milestoneError}</div>}<form className="custom-milestone-form" onSubmit={createCustomMilestone}><h3>追加项目自定义节点</h3><div className="modal-form-grid"><label>节点名称<input name="name" required /></label><label>节点序号<input name="sequence" type="number" min="1" max="99" required /></label><label>计划开始日<input name="plannedStart" type="date" required /></label><label>计划完成日<input name="plannedFinish" type="date" required /></label></div><label className="template-check custom-critical"><input name="critical" type="checkbox" /><span>标记为关键节点</span></label><button className="outline-button" disabled={milestoneWorking}>＋ 新增零权重节点</button></form><div className="modal-actions"><button className="outline-button" onClick={() => setShowMilestoneGovernance(false)}>取消</button><button className="primary-button" disabled={milestoneWorking || Math.abs(milestoneDraft.reduce((sum, row) => sum + Number(row.weight || 0), 0) - 100) >= 0.01} onClick={saveMilestoneGovernance}>{milestoneWorking ? "正在保存…" : "保存节点治理"}</button></div></section></div>}
     {showBaselineForm && <div className="modal-backdrop" onClick={() => setShowBaselineForm(false)}><section className="create-modal baseline-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowBaselineForm(false)}>×</button><span className="modal-kicker">BASELINE CHANGE</span><h2>申请基线变更</h2><p>{currentProject.name} · 当前批准基线 V{currentProject.baselineVersion ?? 1}</p><form onSubmit={requestBaselineChange}><div className="modal-form-grid"><label>调整节点<select name="milestoneId" required>{adjustableMilestones.map((milestone) => <option key={milestone.id} value={milestone.id}>{milestone.name}（当前 {milestone.plannedFinish}）</option>)}</select></label><label>新计划完成日<input name="to" type="date" required /></label></div><label className="full-label">变更原因<textarea name="reason" minLength={10} required placeholder="说明触发原因、决策依据和不可通过纠偏消化的原因" /></label><label className="full-label">影响评估<textarea name="impact" minLength={10} required placeholder="说明对总体工期、成本、范围、资源和年度目标的影响" /></label>{baselineError && <div className="form-error" role="alert">! {baselineError}</div>}<div className="modal-actions"><button type="button" className="outline-button" onClick={() => setShowBaselineForm(false)}>取消</button><button className="primary-button" disabled={baselineWorking}>{baselineWorking ? "正在提交…" : "提交 PMO 审批"}</button></div></form></section></div>}
@@ -796,36 +1126,225 @@ function ProjectDetail({ onNavigate, onDataChanged, projectData = projects, proj
   </div>;
 }
 
-function WeeklyReport({ onNavigate, onDataChanged, projectId, projectData = projects, identity }: { onNavigate: Navigate; onDataChanged: () => Promise<void>; projectId: string; projectData?: ProjectData[]; identity: Identity | null }) {
+function WeeklyReport({ onNavigate, onDataChanged, projectId, projectData = projects, identity, snapshot }: { onNavigate: Navigate; onDataChanged: () => Promise<void>; projectId: string; projectData?: ProjectData[]; identity: Identity | null; snapshot: DashboardSnapshot | null }) {
   const currentProject =
     projectData.find((project) => project.id === projectId) ??
     projectData[0] ??
     projects[0];
-  const [declared, setDeclared] = useState(55);
-  const [systemProgress, setSystemProgress] = useState(53);
-  const [reason, setReason] = useState("核心供应商接口规范确认晚于计划，影响开发联调窗口。");
-  const [saved, setSaved] = useState(false);
+  const reportingPeriod = useMemo(() => {
+    const current = currentReportingPeriod();
+    return snapshot?.weekKey === current.weekKey
+      ? currentReportingPeriod(7)
+      : current;
+  }, [snapshot?.weekKey]);
+  const applicableMilestones = useMemo(
+    () =>
+      [...(currentProject.milestones ?? [])]
+        .filter((milestone) => milestone.applicable)
+        .sort((left, right) => left.sequence - right.sequence),
+    [currentProject.milestones],
+  );
+  const recommendedMilestone = useMemo(
+    () =>
+      applicableMilestones.find(
+        (milestone) =>
+          milestone.completion < 100 &&
+          (milestone.status === "red" || milestone.status === "yellow"),
+      ) ??
+      applicableMilestones.find((milestone) => milestone.completion < 100) ??
+      applicableMilestones.at(-1),
+    [applicableMilestones],
+  );
+  const [selectedSequence, setSelectedSequence] = useState(0);
+  const [completion, setCompletion] = useState(0);
+  const [forecastFinish, setForecastFinish] = useState("");
+  const [actualFinish, setActualFinish] = useState("");
+  const [declared, setDeclared] = useState(currentProject.declared);
+  const [reason, setReason] = useState("");
+  const [actionName, setActionName] = useState("");
+  const [actionOwner, setActionOwner] = useState(currentProject.owner);
+  const [recoveryDate, setRecoveryDate] = useState("");
+  const [actionDetail, setActionDetail] = useState("");
+  const [savedMessage, setSavedMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [loadingDraft, setLoadingDraft] = useState(true);
   const [submitError, setSubmitError] = useState("");
-  const diff = declared - systemProgress;
+  const selectedMilestone =
+    applicableMilestones.find(
+      (milestone) => milestone.sequence === selectedSequence,
+    ) ?? recommendedMilestone;
+  const systemProgress = useMemo(() => {
+    const totalWeight = applicableMilestones.reduce(
+      (sum, milestone) => sum + milestone.weight,
+      0,
+    );
+    if (!totalWeight) return 0;
+    return Number(
+      (
+        applicableMilestones.reduce(
+          (sum, milestone) =>
+            sum +
+            milestone.weight *
+              (milestone.sequence === selectedMilestone?.sequence
+                ? completion
+                : milestone.completion),
+          0,
+        ) / totalWeight
+      ).toFixed(1),
+    );
+  }, [applicableMilestones, completion, selectedMilestone?.sequence]);
+  const diff = Number((declared - systemProgress).toFixed(1));
+  const effectiveFinish =
+    completion >= 100 ? actualFinish || forecastFinish : forecastFinish;
+  const deviationDays =
+    selectedMilestone && effectiveFinish
+      ? daysBetween(selectedMilestone.plannedFinish, effectiveFinish)
+      : selectedMilestone?.deviationDays ?? 0;
+  const todayParts = shanghaiDateParts();
+  const today = `${todayParts.year}-${String(todayParts.month).padStart(2, "0")}-${String(todayParts.day).padStart(2, "0")}`;
+  const overdue =
+    Boolean(selectedMilestone) &&
+    completion < 100 &&
+    selectedMilestone!.plannedFinish < today;
+  const yellowDays = selectedMilestone?.critical ? 1 : 4;
+  const redDays = selectedMilestone?.critical ? 4 : 8;
+  const previewStatus: Status = !selectedMilestone
+    ? "na"
+    : overdue || deviationDays >= redDays
+      ? "red"
+      : deviationDays >= yellowDays
+        ? "yellow"
+        : "green";
+  const requiresAction =
+    previewStatus === "red" || previewStatus === "yellow";
+  const actionComplete = Boolean(
+    actionName.trim() &&
+      actionOwner.trim() &&
+      recoveryDate &&
+      actionDetail.trim(),
+  );
+  const completionItems = [
+    true,
+    Boolean(selectedMilestone),
+    Boolean(reason.trim()),
+    !requiresAction || actionComplete,
+  ];
+  const formCompleteness = Math.round(
+    (completionItems.filter(Boolean).length / completionItems.length) * 100,
+  );
 
   useEffect(() => {
-    fetch("/api/bootstrap")
-      .then(async (response) => {
-        if (!response.ok) throw new Error("无法读取当前项目数据");
-        return response.json();
-      })
-      .then((data: { projects?: Array<{ id: string; actual: number; declared: number }> }) => {
-        const project = data.projects?.find((item) => item.id === projectId);
-        if (project) {
-          setSystemProgress(project.actual);
-          setDeclared(project.declared);
-        }
-      })
-      .catch(() => undefined);
-  }, [projectId]);
+    if (!recommendedMilestone) return;
+    const timer = window.setTimeout(() => {
+      setSelectedSequence(recommendedMilestone.sequence);
+      setCompletion(recommendedMilestone.completion);
+      setForecastFinish(
+        recommendedMilestone.forecastFinish ??
+          recommendedMilestone.plannedFinish,
+      );
+      setActualFinish(recommendedMilestone.actualFinish ?? "");
+      setReason(recommendedMilestone.reason ?? "");
+      setDeclared(currentProject.declared);
+      setActionOwner(currentProject.owner);
+      setRecoveryDate(
+        recommendedMilestone.forecastFinish ??
+          recommendedMilestone.plannedFinish,
+      );
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [
+    currentProject.declared,
+    currentProject.owner,
+    recommendedMilestone,
+  ]);
 
-  async function submitWeeklyReport() {
+  useEffect(() => {
+    let active = true;
+    const timer = window.setTimeout(() => {
+      setLoadingDraft(true);
+      fetch(
+        `/api/projects/${encodeURIComponent(projectId)}/weekly-reports`,
+        { cache: "no-store" },
+      )
+        .then(async (response) => {
+          const result = (await response.json()) as {
+            error?: string;
+            weeklyReports?: WeeklyReportRow[];
+          };
+          if (!response.ok) {
+            throw new Error(result.error || "无法读取本周草稿");
+          }
+          if (!active) return;
+          const draft = result.weeklyReports?.find(
+            (row) =>
+              row.weekKey === reportingPeriod.weekKey &&
+              row.status === "draft",
+          )?.draft;
+          if (!draft) return;
+          if (draft.milestone?.sequence) {
+            setSelectedSequence(draft.milestone.sequence);
+          }
+          if (draft.milestone?.completion !== undefined) {
+            setCompletion(draft.milestone.completion);
+          }
+          setForecastFinish(draft.milestone?.forecastFinish ?? "");
+          setActualFinish(draft.milestone?.actualFinish ?? "");
+          if (draft.declaredProgress !== undefined) {
+            setDeclared(draft.declaredProgress);
+          }
+          setReason(draft.reason ?? "");
+          setActionName(draft.action?.name ?? "");
+          setActionOwner(draft.action?.owner ?? currentProject.owner);
+          setRecoveryDate(draft.action?.recoveryDate ?? "");
+          setActionDetail(draft.action?.detail ?? "");
+          setSavedMessage("已恢复本周服务器草稿");
+        })
+        .catch((draftError) => {
+          if (active) {
+            setSubmitError(
+              draftError instanceof Error
+                ? draftError.message
+                : "无法读取本周草稿",
+            );
+          }
+        })
+        .finally(() => {
+          if (active) setLoadingDraft(false);
+        });
+    }, 0);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [currentProject.owner, projectId, reportingPeriod.weekKey]);
+
+  function selectMilestone(sequence: number) {
+    const milestone = applicableMilestones.find(
+      (row) => row.sequence === sequence,
+    );
+    if (!milestone) return;
+    setSelectedSequence(sequence);
+    setCompletion(milestone.completion);
+    setForecastFinish(milestone.forecastFinish ?? milestone.plannedFinish);
+    setActualFinish(milestone.actualFinish ?? "");
+    setReason(milestone.reason ?? "");
+    setRecoveryDate(milestone.forecastFinish ?? milestone.plannedFinish);
+    setSubmitError("");
+  }
+
+  async function saveWeeklyReport(submitMode: "draft" | "submitted") {
+    if (!selectedMilestone) {
+      setSubmitError("当前项目没有可填报的适用节点。");
+      return;
+    }
+    if (submitMode === "submitted" && !reason.trim()) {
+      setSubmitError("请填写本周进展或偏差原因。");
+      return;
+    }
+    if (submitMode === "submitted" && requiresAction && !actionComplete) {
+      setSubmitError("红黄节点必须完整填写纠偏措施、责任人、恢复日期和具体行动。");
+      return;
+    }
     setSubmitting(true);
     setSubmitError("");
     try {
@@ -833,35 +1352,65 @@ function WeeklyReport({ onNavigate, onDataChanged, projectId, projectData = proj
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          weekKey: "2026-W30",
+          submitMode,
+          weekKey: reportingPeriod.weekKey,
           systemProgress,
           declaredProgress: declared,
           reason,
-          forecastFinish: "2026-07-28",
-          milestone: { sequence: 4, completion: 68, forecastFinish: "2026-07-28" },
-          action: {
-            name: "接口联调专项攻坚",
-            owner: "李程",
-            recoveryDate: "2026-07-28",
-            detail: "增加2名接口开发人员，每日17:00开展问题清零会。",
+          forecastFinish: forecastFinish || undefined,
+          milestone: {
+            sequence: selectedMilestone.sequence,
+            completion,
+            forecastFinish: forecastFinish || undefined,
+            actualFinish:
+              completion >= 100 ? actualFinish || forecastFinish : undefined,
           },
+          action:
+            requiresAction || actionName.trim() || actionDetail.trim()
+              ? {
+                  name: actionName,
+                  owner: actionOwner,
+                  recoveryDate,
+                  detail: actionDetail,
+                }
+              : undefined,
         }),
       });
       const result = (await response.json()) as { error?: string };
-      if (!response.ok) throw new Error(result.error || "周报提交失败");
-      await onDataChanged();
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2800);
+      if (!response.ok) {
+        throw new Error(
+          result.error ||
+            (submitMode === "draft" ? "草稿保存失败" : "周报提交失败"),
+        );
+      }
+      if (submitMode === "submitted") await onDataChanged();
+      setSavedMessage(
+        submitMode === "draft"
+          ? `${reportingPeriod.weekKey} 草稿已保存`
+          : `${reportingPeriod.weekKey} 周报已提交`,
+      );
+      window.setTimeout(() => setSavedMessage(""), 3000);
     } catch (error) {
-      setSubmitError(error instanceof Error ? error.message : "周报提交失败");
+      setSubmitError(
+        error instanceof Error
+          ? error.message
+          : submitMode === "draft"
+            ? "草稿保存失败"
+            : "周报提交失败",
+      );
     } finally {
       setSubmitting(false);
     }
   }
+
+  const rolledToNextWeek =
+    snapshot?.weekKey === currentReportingPeriod().weekKey &&
+    snapshot.weekKey !== reportingPeriod.weekKey;
+
   return <div className="workspace-page">
-    <WorkspaceHeader title="周度进度填报" subtitle="2026年第30周 · 填报截止 07月24日 17:00" onNavigate={onNavigate} identity={identity} />
+    <WorkspaceHeader title="周度进度填报" subtitle={`${reportingPeriod.year}年第${reportingPeriod.week}周 · 填报截止 ${reportingPeriod.fridayLabel} 17:00`} onNavigate={onNavigate} identity={identity} />
     <div className="page-content report-page">
-      <div className="report-top"><div><button className="back-link" onClick={() => onNavigate("project", projectId)}>← 返回项目详情</button><h2>{currentProject.name}</h2><p>{currentProject.owner}负责 · 本周数据将进入下一次周度快照</p></div><div className="save-state"><span>服务端校验已启用</span><i /> 实时</div></div>
+      <div className="report-top"><div><button className="back-link" onClick={() => onNavigate("project", projectId)}>← 返回项目详情</button><h2>{currentProject.name}</h2><p>{currentProject.owner}负责 · {rolledToNextWeek ? `${snapshot?.weekKey} 已锁定，已自动切换到下一填报周期` : "本周数据将进入下一次周度快照"}</p></div><div className="save-state"><span>{loadingDraft ? "正在检查草稿" : "服务端校验已启用"}</span><i /> {loadingDraft ? "同步中" : "实时"}</div></div>
       <div className="report-layout">
         <div className="report-form">
           <section className="content-card form-section">
@@ -869,32 +1418,28 @@ function WeeklyReport({ onNavigate, onDataChanged, projectId, projectData = proj
             <div className="progress-compare"><div><small>系统计算进度</small><strong>{systemProgress}%</strong><ProgressBar value={systemProgress} /></div><div><small>项目经理申报进度</small><strong>{declared}%</strong><input aria-label="项目经理申报进度" type="range" min="0" max="100" value={declared} onChange={e => setDeclared(Number(e.target.value))} /></div><div className={Math.abs(diff) > 5 ? "compare-warning" : "compare-ok"}><span>{Math.abs(diff) > 5 ? "!" : "✓"}</span><strong>{diff > 0 ? "+" : ""}{diff}pp</strong><small>{Math.abs(diff) > 5 ? "需说明差异" : "口径一致"}</small></div></div>
           </section>
           <section className="content-card form-section">
-            <div className="form-title"><span>02</span><div><h3>节点进展更新</h3><p>仅展示本周有变化或需要关注的节点。</p></div></div>
-            <div className="node-form">
-              <div className="node-form-head"><div><StatusPill status="red" /><h4>开发完成 <span>◆ 关键节点</span></h4></div><small>计划完成 07月16日 · 当前完成 68%</small></div>
-              <div className="form-grid"><label>节点状态<select defaultValue="进行中"><option>未开始</option><option>进行中</option><option>已完成</option></select></label><label>完成度<div className="percent-input"><input defaultValue="68" /><span>%</span></div></label><label>预测完成日期<input type="date" defaultValue="2026-07-28" /></label><label>相对基线偏差<div className="readonly-input red-text">+12 天</div></label></div>
-              <label className="full-label">偏差原因 <b>*</b><textarea value={reason} onChange={e => setReason(e.target.value)} /></label>
-            </div>
-            <div className="node-form warning-node">
-              <div className="node-form-head"><div><StatusPill status="yellow" /><h4>联调测试</h4></div><small>计划完成 08月18日 · 当前完成 25%</small></div>
-              <div className="form-grid"><label>节点状态<select defaultValue="进行中"><option>未开始</option><option>进行中</option></select></label><label>完成度<div className="percent-input"><input defaultValue="25" /><span>%</span></div></label><label>预测完成日期<input type="date" defaultValue="2026-08-22" /></label><label>相对基线偏差<div className="readonly-input yellow-text">+4 天</div></label></div>
-            </div>
+            <div className="form-title"><span>02</span><div><h3>节点进展更新</h3><p>选择一个本周发生变化或需要关注的适用节点。</p></div></div>
+            {selectedMilestone ? <div className={`node-form ${previewStatus === "yellow" ? "warning-node" : ""}`}>
+              <div className="node-form-head"><div><StatusPill status={previewStatus} /><h4>{selectedMilestone.name} {selectedMilestone.critical && <span>◆ 关键节点</span>}</h4></div><small>计划完成 {selectedMilestone.plannedFinish} · 原完成度 {selectedMilestone.completion}%</small></div>
+              <div className="form-grid"><label>更新节点<select value={selectedMilestone.sequence} onChange={(event) => selectMilestone(Number(event.target.value))}>{applicableMilestones.map((milestone) => <option key={milestone.id} value={milestone.sequence}>{milestone.sequence}. {milestone.name}{milestone.status === "red" ? "（红）" : milestone.status === "yellow" ? "（黄）" : ""}</option>)}</select></label><label>完成度<div className="percent-input"><input aria-label="节点完成度" type="number" min="0" max="100" step="1" value={completion} onChange={(event) => setCompletion(Math.min(100, Math.max(0, Number(event.target.value))))} /><span>%</span></div></label><label>{completion >= 100 ? "实际完成日期" : "预测完成日期"}<input type="date" value={completion >= 100 ? actualFinish : forecastFinish} onChange={(event) => completion >= 100 ? setActualFinish(event.target.value) : setForecastFinish(event.target.value)} /></label><label>相对基线偏差<div className={`readonly-input ${deviationDays >= redDays ? "red-text" : deviationDays >= yellowDays ? "yellow-text" : ""}`}>{deviationDays > 0 ? "+" : ""}{deviationDays} 天</div></label></div>
+              <label className="full-label">本周进展 / 偏差原因 <b>*</b><textarea value={reason} onChange={e => setReason(e.target.value)} placeholder="说明本周完成事项；如有偏差，说明根因、影响与判断依据" /></label>
+            </div> : <div className="empty-state">当前项目没有可填报的适用节点</div>}
           </section>
-          <section className="content-card form-section">
-            <div className="form-title"><span>03</span><div><h3>异常纠偏措施</h3><p>红黄节点必须明确措施、责任人与预计恢复时间。</p></div></div>
-            <div className="action-form"><div className="form-grid"><label>措施名称 <b>*</b><input defaultValue="接口联调专项攻坚" /></label><label>责任人 <b>*</b><input defaultValue="李程" /></label><label>预计恢复日期 <b>*</b><input type="date" defaultValue="2026-07-28" /></label><label>措施状态<select><option>进行中</option><option>待启动</option><option>已完成</option></select></label></div><label className="full-label">具体行动<input defaultValue="增加2名接口开发人员，每日17:00开展问题清零会。" /></label></div>
-          </section>
+          {requiresAction && <section className="content-card form-section">
+            <div className="form-title"><span>03</span><div><h3>异常纠偏措施</h3><p>当前节点已触发{previewStatus === "red" ? "红色" : "黄色"}预警，正式提交前必须完整填写。</p></div></div>
+            <div className="action-form"><div className="form-grid"><label>措施名称 <b>*</b><input value={actionName} onChange={(event) => setActionName(event.target.value)} placeholder="例如：接口联调专项攻坚" /></label><label>责任人 <b>*</b><input value={actionOwner} onChange={(event) => setActionOwner(event.target.value)} /></label><label>预计恢复日期 <b>*</b><input type="date" value={recoveryDate} onChange={(event) => setRecoveryDate(event.target.value)} /></label><label>措施状态<div className="readonly-input">进行中</div></label></div><label className="full-label">具体行动 <b>*</b><input value={actionDetail} onChange={(event) => setActionDetail(event.target.value)} placeholder="说明动作、资源投入、检查频率和完成标准" /></label></div>
+          </section>}
           {submitError && <div className="form-error" role="alert">! {submitError}</div>}
-          <div className="report-actions"><button className="outline-button">保存草稿</button><button className="primary-button" disabled={submitting} onClick={submitWeeklyReport}>{submitting ? "正在提交…" : "提交本周进度"}</button></div>
+          <div className="report-actions"><button className="outline-button" disabled={submitting || loadingDraft} onClick={() => saveWeeklyReport("draft")}>{submitting ? "处理中…" : "保存草稿"}</button><button className="primary-button" disabled={submitting || loadingDraft || !selectedMilestone} onClick={() => saveWeeklyReport("submitted")}>{submitting ? "正在提交…" : "提交本周进度"}</button></div>
         </div>
         <aside className="report-aside">
-          <div className="aside-card"><h3>填报完整度</h3><div className="completion-circle"><strong>92%</strong></div><ul><li className="done">✓ 总体进度</li><li className="done">✓ 节点更新</li><li className="done">✓ 偏差原因</li><li className="done">✓ 纠偏措施</li><li>○ 支撑附件（选填）</li></ul></div>
-          <div className="aside-card rule-tips"><h3>本次规则检查</h3><p className="pass">✓ 申报与计算进度一致</p><p className="pass">✓ 红色节点已填写原因</p><p className="pass">✓ 已指定措施责任人</p><p className="warning">▲ 预测完成日晚于基线12天</p></div>
-          <div className="aside-card"><h3>快照提示</h3><p>本周五 17:00 系统将锁定第30周快照。锁定后修改只影响下一周期。</p></div>
+          <div className="aside-card"><h3>填报完整度</h3><div className="completion-circle" style={{ background: `conic-gradient(var(--blue) ${formCompleteness}%,#e9edf3 0)` }}><strong>{formCompleteness}%</strong></div><ul><li className="done">✓ 总体进度</li><li className={selectedMilestone ? "done" : ""}>{selectedMilestone ? "✓" : "○"} 节点更新</li><li className={reason.trim() ? "done" : ""}>{reason.trim() ? "✓" : "○"} 本周进展说明</li><li className={!requiresAction || actionComplete ? "done" : ""}>{!requiresAction || actionComplete ? "✓" : "○"} 纠偏措施</li><li>○ 支撑附件（后续开放）</li></ul></div>
+          <div className="aside-card rule-tips"><h3>本次规则检查</h3><p className={Math.abs(diff) <= 5 ? "pass" : "warning"}>{Math.abs(diff) <= 5 ? "✓ 申报与计算进度一致" : `▲ 申报与计算相差 ${Math.abs(diff).toFixed(1)}pp`}</p><p className={reason.trim() ? "pass" : "warning"}>{reason.trim() ? "✓ 已填写本周进展说明" : "▲ 尚未填写进展说明"}</p><p className={!requiresAction || actionComplete ? "pass" : "warning"}>{!requiresAction ? "✓ 当前节点未触发措施必填" : actionComplete ? "✓ 纠偏措施字段完整" : "▲ 红黄节点措施尚不完整"}</p><p className={deviationDays > 0 ? "warning" : "pass"}>{deviationDays > 0 ? `▲ 预测完成日晚于基线 ${deviationDays} 天` : "✓ 节点未晚于批准基线"}</p></div>
+          <div className="aside-card"><h3>快照提示</h3><p>{reportingPeriod.fridayLabel} 17:00 PMO 将锁定第{reportingPeriod.week}周快照。锁定后本周期不可再修改。</p></div>
         </aside>
       </div>
     </div>
-    {saved && <div className="toast"><span>✓</span><div><strong>周报提交成功</strong><p>已进入第30周待锁定数据。</p></div></div>}
+    {savedMessage && <div className="toast"><span>✓</span><div><strong>{savedMessage}</strong><p>{savedMessage.includes("草稿") ? "可刷新页面或稍后继续编辑。" : `已进入第${reportingPeriod.week}周待锁定数据。`}</p></div></div>}
   </div>;
 }
 
@@ -1339,9 +1884,10 @@ export default function Home() {
   const [view, setView] = useState<View>("cockpit");
   const [projectData, setProjectData] = useState<ProjectData[]>(projects);
   const [identity, setIdentity] = useState<Identity | null>(null);
-  const [dashboardData, setDashboardData] = useState<ProjectData[]>(projects);
+  const [dashboardData, setDashboardData] = useState<ProjectData[]>([]);
   const [dashboardSnapshot, setDashboardSnapshot] =
     useState<DashboardSnapshot | null>(null);
+  const [trendData, setTrendData] = useState<TrendPoint[]>([]);
   const [templateData, setTemplateData] =
     useState<TemplateData[]>(defaultTemplateData);
   const [selectedProjectId, setSelectedProjectId] = useState("P02");
@@ -1366,14 +1912,29 @@ export default function Home() {
       if (data.projects?.length) setProjectData(data.projects);
       if (data.dashboardProjects?.length) {
         setDashboardData(data.dashboardProjects);
-      } else if (data.projects?.length) {
-        setDashboardData(data.projects);
+      } else {
+        setDashboardData([]);
       }
       setDashboardSnapshot(data.dashboardSnapshot ?? null);
       if (data.milestoneTemplates?.length) {
         setTemplateData(data.milestoneTemplates);
       }
       if (data.identity) setIdentity(data.identity);
+      try {
+        const trendResponse = await fetch("/api/dashboard/trends", {
+          cache: "no-store",
+        });
+        const trendResult = (await trendResponse.json()) as {
+          trends?: TrendPoint[];
+        };
+        setTrendData(
+          trendResponse.ok && Array.isArray(trendResult.trends)
+            ? trendResult.trends
+            : [],
+        );
+      } catch {
+        setTrendData([]);
+      }
       setDataState("ready");
     } catch {
       setDataState("fallback");
@@ -1385,6 +1946,6 @@ export default function Home() {
     return () => window.clearTimeout(timer);
   }, [refreshData]);
 
-  if (view === "cockpit") return <><Cockpit onNavigate={navigate} projectData={dashboardData} snapshot={dashboardSnapshot} templateData={templateData} />{dataState === "fallback" && <div className="data-banner">当前显示离线演示数据，数据服务恢复后将自动同步。</div>}</>;
-  return <div className="app-shell"><Sidebar view={view} onNavigate={navigate} identity={identity} /><div className="workspace">{view === "portfolio" && <Portfolio onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} identity={identity} templateData={templateData} />}{view === "project" && <ProjectDetail onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} projectId={selectedProjectId} identity={identity} />}{view === "report" && <WeeklyReport onNavigate={navigate} onDataChanged={refreshData} projectId={selectedProjectId} projectData={projectData} identity={identity} />}{view === "pmo" && <PmoPage onNavigate={navigate} onDataChanged={refreshData} identity={identity} projectData={projectData} />}{view === "admin" && <AdminPage onNavigate={navigate} identity={identity} />}</div></div>;
+  if (view === "cockpit") return <><Cockpit onNavigate={navigate} projectData={dashboardData} snapshot={dashboardSnapshot} templateData={templateData} trends={trendData} />{dataState === "fallback" && <div className="data-banner">当前数据服务不可用，管理大屏不展示未核实的演示数据。</div>}</>;
+  return <div className="app-shell"><Sidebar view={view} onNavigate={navigate} identity={identity} /><div className="workspace">{view === "portfolio" && <Portfolio onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} identity={identity} templateData={templateData} />}{view === "project" && <ProjectDetail onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} projectId={selectedProjectId} identity={identity} />}{view === "report" && <WeeklyReport onNavigate={navigate} onDataChanged={refreshData} projectId={selectedProjectId} projectData={projectData} identity={identity} snapshot={dashboardSnapshot} />}{view === "pmo" && <PmoPage onNavigate={navigate} onDataChanged={refreshData} identity={identity} projectData={projectData} />}{view === "admin" && <AdminPage onNavigate={navigate} identity={identity} />}</div></div>;
 }

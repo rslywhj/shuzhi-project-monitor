@@ -117,6 +117,7 @@ export const weeklyReports = sqliteTable(
     variance: real("variance").notNull(),
     reason: text("reason").notNull(),
     forecastFinish: text("forecast_finish"),
+    draftJson: text("draft_json").notNull().default("{}"),
     status: text("status", { enum: ["draft", "submitted", "locked"] })
       .notNull()
       .default("submitted"),
@@ -126,6 +127,30 @@ export const weeklyReports = sqliteTable(
   (table) => [
     uniqueIndex("weekly_reports_project_week_idx").on(table.projectId, table.weekKey),
     index("weekly_reports_week_idx").on(table.weekKey),
+  ],
+);
+
+export const baselineVersions = sqliteTable(
+  "baseline_versions",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    kind: text("kind", { enum: ["original", "approved", "legacy"] })
+      .notNull()
+      .default("approved"),
+    milestoneJson: text("milestone_json").notNull(),
+    changeId: integer("change_id"),
+    createdBy: text("created_by").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("baseline_versions_project_version_idx").on(
+      table.projectId,
+      table.version,
+    ),
   ],
 );
 

@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, ne } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   correctiveActions,
@@ -112,7 +112,12 @@ export async function recalculateProjectHealth(
     db
       .select()
       .from(weeklyReports)
-      .where(eq(weeklyReports.projectId, projectId))
+      .where(
+        and(
+          eq(weeklyReports.projectId, projectId),
+          ne(weeklyReports.status, "draft"),
+        ),
+      )
       .orderBy(desc(weeklyReports.weekKey))
       .limit(2),
     db

@@ -28,6 +28,7 @@ import {
 export const dynamic = "force-dynamic";
 
 type WeeklyReportPayload = {
+  submitMode?: "draft" | "submitted";
   weekKey?: string;
   systemProgress?: number;
   declaredProgress?: number;
@@ -47,6 +48,42 @@ type WeeklyReportPayload = {
   };
 };
 
+export async function GET(
+  request: Request,
+  context: { params: Promise<{ id: string }> },
+) {
+  try {
+    const identity = await getRequestIdentity(request);
+    if (!identity) return unauthorized();
+    await ensureSeeded();
+    const { id } = await context.params;
+    const db = getDb();
+    const [project] = await db
+      .select({ id: projects.id })
+      .from(projects)
+      .where(eq(projects.id, id))
+      .limit(1);
+    if (!project) {
+      return Response.json({ error: "未找到指定项目。" }, { status: 404 });
+    }
+    const rows = await db
+      .select()
+      .from(weeklyReports)
+      .where(eq(weeklyReports.projectId, id))
+      .orderBy(desc(weeklyReports.weekKey))
+      .limit(100);
+    return Response.json({
+      weeklyReports: rows.map((row) => ({
+        ...row,
+        draft: JSON.parse(row.draftJson) as unknown,
+        draftJson: undefined,
+      })),
+    });
+  } catch (error) {
+    return apiError(error);
+  }
+}
+
 export async function POST(
   request: Request,
   context: { params: Promise<{ id: string }> },
@@ -65,6 +102,8 @@ export async function POST(
     if (!canWriteProject(identity, project.ownerEmail)) return forbidden();
 
     const payload = (await request.json()) as WeeklyReportPayload;
+    const submitMode =
+      payload.submitMode === "draft" ? ("draft" as const) : ("submitted" as const);
     const weekKey = requiredWeekKey(payload.weekKey, "填报周期");
     const [latestSnapshot] = await db
       .select({ id: snapshots.id, status: snapshots.status })
@@ -79,7 +118,10 @@ export async function POST(
       );
     }
     const declaredProgress = safeNumber(payload.declaredProgress, "申报进度");
-    const reason = requiredString(payload.reason, "偏差原因");
+    const reason =
+      submitMode === "draft"
+        ? payload.reason?.trim() ?? ""
+        : requiredString(payload.reason, "偏差原因");
     const milestoneRows = await db
       .select()
       .from(milestones)
@@ -158,7 +200,11 @@ export async function POST(
             ).toFixed(1),
           );
     const variance = Number((declaredProgress - systemProgress).toFixed(2));
-    if (Math.abs(variance) > 10 && reason.length < 10) {
+    if (
+      submitMode === "submitted" &&
+      Math.abs(variance) > 10 &&
+      reason.length < 10
+    ) {
       return Response.json(
         { error: "申报进度与计算值相差超过10个百分点，请填写完整差异说明。" },
         { status: 400 },
@@ -168,7 +214,7 @@ export async function POST(
     let actionValues:
       | typeof correctiveActions.$inferInsert
       | undefined;
-    if (payload.action) {
+    if (submitMode === "submitted" && payload.action) {
       actionValues = {
         projectId: id,
         milestoneId,
@@ -198,6 +244,7 @@ export async function POST(
         currentMilestone.plannedFinish <
           new Date().toISOString().slice(0, 10);
       if (
+        submitMode === "submitted" &&
         (overdue || milestoneUpdate.deviationDays >= yellowDays) &&
         !actionValues
       ) {
@@ -220,6 +267,9 @@ export async function POST(
         forecastFinish: payload.forecastFinish
           ? requiredIsoDate(payload.forecastFinish, "项目预测完成日")
           : null,
+        draftJson:
+          submitMode === "draft" ? JSON.stringify(payload) : "{}",
+        status: submitMode,
         submittedBy: identity.email,
       })
       .onConflictDoUpdate({
@@ -232,12 +282,24 @@ export async function POST(
           forecastFinish: payload.forecastFinish
             ? requiredIsoDate(payload.forecastFinish, "项目预测完成日")
             : null,
-          status: "submitted",
+          draftJson:
+            submitMode === "draft" ? JSON.stringify(payload) : "{}",
+          status: submitMode,
           submittedBy: identity.email,
           submittedAt: sql`CURRENT_TIMESTAMP`,
         },
       })
       .returning();
+    if (submitMode === "draft") {
+      await db.insert(auditLogs).values({
+        actorEmail: identity.email,
+        action: "weekly_report.save_draft",
+        entityType: "project",
+        entityId: id,
+        detailJson: JSON.stringify({ reportId: report.id, weekKey }),
+      });
+      return Response.json({ report }, { status: 201 });
+    }
     if (milestoneUpdate) {
       await db
         .update(milestones)

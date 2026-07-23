@@ -1,6 +1,7 @@
 import { getDb } from "@/db";
 import {
   auditLogs,
+  baselineVersions,
   milestoneTemplates,
   milestones,
   projects,
@@ -137,6 +138,24 @@ export async function POST(request: Request) {
     await db.batch([
       db.insert(projects).values(project),
       ...milestoneChunks.map((rows) => db.insert(milestones).values(rows)),
+      db.insert(baselineVersions).values({
+        projectId: project.id,
+        version: 1,
+        kind: "original",
+        milestoneJson: JSON.stringify(
+          milestoneValues.map((row) => ({
+            templateId: row.templateId,
+            name: row.name,
+            sequence: row.sequence,
+            plannedStart: row.plannedStart,
+            plannedFinish: row.plannedFinish,
+            weight: row.weight,
+            critical: row.critical,
+            applicable: row.applicable,
+          })),
+        ),
+        createdBy: identity.email,
+      }),
       db.insert(auditLogs).values({
         actorEmail: identity.email,
         action: "project.create",

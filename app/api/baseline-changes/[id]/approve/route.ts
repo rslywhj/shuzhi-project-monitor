@@ -1,6 +1,12 @@
 import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { auditLogs, baselineChanges, milestones, projects } from "@/db/schema";
+import {
+  auditLogs,
+  baselineChanges,
+  baselineVersions,
+  milestones,
+  projects,
+} from "@/db/schema";
 import { apiError } from "@/lib/api-utils";
 import { ensureSeeded } from "@/lib/seed";
 import { recalculateProjectHealth } from "@/lib/health";
@@ -47,6 +53,30 @@ export async function POST(
       milestoneId?: number;
       to: string;
     }>;
+    const existingMilestones = await db
+      .select()
+      .from(milestones)
+      .where(eq(milestones.projectId, change.projectId));
+    const nextMilestoneSnapshot = existingMilestones
+      .map((milestone) => {
+        const update = updates.find(
+          (item) =>
+            (item.milestoneId && item.milestoneId === milestone.id) ||
+            (!item.milestoneId && item.milestone === milestone.name),
+        );
+        return {
+          milestoneId: milestone.id,
+          templateId: milestone.templateId,
+          name: milestone.name,
+          sequence: milestone.sequence,
+          plannedStart: milestone.plannedStart,
+          plannedFinish: update?.to ?? milestone.plannedFinish,
+          weight: milestone.weight,
+          critical: milestone.critical,
+          applicable: milestone.applicable,
+        };
+      })
+      .sort((left, right) => left.sequence - right.sequence);
     const stillPending = sql`EXISTS (
       SELECT 1
       FROM ${baselineChanges}
@@ -85,8 +115,32 @@ export async function POST(
         ),
     );
     const approvedAt = new Date().toISOString();
+    const baselineVersionInsert = db.insert(baselineVersions).select(
+      db
+        .select({
+          id: sql<number>`NULL`.as("id"),
+          projectId: sql<string>`${change.projectId}`.as("project_id"),
+          version: sql<number>`${change.versionTo}`.as("version"),
+          kind: sql<"approved">`'approved'`.as("kind"),
+          milestoneJson: sql<string>`${JSON.stringify(nextMilestoneSnapshot)}`.as(
+            "milestone_json",
+          ),
+          changeId: sql<number>`${changeId}`.as("change_id"),
+          createdBy: sql<string>`${identity.email}`.as("created_by"),
+          createdAt: sql<string>`${approvedAt}`.as("created_at"),
+        })
+        .from(projects)
+        .where(
+          and(
+            eq(projects.id, change.projectId),
+            eq(projects.currentBaselineVersion, change.versionFrom),
+            stillPending,
+          ),
+        ),
+    );
     const batchResults = await db.batch([
       ...milestoneStatements,
+      baselineVersionInsert,
       db
         .update(projects)
         .set({
@@ -152,6 +206,17 @@ export async function POST(
       health,
     });
   } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message.includes(
+        "UNIQUE constraint failed: baseline_versions.project_id",
+      )
+    ) {
+      return Response.json(
+        { error: "该基线版本已经生成，请刷新后查看最新审批状态。" },
+        { status: 409 },
+      );
+    }
     return apiError(error);
   }
 }

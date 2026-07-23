@@ -356,3 +356,15 @@ test("delivers recipient-scoped notifications, report reminders and red escalati
   assert.match(page, /催报缺报/);
   assert.match(page, /升级红灯/);
 });
+
+test("supports all required management heatmap filter dimensions", async () => {
+  const page = await readFile(new URL("app/page.tsx", templateRoot), "utf8");
+
+  assert.match(page, /全部组织/);
+  assert.match(page, /全部负责人/);
+  assert.match(page, /全部类型/);
+  assert.match(page, /全部状态/);
+  assert.match(page, /project\.owner === owner/);
+  assert.match(page, /project\.type === projectType/);
+  assert.match(page, /setPage\(0\)/);
+});

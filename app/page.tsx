@@ -299,6 +299,8 @@ function AppLogo({ dark = false }: { dark?: boolean }) {
 
 function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = defaultTemplateData, trends = [] }: { onNavigate: Navigate; projectData?: ProjectData[]; snapshot: DashboardSnapshot | null; templateData?: TemplateData[]; trends?: TrendPoint[] }) {
   const [org, setOrg] = useState("全部组织");
+  const [owner, setOwner] = useState("全部负责人");
+  const [projectType, setProjectType] = useState("全部类型");
   const [health, setHealth] = useState("全部状态");
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState<{ project: ProjectData; index: number } | null>(null);
@@ -311,9 +313,11 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
       projectData.filter(
         (project) =>
           (org === "全部组织" || project.org === org) &&
+          (owner === "全部负责人" || project.owner === owner) &&
+          (projectType === "全部类型" || project.type === projectType) &&
           (health === "全部状态" || statusLabel[project.status] === health),
       ),
-    [health, org, projectData],
+    [health, org, owner, projectData, projectType],
   );
   const pageCount = Math.max(1, Math.ceil(matching.length / 10));
   const filtered = matching.slice(page * 10, page * 10 + 10);
@@ -329,6 +333,10 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
     : 0;
   const progressGap = actualProgress - planProgress;
   const organizations = [...new Set(projectData.map((project) => project.org))].sort();
+  const owners = [...new Set(projectData.map((project) => project.owner))].sort();
+  const projectTypes = [
+    ...new Set(projectData.map((project) => project.type)),
+  ].sort();
   const snapshotLabel = snapshot
     ? `${snapshot.weekKey.replace("-W", "年第")}周 · V${snapshot.version}`
     : "尚无锁定快照";
@@ -412,6 +420,16 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
         <label>组织
           <select value={org} onChange={e => { setOrg(e.target.value); setPage(0); }}>
             <option>全部组织</option>{organizations.map((organization) => <option key={organization}>{organization}</option>)}
+          </select>
+        </label>
+        <label>负责人
+          <select value={owner} onChange={e => { setOwner(e.target.value); setPage(0); }}>
+            <option>全部负责人</option>{owners.map((projectOwner) => <option key={projectOwner}>{projectOwner}</option>)}
+          </select>
+        </label>
+        <label>项目类型
+          <select value={projectType} onChange={e => { setProjectType(e.target.value); setPage(0); }}>
+            <option>全部类型</option>{projectTypes.map((type) => <option key={type}>{type}</option>)}
           </select>
         </label>
         <label>健康度

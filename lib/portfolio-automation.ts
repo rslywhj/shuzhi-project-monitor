@@ -13,6 +13,10 @@ import {
   type PortfolioAutomationWindow,
 } from "@/lib/reporting-period";
 import {
+  refreshPortfolioHealth,
+  type PortfolioHealthRefreshResult,
+} from "@/lib/portfolio-health-refresh";
+import {
   lockPortfolioSnapshot,
   type SnapshotLockResult,
 } from "@/lib/snapshot-service";
@@ -36,6 +40,7 @@ function chunks<T>(rows: T[], size = NOTIFICATION_BATCH_SIZE) {
 export type PortfolioAutomationResult = {
   trigger: AutomationTrigger;
   window: PortfolioAutomationWindow;
+  healthRefresh: PortfolioHealthRefreshResult;
   reminderCount: number;
   overdueNoticeCount: number;
   redEscalationCount: number;
@@ -225,6 +230,12 @@ export async function runPortfolioAutomation(
 ): Promise<PortfolioAutomationResult> {
   await ensureSeeded();
   const window = portfolioAutomationWindow(now);
+  const healthRefresh = await refreshPortfolioHealth({
+    asOfDate: window.localTimestamp.slice(0, 10),
+    evaluationWeekKey: window.currentWeekKey,
+    trigger,
+    now,
+  });
   let reminderCount = 0;
   let overdueNoticeCount = 0;
   let redEscalationCount = 0;
@@ -268,6 +279,7 @@ export async function runPortfolioAutomation(
   return {
     trigger,
     window,
+    healthRefresh,
     reminderCount,
     overdueNoticeCount,
     redEscalationCount,

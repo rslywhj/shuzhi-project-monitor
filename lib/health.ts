@@ -26,7 +26,8 @@ function isoWeekStart(value: string) {
   return januaryFourth - (januaryFourthDay - 1) * DAY_MS + (week - 1) * WEEK_MS;
 }
 
-function isoWeekKey(date = new Date()) {
+function isoWeekKey(value = shanghaiDate()) {
+  const date = new Date(`${value}T00:00:00Z`);
   const utc = new Date(
     Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()),
   );
@@ -39,12 +40,25 @@ function isoWeekKey(date = new Date()) {
   return `${utc.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
 }
 
-function evaluationDate(weekKey?: string) {
+function shanghaiDate(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const value = Object.fromEntries(
+    parts.map((part) => [part.type, part.value]),
+  );
+  return `${value.year}-${value.month}-${value.day}`;
+}
+
+function evaluationDate(weekKey?: string, asOfDate?: string) {
   const weekStart = weekKey ? isoWeekStart(weekKey) : null;
-  if (weekStart === null) return new Date().toISOString().slice(0, 10);
+  const today = asOfDate ?? shanghaiDate();
+  if (weekStart === null) return today;
   const friday = new Date(weekStart + 4 * DAY_MS).toISOString().slice(0, 10);
-  const today = new Date().toISOString().slice(0, 10);
-  return weekKey === isoWeekKey() && friday > today ? today : friday;
+  return weekKey === isoWeekKey(today) && friday > today ? today : friday;
 }
 
 function weeksBetween(later: string, earlier: string) {
@@ -92,6 +106,7 @@ function weightedProgress(
 export async function recalculateProjectHealth(
   projectId: string,
   evaluationWeekKey?: string,
+  options: { touchProject?: boolean; asOfDate?: string } = {},
 ) {
   const db = getDb();
   const [
@@ -130,7 +145,7 @@ export async function recalculateProjectHealth(
   const project = projectRows[0];
   if (!project) return null;
   const rule = activeRuleRows[0];
-  const asOf = evaluationDate(evaluationWeekKey);
+  const asOf = evaluationDate(evaluationWeekKey, options.asOfDate);
   const evaluatedMilestones = milestoneRows.map((milestone) => {
     if (!milestone.applicable) return { ...milestone, status: "na" as const };
     const effectiveFinish =
@@ -216,7 +231,7 @@ export async function recalculateProjectHealth(
   );
   const actionPenalty = Math.min(15, overdueActions.length * 5);
 
-  const latestWeek = evaluationWeekKey ?? isoWeekKey();
+  const latestWeek = evaluationWeekKey ?? isoWeekKey(asOf);
   const latestProjectWeek = projectReportRows[0]?.weekKey;
   let reportingPenalty = 0;
   let consecutiveMissing = false;
@@ -269,6 +284,7 @@ export async function recalculateProjectHealth(
       ? "medium"
       : "low";
 
+  const calculatedAt = new Date().toISOString();
   await db
     .update(projects)
     .set({
@@ -277,7 +293,8 @@ export async function recalculateProjectHealth(
       riskLevel,
       planProgress: progress.plan,
       actualProgress: progress.actual,
-      updatedAt: new Date().toISOString(),
+      healthCalculatedAt: calculatedAt,
+      ...(options.touchProject === false ? {} : { updatedAt: calculatedAt }),
     })
     .where(eq(projects.id, projectId));
   return {

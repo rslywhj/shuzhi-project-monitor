@@ -40,6 +40,7 @@ export const projects = sqliteTable(
       .default("low"),
     originalBaselineVersion: integer("original_baseline_version").notNull().default(1),
     currentBaselineVersion: integer("current_baseline_version").notNull().default(1),
+    healthCalculatedAt: text("health_calculated_at"),
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => [
@@ -169,6 +170,36 @@ export const notificationDeliveries = sqliteTable(
     index("notification_deliveries_channel_idx").on(
       table.channelId,
       table.createdAt,
+    ),
+  ],
+);
+
+export const portfolioHealthRuns = sqliteTable(
+  "portfolio_health_runs",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    runKey: text("run_key").notNull(),
+    asOfDate: text("as_of_date").notNull(),
+    evaluationWeekKey: text("evaluation_week_key").notNull(),
+    trigger: text("trigger", {
+      enum: ["request", "cron", "manual"],
+    }).notNull(),
+    status: text("status", {
+      enum: ["running", "completed", "failed"],
+    })
+      .notNull()
+      .default("running"),
+    projectCount: integer("project_count").notNull().default(0),
+    changedProjectCount: integer("changed_project_count").notNull().default(0),
+    errorMessage: text("error_message").notNull().default(""),
+    startedAt: text("started_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    completedAt: text("completed_at"),
+  },
+  (table) => [
+    uniqueIndex("portfolio_health_runs_key_idx").on(table.runKey),
+    index("portfolio_health_runs_status_idx").on(
+      table.status,
+      table.startedAt,
     ),
   ],
 );

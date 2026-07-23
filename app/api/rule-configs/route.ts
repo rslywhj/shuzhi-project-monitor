@@ -118,7 +118,11 @@ export async function PUT(request: Request) {
       await Promise.all(
         projectRows
           .slice(index, index + 5)
-          .map((project) => recalculateProjectHealth(project.id)),
+          .map((project) =>
+            recalculateProjectHealth(project.id, undefined, {
+              touchProject: false,
+            }),
+          ),
       );
     }
     return Response.json({ rule, recalculatedProjects: projectRows.length });

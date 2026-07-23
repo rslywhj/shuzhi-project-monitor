@@ -484,6 +484,8 @@ test("automates pre-deadline reminders, Friday locking and post-lock escalation"
   assert.match(reportingPeriod, /LOCK_MINUTE = 17 \* 60/);
   assert.match(automation, /createReportNotices/);
   assert.match(automation, /createRedEscalations/);
+  assert.match(automation, /refreshPortfolioHealth/);
+  assert.match(automation, /healthRefresh/);
   assert.match(automation, /source: "automation"/);
   assert.match(automation, /result\.outcome !== "reopened"/);
   assert.match(snapshotService, /options\.source === "automation"/);

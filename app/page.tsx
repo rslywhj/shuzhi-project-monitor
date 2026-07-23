@@ -2619,6 +2619,7 @@ function AdminPage({ onNavigate, identity }: { onNavigate: Navigate; identity: I
     "notification_channel.update": "更新通知渠道",
     "notification_channel.test": "测试通知渠道",
     "notification_delivery.retry": "重试外部投递",
+    "automation.health_refresh": "每日健康度重算",
   };
 
   const loadAdminData = useCallback(async () => {

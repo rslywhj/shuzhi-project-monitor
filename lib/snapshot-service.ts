@@ -51,7 +51,9 @@ export async function lockPortfolioSnapshot(options: {
       projectIds
         .slice(index, index + 5)
         .map((project) =>
-          recalculateProjectHealth(project.id, options.weekKey),
+          recalculateProjectHealth(project.id, options.weekKey, {
+            touchProject: false,
+          }),
         ),
     );
   }

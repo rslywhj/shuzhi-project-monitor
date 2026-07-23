@@ -300,6 +300,24 @@ test("closes project maintenance, account lifecycle and dynamic PMO operations",
   assert.match(snapshotRead, /payload: JSON\.parse/);
 });
 
+test("pre-provisions authenticated users with admin-only roles and audit history", async () => {
+  const [usersRoute, page] = await Promise.all([
+    readFile(new URL("app/api/users/route.ts", templateRoot), "utf8"),
+    readFile(new URL("app/page.tsx", templateRoot), "utf8"),
+  ]);
+
+  assert.match(usersRoute, /export async function POST/);
+  assert.match(usersRoute, /canAdministerUsers/);
+  assert.match(usersRoute, /db\.batch/);
+  assert.match(usersRoute, /user\.create/);
+  assert.match(usersRoute, /用户姓名长度必须为2–60个字符/);
+  assert.match(usersRoute, /该邮箱已存在，无需重复预置/);
+  assert.match(page, /预置登录账号/);
+  assert.match(page, /首次通过统一登录进入后/);
+  assert.match(page, /身份与权限分离/);
+  assert.match(page, /"user\.create": "预置用户"/);
+});
+
 test("persists weekly report attachments in R2 and removes dead prototype controls", async () => {
   const [hosting, schema, migration, uploadRoute, fileRoute, activityRoute, page] =
     await Promise.all([

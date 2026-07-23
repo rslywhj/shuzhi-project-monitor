@@ -1,8 +1,9 @@
-import { asc } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { users } from "@/db/schema";
+import { auditLogs, users } from "@/db/schema";
 import { apiError } from "@/lib/api-utils";
 import {
+  canAdministerUsers,
   canManagePortfolio,
   forbidden,
   getRequestIdentity,
@@ -10,6 +11,8 @@ import {
 } from "@/lib/server-auth";
 
 export const dynamic = "force-dynamic";
+
+const roles = new Set(["executive", "pmo", "manager", "admin"]);
 
 export async function GET(request: Request) {
   try {
@@ -19,6 +22,81 @@ export async function GET(request: Request) {
     const rows = await getDb().select().from(users).orderBy(asc(users.displayName));
     return Response.json({ users: rows });
   } catch (error) {
+    return apiError(error);
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    const identity = await getRequestIdentity(request);
+    if (!identity) return unauthorized();
+    if (!canAdministerUsers(identity)) return forbidden();
+
+    const payload = (await request.json()) as {
+      email?: unknown;
+      displayName?: unknown;
+      role?: unknown;
+    };
+    const email =
+      typeof payload.email === "string"
+        ? payload.email.trim().toLowerCase()
+        : "";
+    const displayName =
+      typeof payload.displayName === "string"
+        ? payload.displayName.trim()
+        : "";
+    const role =
+      typeof payload.role === "string" && roles.has(payload.role)
+        ? (payload.role as "executive" | "pmo" | "manager" | "admin")
+        : null;
+    if (
+      !email ||
+      email.length > 254 ||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+    ) {
+      return Response.json({ error: "请输入有效的用户邮箱。" }, { status: 400 });
+    }
+    if (displayName.length < 2 || displayName.length > 60) {
+      return Response.json(
+        { error: "用户姓名长度必须为2–60个字符。" },
+        { status: 400 },
+      );
+    }
+    if (!role) {
+      return Response.json({ error: "请选择有效的用户角色。" }, { status: 400 });
+    }
+
+    const db = getDb();
+    const [existing] = await db
+      .select({ email: users.email })
+      .from(users)
+      .where(eq(users.email, email))
+      .limit(1);
+    if (existing) {
+      return Response.json({ error: "该邮箱已存在，无需重复预置。" }, { status: 409 });
+    }
+
+    await db.batch([
+      db.insert(users).values({ email, displayName, role, active: true }),
+      db.insert(auditLogs).values({
+        actorEmail: identity.email,
+        action: "user.create",
+        entityType: "user",
+        entityId: email,
+        detailJson: JSON.stringify({ displayName, role, active: true }),
+      }),
+    ]);
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(eq(users.email, email))
+      .limit(1);
+    return Response.json({ user }, { status: 201 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (message.includes("UNIQUE constraint failed")) {
+      return Response.json({ error: "该邮箱已存在，无需重复预置。" }, { status: 409 });
+    }
     return apiError(error);
   }
 }

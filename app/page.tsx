@@ -2582,12 +2582,16 @@ function AdminPage({ onNavigate, identity }: { onNavigate: Navigate; identity: I
   const [loading, setLoading] = useState(true);
   const [updatingUser, setUpdatingUser] = useState("");
   const [error, setError] = useState("");
+  const [showCreateUser, setShowCreateUser] = useState(false);
+  const [creatingUser, setCreatingUser] = useState(false);
+  const [createUserError, setCreateUserError] = useState("");
   const actionNames: Record<string, string> = {
     "weekly_report.submit": "提交周报",
     "baseline_change.approve": "批准基线",
     "snapshot.lock": "锁定快照",
     "project.create": "创建项目",
     "project.update": "更新项目",
+    "user.create": "预置用户",
     "user.update": "更新用户",
     "rule_config.publish": "发布规则",
     "risk.create": "登记风险",
@@ -2667,8 +2671,244 @@ function AdminPage({ onNavigate, identity }: { onNavigate: Navigate; identity: I
     }
   }
 
+  async function createUser(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setCreatingUser(true);
+    setCreateUserError("");
+    const form = new FormData(event.currentTarget);
+    try {
+      const response = await fetch("/api/users", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          email: form.get("email"),
+          displayName: form.get("displayName"),
+          role: form.get("role"),
+        }),
+      });
+      const result = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        throw new Error(result.error || "用户预置失败");
+      }
+      await loadAdminData();
+      setShowCreateUser(false);
+    } catch (createError) {
+      setCreateUserError(
+        createError instanceof Error ? createError.message : "用户预置失败",
+      );
+    } finally {
+      setCreatingUser(false);
+    }
+  }
+
   const canEditUsers = identity?.role === "admin";
-  return <div className="workspace-page"><WorkspaceHeader title="系统管理" subtitle="用户角色、权限边界与全量操作审计" onNavigate={onNavigate} identity={identity} /><div className="page-content admin-page">{error && <div className="form-error" role="alert">! {error}</div>}<div className="admin-grid"><section className="content-card"><div className="card-title"><div><h2>用户与角色</h2><p>{canEditUsers ? "可调整角色并启用或停用账号；身份仍由登录平台确认" : "PMO 可查看账号，只有系统管理员可调整权限"}</p></div><span className="count-badge">{usersData.filter((user) => user.active).length} / {usersData.length} 启用</span></div>{loading ? <div className="panel-loading">正在读取用户数据…</div> : <div className="user-table"><div className="table-head"><span>用户</span><span>角色</span><span>账号状态</span><span>加入时间</span></div>{usersData.map((user) => <div className={`table-row ${user.active ? "" : "inactive-user"}`} key={user.email}><span className="admin-user"><i>{user.displayName[0]}</i><b>{user.displayName}<small>{user.email}</small></b></span><select value={user.role} disabled={!canEditUsers || updatingUser === user.email || !user.active || user.email === identity?.email} onChange={(event) => updateRole(user, event.target.value as UserRow["role"])}><option value="executive">管理层只读</option><option value="manager">项目经理</option><option value="pmo">PMO</option><option value="admin">系统管理员</option></select><button type="button" className={`user-state-button ${user.active ? "active" : "disabled"}`} disabled={!canEditUsers || updatingUser === user.email || user.email === identity?.email} onClick={() => toggleUser(user)} aria-label={`${user.active ? "停用" : "启用"} ${user.displayName}`}>{updatingUser === user.email ? "处理中…" : user.active ? "● 已启用" : "— 已停用"}</button><span>{user.createdAt.slice(0, 10)}</span></div>)}</div>}</section><section className="content-card"><div className="card-title"><div><h2>操作审计</h2><p>记录所有关键数据与权限变更</p></div><button className="text-button" onClick={loadAdminData}>刷新</button></div>{loading ? <div className="panel-loading">正在读取审计记录…</div> : <div className="audit-list">{auditData.length ? auditData.map((row) => <div key={row.id}><span className="audit-dot" /><div><strong>{actionNames[row.action] ?? row.action}</strong><p>{row.actorEmail} · {row.entityType} / {row.entityId}</p></div><time>{row.createdAt.replace("T"," ").slice(0,16)}</time></div>) : <div className="empty-state">暂无审计记录</div>}</div>}</section></div></div></div>;
+  return (
+    <div className="workspace-page">
+      <WorkspaceHeader
+        title="系统管理"
+        subtitle="用户角色、权限边界与全量操作审计"
+        onNavigate={onNavigate}
+        identity={identity}
+      />
+      <div className="page-content admin-page">
+        {error && <div className="form-error" role="alert">! {error}</div>}
+        <div className="admin-grid">
+          <section className="content-card">
+            <div className="card-title">
+              <div>
+                <h2>用户与角色</h2>
+                <p>
+                  {canEditUsers
+                    ? "可预置账号、调整角色并启停；实际身份仍由统一登录平台确认"
+                    : "PMO 可查看账号，只有系统管理员可调整权限"}
+                </p>
+              </div>
+              <div className="user-card-actions">
+                <span className="count-badge">
+                  {usersData.filter((user) => user.active).length} / {usersData.length} 启用
+                </span>
+                {canEditUsers && (
+                  <button
+                    className="primary-button"
+                    onClick={() => {
+                      setCreateUserError("");
+                      setShowCreateUser(true);
+                    }}
+                  >
+                    ＋ 预置账号
+                  </button>
+                )}
+              </div>
+            </div>
+            {loading ? (
+              <div className="panel-loading">正在读取用户数据…</div>
+            ) : (
+              <div className="user-table">
+                <div className="table-head">
+                  <span>用户</span><span>角色</span><span>账号状态</span><span>加入时间</span>
+                </div>
+                {usersData.map((user) => (
+                  <div
+                    className={`table-row ${user.active ? "" : "inactive-user"}`}
+                    key={user.email}
+                  >
+                    <span className="admin-user">
+                      <i>{user.displayName[0]}</i>
+                      <b>{user.displayName}<small>{user.email}</small></b>
+                    </span>
+                    <select
+                      value={user.role}
+                      disabled={
+                        !canEditUsers ||
+                        updatingUser === user.email ||
+                        !user.active ||
+                        user.email === identity?.email
+                      }
+                      onChange={(event) =>
+                        updateRole(user, event.target.value as UserRow["role"])
+                      }
+                    >
+                      <option value="executive">管理层只读</option>
+                      <option value="manager">项目经理</option>
+                      <option value="pmo">PMO</option>
+                      <option value="admin">系统管理员</option>
+                    </select>
+                    <button
+                      type="button"
+                      className={`user-state-button ${user.active ? "active" : "disabled"}`}
+                      disabled={
+                        !canEditUsers ||
+                        updatingUser === user.email ||
+                        user.email === identity?.email
+                      }
+                      onClick={() => toggleUser(user)}
+                      aria-label={`${user.active ? "停用" : "启用"} ${user.displayName}`}
+                    >
+                      {updatingUser === user.email
+                        ? "处理中…"
+                        : user.active
+                          ? "● 已启用"
+                          : "— 已停用"}
+                    </button>
+                    <span>{user.createdAt.slice(0, 10)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+          <section className="content-card">
+            <div className="card-title">
+              <div><h2>操作审计</h2><p>记录所有关键数据与权限变更</p></div>
+              <button className="text-button" onClick={loadAdminData}>刷新</button>
+            </div>
+            {loading ? (
+              <div className="panel-loading">正在读取审计记录…</div>
+            ) : (
+              <div className="audit-list">
+                {auditData.length ? (
+                  auditData.map((row) => (
+                    <div key={row.id}>
+                      <span className="audit-dot" />
+                      <div>
+                        <strong>{actionNames[row.action] ?? row.action}</strong>
+                        <p>{row.actorEmail} · {row.entityType} / {row.entityId}</p>
+                      </div>
+                      <time>{row.createdAt.replace("T", " ").slice(0, 16)}</time>
+                    </div>
+                  ))
+                ) : (
+                  <div className="empty-state">暂无审计记录</div>
+                )}
+              </div>
+            )}
+          </section>
+        </div>
+      </div>
+      {showCreateUser && canEditUsers && (
+        <div
+          className="modal-backdrop"
+          onClick={creatingUser ? undefined : () => setShowCreateUser(false)}
+        >
+          <section
+            className="create-modal create-user-modal"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              className="modal-close"
+              type="button"
+              disabled={creatingUser}
+              onClick={() => setShowCreateUser(false)}
+              aria-label="关闭预置账号"
+            >
+              ×
+            </button>
+            <span className="modal-kicker">ACCOUNT PROVISIONING</span>
+            <h2>预置登录账号</h2>
+            <p>
+              预先绑定邮箱和系统角色。用户首次通过统一登录进入后，将直接沿用该角色与权限。
+            </p>
+            <form onSubmit={createUser}>
+              <div className="modal-form-grid">
+                <label>
+                  用户姓名
+                  <input
+                    name="displayName"
+                    minLength={2}
+                    maxLength={60}
+                    placeholder="请输入真实姓名"
+                    required
+                  />
+                </label>
+                <label>
+                  登录邮箱
+                  <input
+                    name="email"
+                    type="email"
+                    maxLength={254}
+                    placeholder="name@example.com"
+                    autoComplete="off"
+                    required
+                  />
+                </label>
+                <label>
+                  初始角色
+                  <select name="role" defaultValue="manager">
+                    <option value="executive">管理层只读</option>
+                    <option value="manager">项目经理</option>
+                    <option value="pmo">PMO</option>
+                    <option value="admin">系统管理员</option>
+                  </select>
+                </label>
+              </div>
+              <div className="account-provision-note">
+                <span>i</span>
+                <div>
+                  <strong>身份与权限分离</strong>
+                  <p>系统只保存邮箱、姓名和角色，不创建或保管密码；登录身份由统一登录平台验证。</p>
+                </div>
+              </div>
+              {createUserError && (
+                <div className="form-error" role="alert">! {createUserError}</div>
+              )}
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="outline-button"
+                  disabled={creatingUser}
+                  onClick={() => setShowCreateUser(false)}
+                >
+                  取消
+                </button>
+                <button className="primary-button" disabled={creatingUser}>
+                  {creatingUser ? "正在预置…" : "确认预置"}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function PmoPage({ onNavigate, onDataChanged, identity, projectData = projects }: { onNavigate: Navigate; onDataChanged: () => Promise<void>; identity: Identity | null; projectData?: ProjectData[] }) {

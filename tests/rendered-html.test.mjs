@@ -90,6 +90,9 @@ test("defines durable, authorized and auditable workflow APIs", async () => {
   assert.match(baselineRequestRoute, /baseline_change\.request/);
   assert.match(baselineRejectRoute, /baseline_change\.reject/);
   assert.match(snapshotRoute, /snapshot\.lock/);
+  assert.match(snapshotRoute, /dashboardAlerts/);
+  assert.match(snapshotRoute, /risk\.status !== "closed"/);
+  assert.match(snapshotRoute, /action\.status === "overdue"/);
   assert.match(snapshotRoute, /请先填写原因并重新打开/);
   assert.match(snapshotReopenRoute, /snapshot\.reopen/);
   assert.match(snapshotReopenRoute, /只能重新打开该周期的最新快照版本/);
@@ -387,4 +390,22 @@ test("shows a real authentication boundary instead of unauthenticated demo data"
   assert.match(page, /身份由登录服务验证/);
   assert.match(auth, /safeRelativeReturnPath/);
   assert.match(auth, /isReservedAuthPath/);
+});
+
+test("freezes high risks and overdue actions into the management snapshot", async () => {
+  const [snapshotRoute, bootstrap, page] = await Promise.all([
+    readFile(new URL("app/api/snapshots/lock/route.ts", templateRoot), "utf8"),
+    readFile(new URL("app/api/bootstrap/route.ts", templateRoot), "utf8"),
+    readFile(new URL("app/page.tsx", templateRoot), "utf8"),
+  ]);
+
+  assert.match(snapshotRoute, /highRisks/);
+  assert.match(snapshotRoute, /overdueActions/);
+  assert.match(snapshotRoute, /capturedDate/);
+  assert.match(bootstrap, /payload\.dashboardAlerts/);
+  assert.match(bootstrap, /dashboardAlerts,/);
+  assert.match(page, /开放高风险/);
+  assert.match(page, /逾期措施/);
+  assert.match(page, /alerts\.highRisks/);
+  assert.match(page, /alerts\.overdueActions/);
 });

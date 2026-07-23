@@ -17,6 +17,19 @@ import { getRequestIdentity, unauthorized } from "@/lib/server-auth";
 
 export const dynamic = "force-dynamic";
 
+type DashboardAlertItem = {
+  id: number;
+  projectId: string;
+  title: string;
+  owner: string;
+  targetDate: string;
+};
+
+type DashboardAlerts = {
+  highRisks: DashboardAlertItem[];
+  overdueActions: DashboardAlertItem[];
+};
+
 export async function GET(request: Request) {
   try {
     const identity = await getRequestIdentity(request);
@@ -91,11 +104,17 @@ export async function GET(request: Request) {
       (snapshot) => snapshot.status === "locked",
     );
     let dashboardProjects: Array<Record<string, unknown>> = [];
+    let dashboardAlerts: DashboardAlerts = {
+      highRisks: [],
+      overdueActions: [],
+    };
     if (lockedSnapshot) {
       const payload = JSON.parse(lockedSnapshot.payloadJson) as {
         projects?: typeof projectRows;
         milestones?: typeof milestoneRows;
+        dashboardAlerts?: DashboardAlerts;
       };
+      dashboardAlerts = payload.dashboardAlerts ?? dashboardAlerts;
       const snapshotMilestones = new Map<string, typeof milestoneRows>();
       for (const milestone of payload.milestones ?? []) {
         const rows = snapshotMilestones.get(milestone.projectId) ?? [];
@@ -158,6 +177,7 @@ export async function GET(request: Request) {
       actions: actionRows,
       risks: riskRows,
       dashboardProjects,
+      dashboardAlerts,
       dashboardSnapshot: lockedSnapshot
         ? {
             id: lockedSnapshot.id,

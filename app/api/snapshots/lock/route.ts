@@ -2,8 +2,10 @@ import { and, count, desc, eq, ne } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   auditLogs,
+  correctiveActions,
   milestones,
   projects,
+  risks,
   snapshots,
   weeklyReports,
 } from "@/db/schema";
@@ -38,8 +40,15 @@ export async function POST(request: Request) {
       );
     }
 
-    const [[projectTotal], [reportTotal], previous, projectRows, milestoneRows] =
-      await Promise.all([
+    const [
+      [projectTotal],
+      [reportTotal],
+      previous,
+      projectRows,
+      milestoneRows,
+      riskRows,
+      actionRows,
+    ] = await Promise.all([
         db.select({ value: count() }).from(projects),
         db
           .select({ value: count() })
@@ -58,6 +67,8 @@ export async function POST(request: Request) {
           .limit(1),
         db.select().from(projects),
         db.select().from(milestones),
+        db.select().from(risks),
+        db.select().from(correctiveActions),
       ]);
 
     const version = (previous[0]?.version ?? 0) + 1;
@@ -71,10 +82,39 @@ export async function POST(request: Request) {
       projectTotal.value === 0
         ? 0
         : Number(((reportTotal.value / projectTotal.value) * 100).toFixed(1));
+    const capturedAt = new Date().toISOString();
+    const capturedDate = capturedAt.slice(0, 10);
+    const dashboardAlerts = {
+      highRisks: riskRows
+        .filter((risk) => risk.status !== "closed" && risk.level === "high")
+        .map((risk) => ({
+          id: risk.id,
+          projectId: risk.projectId,
+          title: risk.title,
+          owner: risk.owner,
+          targetDate: risk.dueDate,
+        })),
+      overdueActions: actionRows
+        .filter(
+          (action) =>
+            action.status !== "completed" &&
+            (action.status === "overdue" ||
+              (Boolean(action.recoveryDate) &&
+                action.recoveryDate < capturedDate)),
+        )
+        .map((action) => ({
+          id: action.id,
+          projectId: action.projectId,
+          title: action.name,
+          owner: action.owner,
+          targetDate: action.recoveryDate,
+        })),
+    };
     const snapshotPayload = JSON.stringify({
       projects: projectRows,
       milestones: milestoneRows,
-      capturedAt: new Date().toISOString(),
+      dashboardAlerts,
+      capturedAt,
     });
 
     const [snapshot] = await db
@@ -101,6 +141,8 @@ export async function POST(request: Request) {
         weekKey,
         version,
         completeness,
+        highRiskCount: dashboardAlerts.highRisks.length,
+        overdueActionCount: dashboardAlerts.overdueActions.length,
       }),
     });
 

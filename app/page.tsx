@@ -90,6 +90,17 @@ type DashboardSnapshot = {
   completeness: number;
   lockedAt: string;
 };
+type DashboardAlertItem = {
+  id: number;
+  projectId: string;
+  title: string;
+  owner: string;
+  targetDate: string;
+};
+type DashboardAlerts = {
+  highRisks: DashboardAlertItem[];
+  overdueActions: DashboardAlertItem[];
+};
 type TrendPoint = {
   weekKey: string;
   version: number;
@@ -442,7 +453,7 @@ function LoginScreen() {
   </main>;
 }
 
-function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = defaultTemplateData, trends = [] }: { onNavigate: Navigate; projectData?: ProjectData[]; snapshot: DashboardSnapshot | null; templateData?: TemplateData[]; trends?: TrendPoint[] }) {
+function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = defaultTemplateData, trends = [], alerts }: { onNavigate: Navigate; projectData?: ProjectData[]; snapshot: DashboardSnapshot | null; templateData?: TemplateData[]; trends?: TrendPoint[]; alerts: DashboardAlerts }) {
   const [org, setOrg] = useState("全部组织");
   const [owner, setOwner] = useState("全部负责人");
   const [projectType, setProjectType] = useState("全部类型");
@@ -624,6 +635,16 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
         <div className="upcoming">
           <h3><Icon>◷</Icon> 未来7日关键节点</h3>
           {upcomingMilestones.length ? <ul>{upcomingMilestones.map(({ project, milestone }) => <li key={`${project.id}-${milestone.id}`}><span>{milestone.plannedFinish.slice(5).replace("-", "/")}</span><b>{project.name} · {milestone.name}</b><em>{daysBetween(today, milestone.plannedFinish)}天</em></li>)}</ul> : <div className="dark-empty-inline">未来7日无到期节点</div>}
+        </div>
+        <div className="governance-alerts">
+          <section>
+            <h3><span>!</span> 开放高风险 <b>{alerts.highRisks.length}</b></h3>
+            {alerts.highRisks.length ? alerts.highRisks.slice(0, 2).map((risk) => <button key={`risk-${risk.id}`} onClick={() => onNavigate("project", risk.projectId)}><strong>{projectData.find((project) => project.id === risk.projectId)?.name ?? risk.projectId}</strong><small>{risk.title} · {risk.owner}</small><em>{risk.targetDate || "未设置日期"}</em></button>) : <p>当前快照无开放高风险</p>}
+          </section>
+          <section>
+            <h3><span>⌛</span> 逾期措施 <b>{alerts.overdueActions.length}</b></h3>
+            {alerts.overdueActions.length ? alerts.overdueActions.slice(0, 2).map((action) => <button key={`action-${action.id}`} onClick={() => onNavigate("project", action.projectId)}><strong>{projectData.find((project) => project.id === action.projectId)?.name ?? action.projectId}</strong><small>{action.title} · {action.owner}</small><em>{action.targetDate || "未设置日期"}</em></button>) : <p>当前快照无逾期措施</p>}
+          </section>
         </div>
       </aside>
     </section>
@@ -2469,6 +2490,10 @@ export default function Home() {
   const [dashboardData, setDashboardData] = useState<ProjectData[]>([]);
   const [dashboardSnapshot, setDashboardSnapshot] =
     useState<DashboardSnapshot | null>(null);
+  const [dashboardAlerts, setDashboardAlerts] = useState<DashboardAlerts>({
+    highRisks: [],
+    overdueActions: [],
+  });
   const [trendData, setTrendData] = useState<TrendPoint[]>([]);
   const [templateData, setTemplateData] =
     useState<TemplateData[]>(defaultTemplateData);
@@ -2496,6 +2521,7 @@ export default function Home() {
         projects?: ProjectData[];
         identity?: Identity;
         dashboardProjects?: ProjectData[];
+        dashboardAlerts?: DashboardAlerts;
         dashboardSnapshot?: DashboardSnapshot | null;
         milestoneTemplates?: TemplateData[];
         weeklyReports?: WeeklyReportRow[];
@@ -2507,6 +2533,9 @@ export default function Home() {
         setDashboardData([]);
       }
       setDashboardSnapshot(data.dashboardSnapshot ?? null);
+      setDashboardAlerts(
+        data.dashboardAlerts ?? { highRisks: [], overdueActions: [] },
+      );
       if (data.milestoneTemplates?.length) {
         setTemplateData(data.milestoneTemplates);
       }
@@ -2539,6 +2568,6 @@ export default function Home() {
   }, [refreshData]);
 
   if (dataState === "unauthenticated") return <LoginScreen />;
-  if (view === "cockpit") return <><Cockpit onNavigate={navigate} projectData={dashboardData} snapshot={dashboardSnapshot} templateData={templateData} trends={trendData} />{dataState === "fallback" && <div className="data-banner">当前数据服务不可用，管理大屏不展示未核实的演示数据。</div>}</>;
+  if (view === "cockpit") return <><Cockpit onNavigate={navigate} projectData={dashboardData} snapshot={dashboardSnapshot} templateData={templateData} trends={trendData} alerts={dashboardAlerts} />{dataState === "fallback" && <div className="data-banner">当前数据服务不可用，管理大屏不展示未核实的演示数据。</div>}</>;
   return <div className="app-shell"><Sidebar view={view} onNavigate={navigate} identity={identity} /><div className="workspace">{view === "portfolio" && <Portfolio onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} identity={identity} templateData={templateData} weeklyReports={weeklyReportData} />}{view === "project" && <ProjectDetail onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} projectId={selectedProjectId} identity={identity} />}{view === "report" && <WeeklyReport onNavigate={navigate} onDataChanged={refreshData} projectId={selectedProjectId} projectData={projectData} identity={identity} snapshot={dashboardSnapshot} />}{view === "pmo" && <PmoPage onNavigate={navigate} onDataChanged={refreshData} identity={identity} projectData={projectData} />}{view === "admin" && <AdminPage onNavigate={navigate} identity={identity} />}</div></div>;
 }

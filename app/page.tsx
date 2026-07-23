@@ -1,9 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import PortfolioAnalytics from "./portfolio-analytics";
 
 type Status = "green" | "yellow" | "red" | "na";
-type View = "cockpit" | "portfolio" | "project" | "report" | "pmo" | "admin";
+type View =
+  | "cockpit"
+  | "portfolio"
+  | "analytics"
+  | "project"
+  | "report"
+  | "pmo"
+  | "admin";
 type Role = "executive" | "pmo" | "manager" | "admin";
 type Identity = { email: string; displayName: string; role: Role };
 type Navigate = (view: View, projectId?: string) => void;
@@ -690,6 +698,7 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
 function Sidebar({ view, onNavigate, identity }: { view: View; onNavigate: Navigate; identity: Identity | null }) {
   const items: Array<{ id: View; icon: string; label: string; roles?: Role[] }> = [
     { id: "portfolio", icon: "⌘", label: "项目总览" },
+    { id: "analytics", icon: "▥", label: "组合分析" },
     { id: "project", icon: "▣", label: "项目台账" },
     { id: "report", icon: "✎", label: "周度填报", roles: ["manager", "pmo", "admin"] },
     { id: "pmo", icon: "◇", label: "PMO 管理", roles: ["pmo", "admin"] },
@@ -3590,5 +3599,5 @@ export default function Home() {
 
   if (dataState === "unauthenticated") return <LoginScreen />;
   if (view === "cockpit") return <><Cockpit onNavigate={navigate} projectData={dashboardData} snapshot={dashboardSnapshot} templateData={templateData} trends={trendData} alerts={dashboardAlerts} />{dataState === "fallback" && <div className="data-banner">当前数据服务不可用，管理大屏不展示未核实的演示数据。</div>}</>;
-  return <div className="app-shell"><Sidebar view={view} onNavigate={navigate} identity={identity} /><div className="workspace">{view === "portfolio" && <Portfolio onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} identity={identity} templateData={templateData} weeklyReports={weeklyReportData} />}{view === "project" && <ProjectDetail onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} projectId={selectedProjectId} identity={identity} />}{view === "report" && <WeeklyReport onNavigate={navigate} onDataChanged={refreshData} projectId={selectedProjectId} projectData={projectData} identity={identity} snapshot={dashboardSnapshot} />}{view === "pmo" && <PmoPage onNavigate={navigate} onDataChanged={refreshData} identity={identity} projectData={projectData} />}{view === "admin" && <AdminPage onNavigate={navigate} identity={identity} />}</div></div>;
+  return <div className="app-shell"><Sidebar view={view} onNavigate={navigate} identity={identity} /><div className="workspace">{view === "portfolio" && <Portfolio onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} identity={identity} templateData={templateData} weeklyReports={weeklyReportData} />}{view === "analytics" && <PortfolioAnalytics onNavigate={(next, projectId) => navigate(next, projectId)} identity={identity} header={<WorkspaceHeader title="项目组合分析" subtitle="从组织、类型、负责人和标准节点维度识别共性瓶颈与基线漂移" onNavigate={navigate} identity={identity} />} />}{view === "project" && <ProjectDetail onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} projectId={selectedProjectId} identity={identity} />}{view === "report" && <WeeklyReport onNavigate={navigate} onDataChanged={refreshData} projectId={selectedProjectId} projectData={projectData} identity={identity} snapshot={dashboardSnapshot} />}{view === "pmo" && <PmoPage onNavigate={navigate} onDataChanged={refreshData} identity={identity} projectData={projectData} />}{view === "admin" && <AdminPage onNavigate={navigate} identity={identity} />}</div></div>;
 }

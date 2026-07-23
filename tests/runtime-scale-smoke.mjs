@@ -4,6 +4,9 @@ import { performance } from "node:perf_hooks";
 const baseUrl = process.env.BASE_URL ?? "http://localhost:4176";
 const targetProjectCount = Number(process.env.TARGET_PROJECT_COUNT ?? 50);
 const maxP95Ms = Number(process.env.MAX_BOOTSTRAP_P95_MS ?? 3000);
+const maxAnalyticsP95Ms = Number(
+  process.env.MAX_ANALYTICS_P95_MS ?? maxP95Ms,
+);
 
 const template = [
   ["立项启动", 5, false],
@@ -129,6 +132,41 @@ assert(
   `bootstrap P95 ${p95Ms.toFixed(1)}ms 超过阈值 ${maxP95Ms}ms`,
 );
 
+const analyticsSamples = [];
+let analytics;
+for (let index = 0; index < 5; index += 1) {
+  analytics = await readJson("/api/portfolio/analytics", {
+    cache: "no-store",
+  });
+  assert.equal(
+    analytics.response.status,
+    200,
+    JSON.stringify(analytics.body),
+  );
+  analyticsSamples.push(analytics.elapsedMs);
+}
+assert(analytics, "未取得组合分析数据");
+assert.equal(
+  analytics.body.summary.projectCount,
+  latest.body.projects.length,
+  "组合分析未覆盖全部项目",
+);
+assert(
+  analytics.body.bottlenecks.length >= 12,
+  `组合分析标准节点不足：${analytics.body.bottlenecks.length}`,
+);
+const sortedAnalyticsSamples = [...analyticsSamples].sort(
+  (left, right) => left - right,
+);
+const analyticsP95Ms =
+  sortedAnalyticsSamples[
+    Math.ceil(sortedAnalyticsSamples.length * 0.95) - 1
+  ];
+assert(
+  analyticsP95Ms <= maxAnalyticsP95Ms,
+  `analytics P95 ${analyticsP95Ms.toFixed(1)}ms 超过阈值 ${maxAnalyticsP95Ms}ms`,
+);
+
 console.log(
   JSON.stringify(
     {
@@ -148,6 +186,12 @@ console.log(
       samplesMs: samples.map((value) => Number(value.toFixed(1))),
       p95Ms: Number(p95Ms.toFixed(1)),
       thresholdMs: maxP95Ms,
+      analyticsBytes: Buffer.byteLength(analytics.text),
+      analyticsSamplesMs: analyticsSamples.map((value) =>
+        Number(value.toFixed(1)),
+      ),
+      analyticsP95Ms: Number(analyticsP95Ms.toFixed(1)),
+      analyticsThresholdMs: maxAnalyticsP95Ms,
     },
     null,
     2,

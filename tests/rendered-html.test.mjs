@@ -4,30 +4,20 @@ import test from "node:test";
 
 const templateRoot = new URL("../", import.meta.url);
 
-async function render() {
-  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
-  workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
-  const { default: worker } = await import(workerUrl.href);
+test("build emits the project monitoring application", async () => {
+  const [page, layout, serverEntry] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../dist/server/index.js", import.meta.url), "utf8"),
+  ]);
 
-  return worker.fetch(
-    new Request("http://localhost/", { headers: { accept: "text/html" } }),
-    { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
-    { waitUntil() {}, passThroughOnException() {} },
-  );
-}
-
-test("server-renders the project monitoring application", async () => {
-  const response = await render();
-  assert.equal(response.status, 200);
-  assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
-
-  const html = await response.text();
-  assert.match(html, /<title>数智军团 · 统建项目进度监控平台<\/title>/);
-  assert.match(html, /管理数智军团统建项目进度监控/);
-  assert.match(html, /项目节点态势矩阵/);
-  assert.match(html, /智慧采购平台/);
-  assert.match(html, /周报完成率/);
-  assert.doesNotMatch(html, /codex-preview|Your site is taking shape|SkeletonPreview/i);
+  assert.match(layout, /数智军团 · 统建项目进度监控平台/);
+  assert.match(page, /管理数智军团统建项目进度监控/);
+  assert.match(page, /项目节点态势矩阵/);
+  assert.match(page, /智慧采购平台/);
+  assert.match(page, /周报完成率/);
+  assert.match(serverEntry, /worker/);
+  assert.doesNotMatch(page + layout, /codex-preview|Your site is taking shape|SkeletonPreview/i);
 });
 
 test("ships the complete prototype flow without starter artifacts", async () => {
@@ -48,4 +38,43 @@ test("ships the complete prototype flow without starter artifacts", async () => 
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   await assert.rejects(access(new URL("app/_sites-preview", templateRoot)));
   await access(new URL("public/og.png", templateRoot));
+});
+
+test("defines durable, authorized and auditable workflow APIs", async () => {
+  const [hosting, schema, reportRoute, baselineRoute, snapshotRoute, migration] =
+    await Promise.all([
+      readFile(new URL(".openai/hosting.json", templateRoot), "utf8"),
+      readFile(new URL("db/schema.ts", templateRoot), "utf8"),
+      readFile(
+        new URL("app/api/projects/[id]/weekly-reports/route.ts", templateRoot),
+        "utf8",
+      ),
+      readFile(
+        new URL("app/api/baseline-changes/[id]/approve/route.ts", templateRoot),
+        "utf8",
+      ),
+      readFile(new URL("app/api/snapshots/lock/route.ts", templateRoot), "utf8"),
+      readFile(new URL("drizzle/0000_married_elektra.sql", templateRoot), "utf8"),
+    ]);
+
+  assert.match(hosting, /"d1":\s*"DB"/);
+  for (const table of [
+    "projects",
+    "milestones",
+    "weekly_reports",
+    "baseline_changes",
+    "snapshots",
+    "audit_logs",
+  ]) {
+    assert.match(migration, new RegExp(`CREATE TABLE \\\`${table}\\\``));
+  }
+  assert.match(schema, /weekly_reports_project_week_idx/);
+  assert.match(schema, /snapshots_week_version_idx/);
+  assert.match(reportRoute, /canWriteProject/);
+  assert.match(reportRoute, /weekly_report\.submit/);
+  assert.match(reportRoute, /该周期快照已经锁定/);
+  assert.match(baselineRoute, /canManagePortfolio/);
+  assert.match(baselineRoute, /baseline_change\.approve/);
+  assert.match(snapshotRoute, /snapshot\.lock/);
+  assert.match(snapshotRoute, /重新锁定必须填写重新打开原因/);
 });

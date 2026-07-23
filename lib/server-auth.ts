@@ -1,0 +1,72 @@
+import { count, eq } from "drizzle-orm";
+import { getDb } from "@/db";
+import { users } from "@/db/schema";
+
+export type AppRole = "executive" | "pmo" | "manager" | "admin";
+
+export type RequestIdentity = {
+  email: string;
+  displayName: string;
+  role: AppRole;
+};
+
+const EMAIL_HEADER = "oai-authenticated-user-email";
+const NAME_HEADER = "oai-authenticated-user-full-name";
+const NAME_ENCODING_HEADER = "oai-authenticated-user-full-name-encoding";
+
+function decodeDisplayName(request: Request, email: string) {
+  const value = request.headers.get(NAME_HEADER);
+  if (!value || request.headers.get(NAME_ENCODING_HEADER) !== "percent-encoded-utf-8") {
+    return email;
+  }
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return email;
+  }
+}
+
+export async function getRequestIdentity(request: Request): Promise<RequestIdentity | null> {
+  const url = new URL(request.url);
+  const forwardedEmail = request.headers.get(EMAIL_HEADER)?.trim().toLowerCase();
+  const isLocal = url.hostname === "localhost" || url.hostname === "127.0.0.1";
+  const email = forwardedEmail || (isLocal ? "demo@local" : "");
+  if (!email) return null;
+
+  const db = getDb();
+  const [existing] = await db.select().from(users).where(eq(users.email, email)).limit(1);
+  if (existing && !existing.active) return null;
+  if (existing) {
+    return {
+      email: existing.email,
+      displayName: existing.displayName,
+      role: existing.role,
+    };
+  }
+
+  const displayName = forwardedEmail ? decodeDisplayName(request, email) : "本地演示用户";
+  const [{ value: userCount }] = await db.select({ value: count() }).from(users);
+  const role: AppRole = isLocal || userCount === 0 ? "admin" : "manager";
+  await db.insert(users).values({ email, displayName, role }).onConflictDoNothing();
+  return { email, displayName, role };
+}
+
+export function canWriteProject(identity: RequestIdentity, ownerEmail: string) {
+  return (
+    identity.role === "admin" ||
+    identity.role === "pmo" ||
+    (identity.role === "manager" && identity.email === ownerEmail.toLowerCase())
+  );
+}
+
+export function canManagePortfolio(identity: RequestIdentity) {
+  return identity.role === "admin" || identity.role === "pmo";
+}
+
+export function unauthorized() {
+  return Response.json({ error: "请先登录后再执行此操作。" }, { status: 401 });
+}
+
+export function forbidden() {
+  return Response.json({ error: "当前账号没有执行此操作的权限。" }, { status: 403 });
+}

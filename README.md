@@ -21,6 +21,9 @@
 - 红黄节点偏差原因和纠偏措施闭环
 - 基线变更审批及版本追溯
 - PMO 数据质量检查与周度快照锁定
+- D1 数据库持久化、服务端写入校验和操作审计
+- 登录用户身份识别及管理层、PMO、项目经理权限边界
+- 已锁定周期防篡改和重复审批保护
 - 桌面端和移动端响应式布局
 - 自动化服务端渲染和关键流程结构测试
 
@@ -39,7 +42,7 @@
 - Vinext + Vite
 - TypeScript
 - Tailwind CSS
-- Cloudflare Workers / OpenAI Sites
+- Cloudflare Workers、D1 / OpenAI Sites
 - Node.js Test Runner
 
 ## 本地运行
@@ -48,6 +51,7 @@
 
 ```bash
 npm ci
+npm run db:local:apply
 npm run dev
 ```
 
@@ -65,8 +69,10 @@ node --test tests/rendered-html.test.mjs
 ```text
 app/
   page.tsx          主要业务页面与交互
+  api/              周报、基线、快照及数据初始化 API
   globals.css       大屏、工作台及响应式视觉系统
-db/                 持久化模型预留
+db/                 D1 持久化模型
+drizzle/            数据库迁移
 tests/              自动化测试
 worker/             Cloudflare Worker 入口
 public/             品牌与分享资源
@@ -74,5 +80,4 @@ public/             品牌与分享资源
 
 ## 当前阶段
 
-当前版本已完成高保真交互原型和私有部署。后续将继续补充持久化数据库、真实身份与角色权限、生产级 API、附件存储以及更完整的自动化测试。
-
+当前版本已完成高保真界面、D1 持久化、身份权限、核心工作流 API 和私有部署。后续将继续补充项目与用户配置页面、附件存储、通知催报、更多组合分析以及覆盖完整业务分支的自动化测试。

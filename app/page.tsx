@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type Status = "green" | "yellow" | "red" | "na";
 type View = "cockpit" | "portfolio" | "project" | "report" | "pmo";
@@ -54,11 +54,11 @@ function AppLogo({ dark = false }: { dark?: boolean }) {
   </div>;
 }
 
-function Cockpit({ onNavigate }: { onNavigate: (view: View, projectId?: string) => void }) {
+function Cockpit({ onNavigate, projectData = projects }: { onNavigate: (view: View, projectId?: string) => void; projectData?: typeof projects }) {
   const [org, setOrg] = useState("全部组织");
   const [health, setHealth] = useState("全部状态");
   const [selected, setSelected] = useState<{ project: typeof projects[0]; index: number } | null>(null);
-  const filtered = projects.filter(p => (org === "全部组织" || p.org === org) && (health === "全部状态" || statusLabel[p.status] === health));
+  const filtered = projectData.filter(p => (org === "全部组织" || p.org === org) && (health === "全部状态" || statusLabel[p.status] === health)).slice(0, 10);
   const total = 44, green = 31, yellow = 8, red = 5;
 
   return <main className="cockpit">
@@ -187,10 +187,10 @@ function WorkspaceHeader({ title, subtitle, onNavigate }: { title: string; subti
   </header>;
 }
 
-function Portfolio({ onNavigate }: { onNavigate: (v: View) => void }) {
+function Portfolio({ onNavigate, projectData = projects }: { onNavigate: (v: View) => void; projectData?: typeof projects }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("全部");
-  const filtered = useMemo(() => projects.filter(p => p.name.includes(query) && (status === "全部" || statusLabel[p.status] === status)), [query, status]);
+  const filtered = useMemo(() => projectData.filter(p => p.name.includes(query) && (status === "全部" || statusLabel[p.status] === status)).slice(0, 10), [query, status, projectData]);
   return <div className="workspace-page">
     <WorkspaceHeader title="项目组合总览" subtitle="以统一口径监控 44 个统建项目的进度与健康状态" onNavigate={onNavigate} />
     <div className="page-content">
@@ -210,7 +210,7 @@ function Portfolio({ onNavigate }: { onNavigate: (v: View) => void }) {
             <span><StatusPill status={p.status} /></span><span className="owner"><i>{p.owner[0]}</i>{p.owner}</span>
             <span className="dual-progress"><b>{p.actual}%</b><ProgressBar value={p.actual} tone={p.status} /><small>计划 {p.plan}%</small></span>
             <span className={p.actual - p.plan < -5 ? "negative" : "positive"}>{p.actual - p.plan > 0 ? "+" : ""}{p.actual - p.plan} pp</span>
-            <span className={`risk ${p.risk === "高" ? "high" : p.risk === "中" ? "medium" : "low"}`}>{p.risk}风险</span><span>07-17 16:4{projects.indexOf(p)}</span><button className="more" aria-label="更多">•••</button>
+            <span className={`risk ${p.risk === "高" ? "high" : p.risk === "中" ? "medium" : "low"}`}>{p.risk}风险</span><span>07-17 16:4{projectData.indexOf(p)}</span><button className="more" aria-label="更多">•••</button>
           </div>)}
         </div>
         <div className="pagination"><span>共 44 条，每页 10 条</span><div><button>‹</button><button className="active">1</button><button>2</button><button>3</button><button>4</button><button>5</button><button>›</button></div></div>
@@ -219,9 +219,10 @@ function Portfolio({ onNavigate }: { onNavigate: (v: View) => void }) {
   </div>;
 }
 
-function ProjectDetail({ onNavigate }: { onNavigate: (v: View) => void }) {
+function ProjectDetail({ onNavigate, projectData = projects }: { onNavigate: (v: View) => void; projectData?: typeof projects }) {
   const [tab, setTab] = useState("节点计划");
   const [expanded, setExpanded] = useState<number | null>(3);
+  const currentProject = projectData.find((project) => project.id === "P02") ?? projects[1];
   return <div className="workspace-page">
     <WorkspaceHeader title="项目详情" subtitle="项目台账 / 智慧采购平台" onNavigate={onNavigate} />
     <div className="page-content project-detail">
@@ -239,7 +240,7 @@ function ProjectDetail({ onNavigate }: { onNavigate: (v: View) => void }) {
         <div className="card-title"><div><h2>项目节点计划</h2><p>当前基线 V2 · 批准于 2026-06-18　<span>较原始基线累计延期 9 天</span></p></div><button className="outline-button">申请基线变更</button></div>
         <div className="milestone-list">
           {milestones.map((m, i) => {
-            const status = projects[1].cells[i]; const complete = [100,100,100,68,25,0,0][i];
+            const status = currentProject.cells[i] ?? "na"; const complete = [100,100,100,Math.max(68, currentProject.actual),25,0,0][i];
             return <div className={`milestone-row ${expanded === i ? "expanded" : ""}`} key={m}>
               <button className="milestone-main" onClick={() => setExpanded(expanded === i ? null : i)}>
                 <span className={`milestone-index ${status}`}>{i + 1}</span><span className="milestone-name"><strong>{m}</strong><small>{i === 3 || i === 6 ? "◆ 关键节点" : "标准节点"} · 权重 {i === 3 ? 20 : i === 6 ? 15 : 10}%</small></span>
@@ -256,11 +257,64 @@ function ProjectDetail({ onNavigate }: { onNavigate: (v: View) => void }) {
   </div>;
 }
 
-function WeeklyReport({ onNavigate }: { onNavigate: (v: View) => void }) {
+function WeeklyReport({ onNavigate, onDataChanged }: { onNavigate: (v: View) => void; onDataChanged: () => Promise<void> }) {
   const [declared, setDeclared] = useState(55);
+  const [systemProgress, setSystemProgress] = useState(53);
   const [reason, setReason] = useState("核心供应商接口规范确认晚于计划，影响开发联调窗口。");
   const [saved, setSaved] = useState(false);
-  const diff = declared - 53;
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+  const diff = declared - systemProgress;
+
+  useEffect(() => {
+    fetch("/api/bootstrap")
+      .then(async (response) => {
+        if (!response.ok) throw new Error("无法读取当前项目数据");
+        return response.json();
+      })
+      .then((data: { projects?: Array<{ id: string; actual: number; declared: number }> }) => {
+        const project = data.projects?.find((item) => item.id === "P02");
+        if (project) {
+          setSystemProgress(project.actual);
+          setDeclared(project.declared);
+        }
+      })
+      .catch(() => undefined);
+  }, []);
+
+  async function submitWeeklyReport() {
+    setSubmitting(true);
+    setSubmitError("");
+    try {
+      const response = await fetch("/api/projects/P02/weekly-reports", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          weekKey: "2026-W30",
+          systemProgress,
+          declaredProgress: declared,
+          reason,
+          forecastFinish: "2026-07-28",
+          milestone: { sequence: 4, completion: 68, forecastFinish: "2026-07-28" },
+          action: {
+            name: "接口联调专项攻坚",
+            owner: "李程",
+            recoveryDate: "2026-07-28",
+            detail: "增加2名接口开发人员，每日17:00开展问题清零会。",
+          },
+        }),
+      });
+      const result = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(result.error || "周报提交失败");
+      await onDataChanged();
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2800);
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : "周报提交失败");
+    } finally {
+      setSubmitting(false);
+    }
+  }
   return <div className="workspace-page">
     <WorkspaceHeader title="周度进度填报" subtitle="2026年第30周 · 填报截止 07月24日 17:00" onNavigate={onNavigate} />
     <div className="page-content report-page">
@@ -269,7 +323,7 @@ function WeeklyReport({ onNavigate }: { onNavigate: (v: View) => void }) {
         <div className="report-form">
           <section className="content-card form-section">
             <div className="form-title"><span>01</span><div><h3>总体进度确认</h3><p>系统根据节点权重自动计算，申报值偏差超过 5pp 将提示核验。</p></div></div>
-            <div className="progress-compare"><div><small>系统计算进度</small><strong>53%</strong><ProgressBar value={53} /></div><div><small>项目经理申报进度</small><strong>{declared}%</strong><input aria-label="项目经理申报进度" type="range" min="0" max="100" value={declared} onChange={e => setDeclared(Number(e.target.value))} /></div><div className={Math.abs(diff) > 5 ? "compare-warning" : "compare-ok"}><span>{Math.abs(diff) > 5 ? "!" : "✓"}</span><strong>{diff > 0 ? "+" : ""}{diff}pp</strong><small>{Math.abs(diff) > 5 ? "需说明差异" : "口径一致"}</small></div></div>
+            <div className="progress-compare"><div><small>系统计算进度</small><strong>{systemProgress}%</strong><ProgressBar value={systemProgress} /></div><div><small>项目经理申报进度</small><strong>{declared}%</strong><input aria-label="项目经理申报进度" type="range" min="0" max="100" value={declared} onChange={e => setDeclared(Number(e.target.value))} /></div><div className={Math.abs(diff) > 5 ? "compare-warning" : "compare-ok"}><span>{Math.abs(diff) > 5 ? "!" : "✓"}</span><strong>{diff > 0 ? "+" : ""}{diff}pp</strong><small>{Math.abs(diff) > 5 ? "需说明差异" : "口径一致"}</small></div></div>
           </section>
           <section className="content-card form-section">
             <div className="form-title"><span>02</span><div><h3>节点进展更新</h3><p>仅展示本周有变化或需要关注的节点。</p></div></div>
@@ -287,7 +341,8 @@ function WeeklyReport({ onNavigate }: { onNavigate: (v: View) => void }) {
             <div className="form-title"><span>03</span><div><h3>异常纠偏措施</h3><p>红黄节点必须明确措施、责任人与预计恢复时间。</p></div></div>
             <div className="action-form"><div className="form-grid"><label>措施名称 <b>*</b><input defaultValue="接口联调专项攻坚" /></label><label>责任人 <b>*</b><input defaultValue="李程" /></label><label>预计恢复日期 <b>*</b><input type="date" defaultValue="2026-07-28" /></label><label>措施状态<select><option>进行中</option><option>待启动</option><option>已完成</option></select></label></div><label className="full-label">具体行动<input defaultValue="增加2名接口开发人员，每日17:00开展问题清零会。" /></label></div>
           </section>
-          <div className="report-actions"><button className="outline-button">保存草稿</button><button className="primary-button" onClick={() => { setSaved(true); setTimeout(() => setSaved(false), 2800); }}>提交本周进度</button></div>
+          {submitError && <div className="form-error" role="alert">! {submitError}</div>}
+          <div className="report-actions"><button className="outline-button">保存草稿</button><button className="primary-button" disabled={submitting} onClick={submitWeeklyReport}>{submitting ? "正在提交…" : "提交本周进度"}</button></div>
         </div>
         <aside className="report-aside">
           <div className="aside-card"><h3>填报完整度</h3><div className="completion-circle"><strong>92%</strong></div><ul><li className="done">✓ 总体进度</li><li className="done">✓ 节点更新</li><li className="done">✓ 偏差原因</li><li className="done">✓ 纠偏措施</li><li>○ 支撑附件（选填）</li></ul></div>
@@ -300,18 +355,82 @@ function WeeklyReport({ onNavigate }: { onNavigate: (v: View) => void }) {
   </div>;
 }
 
-function PmoPage({ onNavigate }: { onNavigate: (v: View) => void }) {
+function PmoPage({ onNavigate, onDataChanged }: { onNavigate: (v: View) => void; onDataChanged: () => Promise<void> }) {
   const [locked, setLocked] = useState(false);
   const [approved, setApproved] = useState(false);
   const [tab, setTab] = useState("快照锁定");
+  const [changeId, setChangeId] = useState(1);
+  const [working, setWorking] = useState(false);
+  const [operationError, setOperationError] = useState("");
+
+  useEffect(() => {
+    fetch("/api/bootstrap")
+      .then(async (response) => {
+        if (!response.ok) throw new Error("无法读取PMO数据");
+        return response.json();
+      })
+      .then((data: {
+        snapshots?: Array<{ weekKey: string }>;
+        baselineChanges?: Array<{ id: number; projectId: string; status: string }>;
+      }) => {
+        setLocked(Boolean(data.snapshots?.some((snapshot) => snapshot.weekKey === "2026-W30")));
+        const change = data.baselineChanges?.find((item) => item.projectId === "P02");
+        if (change) {
+          setChangeId(change.id);
+          setApproved(change.status === "approved");
+        }
+      })
+      .catch(() => undefined);
+  }, []);
+
+  async function lockSnapshot() {
+    setWorking(true);
+    setOperationError("");
+    try {
+      const response = await fetch("/api/snapshots/lock", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ weekKey: "2026-W30" }),
+      });
+      const result = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(result.error || "快照锁定失败");
+      setLocked(true);
+      await onDataChanged();
+    } catch (error) {
+      setOperationError(error instanceof Error ? error.message : "快照锁定失败");
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function approveBaseline() {
+    setWorking(true);
+    setOperationError("");
+    try {
+      const response = await fetch(`/api/baseline-changes/${changeId}/approve`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
+      const result = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(result.error || "基线审批失败");
+      setApproved(true);
+      await onDataChanged();
+    } catch (error) {
+      setOperationError(error instanceof Error ? error.message : "基线审批失败");
+    } finally {
+      setWorking(false);
+    }
+  }
   return <div className="workspace-page">
     <WorkspaceHeader title="PMO 管理中心" subtitle="统一规则、治理数据、锁定管理口径" onNavigate={onNavigate} />
     <div className="page-content pmo-page">
       <div className="pmo-tabs">{["快照锁定","基线变更","节点模板","预警规则"].map(t => <button className={tab === t ? "active" : ""} onClick={() => setTab(t)} key={t}>{t}{t === "基线变更" && <b>3</b>}</button>)}</div>
       {tab === "快照锁定" && <>
         <section className={`snapshot-banner ${locked ? "locked" : ""}`}>
-          <div className="snapshot-calendar"><span>JUL</span><strong>24</strong></div><div><span className="kicker">2026年第30周</span><h2>{locked ? "本周快照已锁定" : "距离本周快照锁定还有 2天 02:21"}</h2><p>{locked ? "管理层大屏已切换至最新锁定口径，历史版本已永久保留。" : "计划于周五 17:00 自动锁定，PMO 可在数据检查通过后提前锁定。"}</p></div><button className={locked ? "locked-button" : "primary-button"} onClick={() => setLocked(true)}>{locked ? "✓ 已锁定 · V1" : "立即锁定快照"}</button>
+          <div className="snapshot-calendar"><span>JUL</span><strong>24</strong></div><div><span className="kicker">2026年第30周</span><h2>{locked ? "本周快照已锁定" : "距离本周快照锁定还有 2天 02:21"}</h2><p>{locked ? "管理层大屏已切换至最新锁定口径，历史版本已永久保留。" : "计划于周五 17:00 自动锁定，PMO 可在数据检查通过后提前锁定。"}</p></div><button className={locked ? "locked-button" : "primary-button"} disabled={working || locked} onClick={lockSnapshot}>{locked ? "✓ 已锁定 · V1" : working ? "正在锁定…" : "立即锁定快照"}</button>
         </section>
+        {operationError && <div className="form-error" role="alert">! {operationError}</div>}
         <div className="pmo-grid">
           <section className="content-card quality-panel"><div className="card-title"><div><h2>锁定前数据检查</h2><p>系统自动检查完整性、时效性与规则异常</p></div><span className="quality-score">96.8分</span></div>
             <div className="quality-items"><div className="ok"><span>✓</span><div><strong>周报提交</strong><small>42 / 44 已完成</small></div><b>95.5%</b></div><div className="ok"><span>✓</span><div><strong>关键字段完整性</strong><small>所有红黄节点均已填写原因</small></div><b>100%</b></div><div className="warn"><span>!</span><div><strong>待补交项目</strong><small>2个项目尚未提交本周数据</small></div><b>2 项</b></div><div className="warn"><span>!</span><div><strong>申报偏差异常</strong><small>申报进度与计算值相差超过5pp</small></div><b>3 项</b></div></div>
@@ -330,7 +449,8 @@ function PmoPage({ onNavigate }: { onNavigate: (v: View) => void }) {
           <div className="change-reason"><small>变更原因</small><p>核心供应商接口规范调整，经项目专题会确认增加开发与联调周期。</p></div>
           <div className="date-change"><div><small>开发完成</small><span><s>2026-07-16</s><b>→</b><strong>2026-07-28</strong><em>+12天</em></span></div><div><small>联调测试</small><span><s>2026-08-18</s><b>→</b><strong>2026-08-22</strong><em>+4天</em></span></div><div><small>上线切换</small><span><s>2026-10-20</s><b>→</b><strong>2026-10-31</strong><em>+11天</em></span></div></div>
           <div className="change-impact"><span>影响评估</span><p>较原始基线累计延期 23 天；不影响年度总体目标；项目成本预计增加 3.2%。</p></div>
-          <div className="approval-actions">{approved ? <div className="approved-note">✓ 已批准，当前基线已更新为 V3</div> : <><button className="danger-outline">驳回申请</button><button className="primary-button" onClick={() => setApproved(true)}>批准并生成 V3</button></>}</div>
+          {operationError && <div className="form-error" role="alert">! {operationError}</div>}
+          <div className="approval-actions">{approved ? <div className="approved-note">✓ 已批准，当前基线已更新为 V3</div> : <><button className="danger-outline">驳回申请</button><button className="primary-button" disabled={working} onClick={approveBaseline}>{working ? "正在审批…" : "批准并生成 V3"}</button></>}</div>
         </div>
       </section>}
       {(tab === "节点模板" || tab === "预警规则") && <section className="content-card placeholder-panel"><div className="placeholder-icon">{tab === "节点模板" ? "▦" : "⚙"}</div><h2>{tab}</h2><p>{tab === "节点模板" ? "统一节点模板包含7个标准节点、权重及关键节点标识，项目可标记不适用或申请新增。" : "当前生效规则 V3：普通节点 3/7 天，关键节点 0/3 天；综合评分阈值 85/70。"}</p><button className="primary-button">编辑配置</button></section>}
@@ -341,7 +461,26 @@ function PmoPage({ onNavigate }: { onNavigate: (v: View) => void }) {
 
 export default function Home() {
   const [view, setView] = useState<View>("cockpit");
+  const [projectData, setProjectData] = useState(projects);
+  const [dataState, setDataState] = useState<"loading" | "ready" | "fallback">("loading");
   const navigate = (next: View) => { setView(next); window.scrollTo({ top: 0, behavior: "smooth" }); };
-  if (view === "cockpit") return <Cockpit onNavigate={navigate} />;
-  return <div className="app-shell"><Sidebar view={view} onNavigate={navigate} /><div className="workspace">{view === "portfolio" && <Portfolio onNavigate={navigate} />}{view === "project" && <ProjectDetail onNavigate={navigate} />}{view === "report" && <WeeklyReport onNavigate={navigate} />}{view === "pmo" && <PmoPage onNavigate={navigate} />}</div></div>;
+
+  async function refreshData() {
+    try {
+      const response = await fetch("/api/bootstrap", { cache: "no-store" });
+      if (!response.ok) throw new Error("data unavailable");
+      const data = (await response.json()) as { projects?: typeof projects };
+      if (data.projects?.length) setProjectData(data.projects);
+      setDataState("ready");
+    } catch {
+      setDataState("fallback");
+    }
+  }
+
+  useEffect(() => {
+    void refreshData();
+  }, []);
+
+  if (view === "cockpit") return <><Cockpit onNavigate={navigate} projectData={projectData} />{dataState === "fallback" && <div className="data-banner">当前显示离线演示数据，数据服务恢复后将自动同步。</div>}</>;
+  return <div className="app-shell"><Sidebar view={view} onNavigate={navigate} /><div className="workspace">{view === "portfolio" && <Portfolio onNavigate={navigate} projectData={projectData} />}{view === "project" && <ProjectDetail onNavigate={navigate} projectData={projectData} />}{view === "report" && <WeeklyReport onNavigate={navigate} onDataChanged={refreshData} />}{view === "pmo" && <PmoPage onNavigate={navigate} onDataChanged={refreshData} />}</div></div>;
 }

@@ -436,9 +436,11 @@ test("supports all required management heatmap filter dimensions", async () => {
 });
 
 test("shows a real authentication boundary instead of unauthenticated demo data", async () => {
-  const [page, auth] = await Promise.all([
+  const [page, auth, serverAuth, readme] = await Promise.all([
     readFile(new URL("app/page.tsx", templateRoot), "utf8"),
     readFile(new URL("app/chatgpt-auth.ts", templateRoot), "utf8"),
+    readFile(new URL("lib/server-auth.ts", templateRoot), "utf8"),
+    readFile(new URL("README.md", templateRoot), "utf8"),
   ]);
 
   assert.match(page, /function LoginScreen/);
@@ -447,8 +449,17 @@ test("shows a real authentication boundary instead of unauthenticated demo data"
   assert.match(page, /\/signin-with-chatgpt\?return_to=%2F/);
   assert.match(page, /\/signout-with-chatgpt\?return_to=%2F/);
   assert.match(page, /身份由登录服务验证/);
+  assert.match(page, /请联系管理员预置账号/);
   assert.match(auth, /safeRelativeReturnPath/);
   assert.match(auth, /isReservedAuthPath/);
+  assert.match(serverAuth, /isLocalDemo = isLocal && !forwardedEmail/);
+  assert.match(
+    serverAuth,
+    /if \(!isLocalDemo && !configuredAdmins\.includes\(email\)\) return null/,
+  );
+  assert.match(serverAuth, /role: "admin"/);
+  assert.match(serverAuth, /联系管理员确认账号已经开通/);
+  assert.match(readme, /其他登录账号不会自动注册/);
 });
 
 test("keeps demo projects out of production and handles a real empty portfolio", async () => {

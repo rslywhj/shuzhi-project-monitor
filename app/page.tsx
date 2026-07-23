@@ -456,7 +456,7 @@ function LoginScreen() {
           <span><b>PMO</b><small>治理规则与周度快照</small></span>
           <span><b>管理员</b><small>维护账号权限</small></span>
         </div>
-        <small className="login-note">平台不在浏览器保存密码；身份由登录服务验证。</small>
+        <small className="login-note">平台不在浏览器保存密码；身份由登录服务验证。若登录后仍停留在此页，请联系管理员预置账号。</small>
       </div>
     </section>
   </main>;

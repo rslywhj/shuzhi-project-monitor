@@ -31,7 +31,8 @@ export async function getRequestIdentity(request: Request): Promise<RequestIdent
   const url = new URL(request.url);
   const forwardedEmail = request.headers.get(EMAIL_HEADER)?.trim().toLowerCase();
   const isLocal = url.hostname === "localhost" || url.hostname === "127.0.0.1";
-  const email = forwardedEmail || (isLocal ? "demo@local" : "");
+  const isLocalDemo = isLocal && !forwardedEmail;
+  const email = forwardedEmail || (isLocalDemo ? "demo@local" : "");
   if (!email) return null;
 
   const db = getDb();
@@ -58,11 +59,15 @@ export async function getRequestIdentity(request: Request): Promise<RequestIdent
     };
   }
 
-  const displayName = forwardedEmail ? decodeDisplayName(request, email) : "本地演示用户";
-  const role: AppRole =
-    isLocal || configuredAdmins.includes(email) ? "admin" : "manager";
-  await db.insert(users).values({ email, displayName, role }).onConflictDoNothing();
-  return { email, displayName, role };
+  if (!isLocalDemo && !configuredAdmins.includes(email)) return null;
+  const displayName = isLocalDemo
+    ? "本地演示用户"
+    : decodeDisplayName(request, email);
+  await db
+    .insert(users)
+    .values({ email, displayName, role: "admin" })
+    .onConflictDoNothing();
+  return { email, displayName, role: "admin" };
 }
 
 export function canWriteProject(identity: RequestIdentity, ownerEmail: string) {
@@ -82,7 +87,10 @@ export function canAdministerUsers(identity: RequestIdentity) {
 }
 
 export function unauthorized() {
-  return Response.json({ error: "请先登录后再执行此操作。" }, { status: 401 });
+  return Response.json(
+    { error: "请先登录，或联系管理员确认账号已经开通。" },
+    { status: 401 },
+  );
 }
 
 export function forbidden() {

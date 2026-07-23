@@ -314,6 +314,29 @@ test("closes project maintenance, account lifecycle and dynamic PMO operations",
   assert.match(snapshotRead, /payload: JSON\.parse/);
 });
 
+test("creates every project with an independent and reviewable milestone plan", async () => {
+  const [page, schedule, projectRoute, css] = await Promise.all([
+    readFile(new URL("app/page.tsx", templateRoot), "utf8"),
+    readFile(new URL("lib/project-schedule.ts", templateRoot), "utf8"),
+    readFile(new URL("app/api/projects/route.ts", templateRoot), "utf8"),
+    readFile(new URL("app/globals.css", templateRoot), "utf8"),
+  ]);
+
+  assert.match(schedule, /buildWeightedProjectSchedule/);
+  assert.match(schedule, /totalDays < sorted\.length/);
+  assert.match(schedule, /distributableDays/);
+  assert.match(schedule, /validateProjectSchedule/);
+  assert.match(page, /generateProjectPlan/);
+  assert.match(page, /projectPlanRows\.map/);
+  assert.match(page, /创建项目并冻结原始基线/);
+  assert.match(page, /系统按节点权重分配时间/);
+  assert.doesNotMatch(page, /8 \+ index > 12/);
+  assert.match(projectRoute, /activeTemplateRows/);
+  assert.match(projectRoute, /milestoneByName/);
+  assert.match(projectRoute, /必须完整套用当前启用的标准节点模板/);
+  assert.match(css, /project-plan-table/);
+});
+
 test("pre-provisions authenticated users with admin-only roles and audit history", async () => {
   const [usersRoute, page] = await Promise.all([
     readFile(new URL("app/api/users/route.ts", templateRoot), "utf8"),

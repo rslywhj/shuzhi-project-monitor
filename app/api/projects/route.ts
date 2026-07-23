@@ -120,17 +120,42 @@ export async function POST(request: Request) {
       riskLevel: payload.riskLevel ?? ("low" as const),
     };
     const templateRows = await db.select().from(milestoneTemplates);
-    const templateByName = new Map(
-      templateRows.map((row) => [row.name, row.id]),
+    const activeTemplateRows = templateRows
+      .filter((row) => row.active)
+      .sort((left, right) => left.sequence - right.sequence);
+    const milestoneByName = new Map(
+      parsedMilestones.map((row) => [row.name, row]),
     );
-    const milestoneValues = parsedMilestones.map((row) => ({
-      ...row,
-      projectId: project.id,
-      templateId: templateByName.get(row.name) ?? null,
-      custom: !templateByName.has(row.name),
-      forecastFinish: row.plannedFinish,
-      status: row.applicable ? ("green" as const) : ("na" as const),
-    }));
+    if (
+      milestoneByName.size !== parsedMilestones.length ||
+      parsedMilestones.length !== activeTemplateRows.length ||
+      activeTemplateRows.some((template) => !milestoneByName.has(template.name))
+    ) {
+      throw new ApiRequestError(
+        "新建项目必须完整套用当前启用的标准节点模板，不能遗漏、重复或追加自定义节点。",
+      );
+    }
+    const milestoneValues = activeTemplateRows.map((template) => {
+      const row = milestoneByName.get(template.name)!;
+      if (
+        row.sequence !== template.sequence ||
+        Math.abs(row.weight - template.defaultWeight) > 0.01 ||
+        row.critical !== template.critical ||
+        !row.applicable
+      ) {
+        throw new ApiRequestError(
+          `${template.name}必须沿用当前模板的序号、权重、关键标识和适用状态；创建后可在节点治理中调整。`,
+        );
+      }
+      return {
+        ...row,
+        projectId: project.id,
+        templateId: template.id,
+        custom: false,
+        forecastFinish: row.plannedFinish,
+        status: "green" as const,
+      };
+    });
     const milestoneChunks = Array.from(
       { length: Math.ceil(milestoneValues.length / 4) },
       (_, index) => milestoneValues.slice(index * 4, index * 4 + 4),

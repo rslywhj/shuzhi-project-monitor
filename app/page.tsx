@@ -3,6 +3,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PortfolioAnalytics from "./portfolio-analytics";
 import NotificationChannelPanel from "./notification-channel-panel";
+import {
+  addIsoDays,
+  buildWeightedProjectSchedule,
+  isoDaySpan,
+  type ProjectScheduleMilestone,
+  validateProjectSchedule,
+} from "@/lib/project-schedule";
 
 type Status = "green" | "yellow" | "red" | "na";
 type View =
@@ -258,6 +265,11 @@ function shanghaiDateParts(value = new Date()) {
   return { year: get("year"), month: get("month"), day: get("day") };
 }
 
+function shanghaiTodayIso() {
+  const parts = shanghaiDateParts();
+  return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
+}
+
 function currentReportingPeriod(offsetDays = 0) {
   const parts = shanghaiDateParts();
   const date = new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
@@ -286,6 +298,15 @@ function daysBetween(from: string, to: string) {
     (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) /
       86_400_000,
   );
+}
+
+function formatScheduleSpan(start: string, finish: string) {
+  try {
+    const span = isoDaySpan(start, finish);
+    return span > 0 ? `${span}天` : "—";
+  } catch {
+    return "—";
+  }
 }
 
 function formatFileSize(size: number) {
@@ -1372,6 +1393,12 @@ function Portfolio({ onNavigate, onDataChanged, projectData = projects, identity
   const [templateDownloading, setTemplateDownloading] = useState(false);
   const [createError, setCreateError] = useState("");
   const [portfolioError, setPortfolioError] = useState("");
+  const [projectPlanStart, setProjectPlanStart] = useState("");
+  const [projectPlanFinish, setProjectPlanFinish] = useState("");
+  const [projectPlanRows, setProjectPlanRows] = useState<
+    ProjectScheduleMilestone[]
+  >([]);
+  const [projectPlanError, setProjectPlanError] = useState("");
   const canManagePortfolio =
     identity?.role === "pmo" || identity?.role === "admin";
   const matching = useMemo(
@@ -1409,15 +1436,73 @@ function Portfolio({ onNavigate, onDataChanged, projectData = projects, identity
     .filter((template) => template.active)
     .sort((left, right) => left.sequence - right.sequence);
 
+  function generateProjectPlan(start: string, finish: string) {
+    try {
+      const rows = buildWeightedProjectSchedule(
+        matrixTemplates,
+        start,
+        finish,
+      );
+      setProjectPlanRows(rows);
+      setProjectPlanError("");
+    } catch (error) {
+      setProjectPlanRows([]);
+      setProjectPlanError(
+        error instanceof Error ? error.message : "项目节点计划生成失败",
+      );
+    }
+  }
+
+  function openCreateProject() {
+    const start = shanghaiTodayIso();
+    const finish = addIsoDays(start, 364);
+    setProjectPlanStart(start);
+    setProjectPlanFinish(finish);
+    setCreateError("");
+    generateProjectPlan(start, finish);
+    setShowCreate(true);
+  }
+
+  function updateProjectRange(
+    field: "start" | "finish",
+    value: string,
+  ) {
+    const start = field === "start" ? value : projectPlanStart;
+    const finish = field === "finish" ? value : projectPlanFinish;
+    if (field === "start") setProjectPlanStart(value);
+    else setProjectPlanFinish(value);
+    if (start && finish) generateProjectPlan(start, finish);
+  }
+
+  function updateProjectPlanRow(
+    id: number,
+    field: "plannedStart" | "plannedFinish",
+    value: string,
+  ) {
+    const rows = projectPlanRows.map((row) =>
+      row.id === id ? { ...row, [field]: value } : row,
+    );
+    setProjectPlanRows(rows);
+    try {
+      validateProjectSchedule(rows);
+      setProjectPlanError("");
+    } catch (error) {
+      setProjectPlanError(
+        error instanceof Error ? error.message : "节点计划日期无效",
+      );
+    }
+  }
+
   async function createProject(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setCreating(true);
     setCreateError("");
     const form = new FormData(event.currentTarget);
-    const activeTemplates = templateData
-      .filter((template) => template.active)
-      .sort((left, right) => left.sequence - right.sequence);
     try {
+      validateProjectSchedule(projectPlanRows);
+      if (projectPlanRows.length !== matrixTemplates.length) {
+        throw new Error("节点计划与当前启用模板不一致，请重新生成。");
+      }
       const response = await fetch("/api/projects", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -1429,14 +1514,14 @@ function Portfolio({ onNavigate, onDataChanged, projectData = projects, identity
           org: form.get("org"),
           type: form.get("type"),
           riskLevel: form.get("riskLevel"),
-          milestones: activeTemplates.map((template, index) => ({
+          milestones: projectPlanRows.map((template) => ({
             name: template.name,
             sequence: template.sequence,
             weight: template.defaultWeight,
             critical: template.critical,
             applicable: true,
-            plannedStart: `${8 + index > 12 ? "2027" : "2026"}-${String(((7 + index) % 12) + 1).padStart(2, "0")}-01`,
-            plannedFinish: `${8 + index > 12 ? "2027" : "2026"}-${String(((7 + index) % 12) + 1).padStart(2, "0")}-20`,
+            plannedStart: template.plannedStart,
+            plannedFinish: template.plannedFinish,
           })),
         }),
       });
@@ -1483,7 +1568,7 @@ function Portfolio({ onNavigate, onDataChanged, projectData = projects, identity
             {canManagePortfolio && <div className="portfolio-import-actions">
               <button className="outline-button" onClick={downloadImportTemplate} disabled={templateDownloading}>{templateDownloading ? "正在生成…" : "下载导入模板"}</button>
               <button className="outline-button import-button" onClick={() => setShowImport(true)}>⇧ Excel批量导入</button>
-              <button className="primary-button" onClick={() => setShowCreate(true)}>＋ 新建项目</button>
+              <button className="primary-button" onClick={openCreateProject}>＋ 新建项目</button>
             </div>}
           </div>
         </div>
@@ -1501,7 +1586,190 @@ function Portfolio({ onNavigate, onDataChanged, projectData = projects, identity
         <div className="pagination"><span>共 {matching.length} 条，每页 10 条</span><div><button disabled={safePage === 0} onClick={() => setPage((current) => Math.max(0, current - 1))}>‹</button>{Array.from({ length: pageCount }, (_, index) => <button key={index} className={safePage === index ? "active" : ""} onClick={() => setPage(index)}>{index + 1}</button>)}<button disabled={safePage === pageCount - 1} onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))}>›</button></div></div>
       </section>
     </div>
-    {showCreate && <div className="modal-backdrop" onClick={() => setShowCreate(false)}><section className="create-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowCreate(false)}>×</button><span className="modal-kicker">PROJECT SETUP</span><h2>新建统建项目</h2><p>创建后自动套用{templateData.filter((template) => template.active).length}个当前启用的标准节点，节点权重合计100%。</p><form onSubmit={createProject}><div className="modal-form-grid"><label>项目编码<input name="code" placeholder="例如 P11" required /></label><label>项目名称<input name="name" placeholder="请输入项目名称" required /></label><label>项目经理<input name="ownerName" placeholder="姓名" required /></label><label>项目经理邮箱<input name="ownerEmail" type="email" placeholder="name@example.com" required /></label><label>所属组织<input name="org" placeholder="例如 财务数智组" required /></label><label>项目类型<select name="type"><option>核心系统</option><option>业务平台</option><option>数据平台</option><option>技术底座</option></select></label><label>初始风险<select name="riskLevel"><option value="low">低风险</option><option value="medium">中风险</option><option value="high">高风险</option></select></label></div><div className="template-summary"><strong>标准节点模板</strong><span>{templateData.filter((template) => template.active).sort((left, right) => left.sequence - right.sequence).map((template) => template.name).join(" → ")}</span></div>{createError && <div className="form-error" role="alert">! {createError}</div>}<div className="modal-actions"><button type="button" className="outline-button" onClick={() => setShowCreate(false)}>取消</button><button type="submit" className="primary-button" disabled={creating}>{creating ? "正在创建…" : "创建项目"}</button></div></form></section></div>}
+    {showCreate && (
+      <div className="modal-backdrop" onClick={() => setShowCreate(false)}>
+        <section
+          className="create-modal project-setup-modal"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <button className="modal-close" onClick={() => setShowCreate(false)}>
+            ×
+          </button>
+          <span className="modal-kicker">PROJECT SETUP</span>
+          <h2>新建统建项目</h2>
+          <p>
+            套用{matrixTemplates.length}个当前启用的标准节点，并按本项目独立计划周期生成可逐项校准的节点日期。
+          </p>
+          <form onSubmit={createProject}>
+            <div className="modal-form-grid">
+              <label>
+                项目编码
+                <input name="code" placeholder="例如 P11" required />
+              </label>
+              <label>
+                项目名称
+                <input name="name" placeholder="请输入项目名称" required />
+              </label>
+              <label>
+                项目经理
+                <input name="ownerName" placeholder="姓名" required />
+              </label>
+              <label>
+                项目经理邮箱
+                <input
+                  name="ownerEmail"
+                  type="email"
+                  placeholder="name@example.com"
+                  required
+                />
+              </label>
+              <label>
+                所属组织
+                <input name="org" placeholder="例如 财务数智组" required />
+              </label>
+              <label>
+                项目类型
+                <select name="type">
+                  <option>核心系统</option>
+                  <option>业务平台</option>
+                  <option>数据平台</option>
+                  <option>技术底座</option>
+                </select>
+              </label>
+              <label>
+                初始风险
+                <select name="riskLevel">
+                  <option value="low">低风险</option>
+                  <option value="medium">中风险</option>
+                  <option value="high">高风险</option>
+                </select>
+              </label>
+            </div>
+            <div className="project-plan-builder">
+              <div className="project-plan-heading">
+                <div>
+                  <strong>项目节点计划</strong>
+                  <span>
+                    系统按节点权重分配时间，可继续修改任一节点的开始和完成日期
+                  </span>
+                </div>
+                <div className="project-range-fields">
+                  <label>
+                    项目开始
+                    <input
+                      type="date"
+                      value={projectPlanStart}
+                      onChange={(event) =>
+                        updateProjectRange("start", event.target.value)
+                      }
+                      required
+                    />
+                  </label>
+                  <label>
+                    目标完成
+                    <input
+                      type="date"
+                      value={projectPlanFinish}
+                      onChange={(event) =>
+                        updateProjectRange("finish", event.target.value)
+                      }
+                      required
+                    />
+                  </label>
+                </div>
+              </div>
+              {projectPlanRows.length > 0 && (
+                <div className="project-plan-table">
+                  <div className="project-plan-head">
+                    <span>节点</span>
+                    <span>权重</span>
+                    <span>计划开始</span>
+                    <span>计划完成</span>
+                    <span>天数</span>
+                  </div>
+                  {projectPlanRows.map((row) => (
+                    <div className="project-plan-row" key={row.id}>
+                      <span>
+                        <i>{row.code}</i>
+                        <strong>{row.name}</strong>
+                        {row.critical && <small>关键</small>}
+                      </span>
+                      <b>{row.defaultWeight}%</b>
+                      <input
+                        type="date"
+                        value={row.plannedStart}
+                        onChange={(event) =>
+                          updateProjectPlanRow(
+                            row.id,
+                            "plannedStart",
+                            event.target.value,
+                          )
+                        }
+                        required
+                      />
+                      <input
+                        type="date"
+                        value={row.plannedFinish}
+                        onChange={(event) =>
+                          updateProjectPlanRow(
+                            row.id,
+                            "plannedFinish",
+                            event.target.value,
+                          )
+                        }
+                        required
+                      />
+                      <em>
+                        {formatScheduleSpan(
+                          row.plannedStart,
+                          row.plannedFinish,
+                        )}
+                      </em>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {projectPlanError && (
+                <div className="form-error" role="alert">
+                  ! {projectPlanError}
+                </div>
+              )}
+            </div>
+            <div className="template-summary">
+              <strong>标准节点模板</strong>
+              <span>
+                {matrixTemplates.map((template) => template.name).join(" → ")}
+              </span>
+            </div>
+            {createError && (
+              <div className="form-error" role="alert">
+                ! {createError}
+              </div>
+            )}
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="outline-button"
+                onClick={() => setShowCreate(false)}
+              >
+                取消
+              </button>
+              <button
+                type="submit"
+                className="primary-button"
+                disabled={
+                  creating ||
+                  Boolean(projectPlanError) ||
+                  !projectPlanRows.length
+                }
+              >
+                {creating ? "正在创建…" : "创建项目并冻结原始基线"}
+              </button>
+            </div>
+          </form>
+        </section>
+      </div>
+    )}
     {showImport && canManagePortfolio && <ProjectImportModal templateData={templateData} onClose={() => setShowImport(false)} onImported={onDataChanged} />}
   </div>;
 }

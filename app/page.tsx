@@ -2939,6 +2939,10 @@ function PmoPage({ onNavigate, onDataChanged, identity, projectData = projects }
     completeness: number;
     lockedAt: string;
     lockedBy: string;
+    reopenEventId?: string | null;
+    reopenedBy?: string | null;
+    reopenedAt?: string | null;
+    reopenReason?: string | null;
   };
   type BaselineRow = {
     id: number;
@@ -3498,7 +3502,7 @@ function PmoPage({ onNavigate, onDataChanged, identity, projectData = projects }
           </section>
         </div>
         <section className="content-card history-card"><div className="card-title"><div><h2>历史快照</h2><p>已锁定版本不可覆盖，导出文件包含当时的完整项目与节点数据</p></div><button className="outline-button" disabled={!snapshotRows.length} onClick={() => snapshotRows[0] && exportSnapshot(snapshotRows[0])}>导出最新快照</button></div>
-          <div className="snapshot-table"><div className="table-head"><span>周期</span><span>版本</span><span>项目数</span><span>数据完整度</span><span>锁定时间</span><span>操作人</span><span>状态</span><span /></div>{snapshotRows.length ? snapshotRows.map((row)=><div className="table-row" key={row.id}><span>{row.weekKey}</span><span>V{row.version}</span><span>{row.projectCount}</span><span>{row.completeness}%</span><span>{row.lockedAt.replace("T"," ").slice(5,16)}</span><span>{row.lockedBy}</span><span><StatusPill status={row.status === "locked" ? "green" : "yellow"} /></span><button onClick={() => exportSnapshot(row)}>导出</button></div>) : <div className="empty-state">暂无历史快照</div>}</div>
+          <div className="snapshot-table"><div className="table-head"><span>周期</span><span>版本</span><span>项目数</span><span>数据完整度</span><span>锁定时间</span><span>操作人</span><span>状态</span><span /></div>{snapshotRows.length ? snapshotRows.map((row)=><div className="table-row" key={row.id}><span>{row.weekKey}</span><span>V{row.version}</span><span>{row.projectCount}</span><span>{row.completeness}%</span><span>{row.lockedAt.replace("T"," ").slice(5,16)}</span><span>{row.lockedBy}</span><span title={row.reopenReason ?? undefined}><StatusPill status={row.status === "locked" ? "green" : "yellow"} /></span><button onClick={() => exportSnapshot(row)}>导出</button></div>) : <div className="empty-state">暂无历史快照</div>}</div>
         </section>
       </>}
       {tab === "基线变更" && <section className="content-card baseline-approval">

@@ -1,4 +1,4 @@
-import { and, count, desc, eq, ne } from "drizzle-orm";
+import { and, count, desc, eq, ne, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   auditLogs,
@@ -123,7 +123,7 @@ export async function lockPortfolioSnapshot(options: {
   });
 
   try {
-    const [snapshot] = await db
+    const snapshotInsert = db
       .insert(snapshots)
       .values({
         weekKey: options.weekKey,
@@ -135,24 +135,52 @@ export async function lockPortfolioSnapshot(options: {
         lockedAt: capturedAtIso,
       })
       .returning();
-    await db
-      .update(weeklyReports)
-      .set({ status: "locked" })
-      .where(eq(weeklyReports.weekKey, options.weekKey));
-    await db.insert(auditLogs).values({
-      actorEmail: options.actorEmail,
-      action: "snapshot.lock",
-      entityType: "snapshot",
-      entityId: String(snapshot.id),
-      detailJson: JSON.stringify({
-        weekKey: options.weekKey,
-        version,
-        completeness,
-        source: options.source,
-        highRiskCount: dashboardAlerts.highRisks.length,
-        overdueActionCount: dashboardAlerts.overdueActions.length,
-      }),
-    });
+    const auditInsert = db.insert(auditLogs).select(
+      db
+        .select({
+          id: sql<number>`NULL`.as("id"),
+          actorEmail: sql<string>`${options.actorEmail}`.as("actor_email"),
+          action: sql<string>`'snapshot.lock'`.as("action"),
+          entityType: sql<string>`'snapshot'`.as("entity_type"),
+          entityId: sql<string>`CAST(${snapshots.id} AS TEXT)`.as("entity_id"),
+          detailJson: sql<string>`${JSON.stringify({
+            weekKey: options.weekKey,
+            version,
+            completeness,
+            source: options.source,
+            highRiskCount: dashboardAlerts.highRisks.length,
+            overdueActionCount: dashboardAlerts.overdueActions.length,
+          })}`.as("detail_json"),
+          createdAt: sql<string>`${capturedAtIso}`.as("created_at"),
+        })
+        .from(snapshots)
+        .where(
+          and(
+            eq(snapshots.weekKey, options.weekKey),
+            eq(snapshots.version, version),
+          ),
+        ),
+    );
+    const batchResults = await db.batch([
+      snapshotInsert,
+      db
+        .update(weeklyReports)
+        .set({ status: "locked" })
+        .where(
+          and(
+            eq(weeklyReports.weekKey, options.weekKey),
+            ne(weeklyReports.status, "draft"),
+          ),
+        ),
+      auditInsert,
+    ]);
+    const insertedRows = batchResults[0] as
+      | (typeof snapshots.$inferSelect)[]
+      | undefined;
+    const snapshot = insertedRows?.[0];
+    if (!snapshot) {
+      throw new Error("快照写入失败。");
+    }
     return { outcome: "created", snapshot };
   } catch (error) {
     if (

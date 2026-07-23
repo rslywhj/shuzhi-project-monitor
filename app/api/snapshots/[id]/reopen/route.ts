@@ -1,4 +1,4 @@
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLogs, snapshots, weeklyReports } from "@/db/schema";
 import { ApiRequestError, apiError, requiredString } from "@/lib/api-utils";
@@ -52,29 +52,79 @@ export async function POST(
       return Response.json({ error: "该快照已经处于重新打开状态。" }, { status: 409 });
     }
 
-    await db.batch([
+    const reopenedAt = new Date().toISOString();
+    const reopenEventId = crypto.randomUUID();
+    const claimedByThisRequest = sql`EXISTS (
+      SELECT 1
+      FROM ${snapshots}
+      WHERE ${snapshots.id} = ${snapshotId}
+        AND ${snapshots.reopenEventId} = ${reopenEventId}
+    )`;
+    const auditInsert = db.insert(auditLogs).select(
+      db
+        .select({
+          id: sql<number>`NULL`.as("id"),
+          actorEmail: sql<string>`${identity.email}`.as("actor_email"),
+          action: sql<string>`'snapshot.reopen'`.as("action"),
+          entityType: sql<string>`'snapshot'`.as("entity_type"),
+          entityId: sql<string>`${String(snapshotId)}`.as("entity_id"),
+          detailJson: sql<string>`${JSON.stringify({
+            weekKey: snapshot.weekKey,
+            version: snapshot.version,
+            reason,
+            reopenEventId,
+          })}`.as("detail_json"),
+          createdAt: sql<string>`${reopenedAt}`.as("created_at"),
+        })
+        .from(snapshots)
+        .where(
+          and(
+            eq(snapshots.id, snapshotId),
+            eq(snapshots.reopenEventId, reopenEventId),
+          ),
+        ),
+    );
+    const batchResults = await db.batch([
       db
         .update(snapshots)
-        .set({ status: "reopened" })
-        .where(eq(snapshots.id, snapshotId)),
+        .set({
+          status: "reopened",
+          reopenEventId,
+          reopenedBy: identity.email,
+          reopenedAt,
+          reopenReason: reason,
+        })
+        .where(
+          and(
+            eq(snapshots.id, snapshotId),
+            eq(snapshots.status, "locked"),
+          ),
+        )
+        .returning(),
       db
         .update(weeklyReports)
-        .set({ status: "submitted", submittedAt: sql`CURRENT_TIMESTAMP` })
-        .where(eq(weeklyReports.weekKey, snapshot.weekKey)),
-      db.insert(auditLogs).values({
-        actorEmail: identity.email,
-        action: "snapshot.reopen",
-        entityType: "snapshot",
-        entityId: String(snapshotId),
-        detailJson: JSON.stringify({
-          weekKey: snapshot.weekKey,
-          version: snapshot.version,
-          reason,
-        }),
-      }),
+        .set({ status: "submitted" })
+        .where(
+          and(
+            eq(weeklyReports.weekKey, snapshot.weekKey),
+            eq(weeklyReports.status, "locked"),
+            claimedByThisRequest,
+          ),
+        ),
+      auditInsert,
     ]);
+    const claimedRows = batchResults[0] as
+      | (typeof snapshots.$inferSelect)[]
+      | undefined;
+    const reopenedSnapshot = claimedRows?.[0];
+    if (!reopenedSnapshot) {
+      return Response.json(
+        { error: "该快照已被其他操作重新打开。" },
+        { status: 409 },
+      );
+    }
     return Response.json({
-      snapshot: { ...snapshot, status: "reopened" },
+      snapshot: reopenedSnapshot,
       reason,
     });
   } catch (error) {

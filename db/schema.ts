@@ -433,6 +433,10 @@ export const snapshots = sqliteTable(
     payloadJson: text("payload_json").notNull(),
     lockedBy: text("locked_by").notNull(),
     lockedAt: text("locked_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    reopenEventId: text("reopen_event_id"),
+    reopenedBy: text("reopened_by"),
+    reopenedAt: text("reopened_at"),
+    reopenReason: text("reopen_reason"),
   },
   (table) => [
     uniqueIndex("snapshots_week_version_idx").on(table.weekKey, table.version),

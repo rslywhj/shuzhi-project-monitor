@@ -41,7 +41,7 @@ test("ships the complete prototype flow without starter artifacts", async () => 
 });
 
 test("defines durable, authorized and auditable workflow APIs", async () => {
-  const [hosting, schema, reportRoute, baselineRoute, baselineRequestRoute, baselineRejectRoute, snapshotRoute, snapshotService, snapshotReopenRoute, migration] =
+  const [hosting, schema, reportRoute, baselineRoute, baselineRequestRoute, baselineRejectRoute, snapshotRoute, snapshotService, snapshotReopenRoute, migration, snapshotLifecycleMigration] =
     await Promise.all([
       readFile(new URL(".openai/hosting.json", templateRoot), "utf8"),
       readFile(new URL("db/schema.ts", templateRoot), "utf8"),
@@ -68,6 +68,7 @@ test("defines durable, authorized and auditable workflow APIs", async () => {
         "utf8",
       ),
       readFile(new URL("drizzle/0000_married_elektra.sql", templateRoot), "utf8"),
+      readFile(new URL("drizzle/0010_dazzling_supernaut.sql", templateRoot), "utf8"),
     ]);
 
   assert.match(hosting, /"d1":\s*"DB"/);
@@ -83,6 +84,9 @@ test("defines durable, authorized and auditable workflow APIs", async () => {
   }
   assert.match(schema, /weekly_reports_project_week_idx/);
   assert.match(schema, /snapshots_week_version_idx/);
+  assert.match(schema, /reopenEventId: text\("reopen_event_id"\)/);
+  assert.match(snapshotLifecycleMigration, /ADD `reopen_event_id`/);
+  assert.match(snapshotLifecycleMigration, /ADD `reopen_reason`/);
   assert.match(reportRoute, /canWriteProject/);
   assert.match(reportRoute, /weekly_report\.submit/);
   assert.match(reportRoute, /该周期快照已经锁定/);
@@ -92,12 +96,22 @@ test("defines durable, authorized and auditable workflow APIs", async () => {
   assert.match(baselineRejectRoute, /baseline_change\.reject/);
   assert.match(snapshotRoute, /lockPortfolioSnapshot/);
   assert.match(snapshotService, /snapshot\.lock/);
+  assert.match(snapshotService, /const batchResults = await db\.batch/);
+  assert.match(snapshotService, /ne\(weeklyReports\.status, "draft"\)/);
+  assert.match(snapshotService, /auditInsert/);
   assert.match(snapshotService, /dashboardAlerts/);
   assert.match(snapshotService, /risk\.status !== "closed"/);
   assert.match(snapshotService, /action\.status === "overdue"/);
   assert.match(snapshotRoute, /请先填写原因并重新打开/);
   assert.match(snapshotReopenRoute, /snapshot\.reopen/);
   assert.match(snapshotReopenRoute, /只能重新打开该周期的最新快照版本/);
+  assert.match(snapshotReopenRoute, /crypto\.randomUUID\(\)/);
+  assert.match(snapshotReopenRoute, /reopenEventId/);
+  assert.match(snapshotReopenRoute, /eq\(weeklyReports\.status, "locked"\)/);
+  assert.doesNotMatch(
+    snapshotReopenRoute,
+    /status: "submitted", submittedAt:/,
+  );
 });
 
 test("secures public access and exposes real administration workflows", async () => {

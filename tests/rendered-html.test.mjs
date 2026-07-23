@@ -41,7 +41,7 @@ test("ships the complete prototype flow without starter artifacts", async () => 
 });
 
 test("defines durable, authorized and auditable workflow APIs", async () => {
-  const [hosting, schema, reportRoute, baselineRoute, baselineRequestRoute, baselineRejectRoute, snapshotRoute, snapshotReopenRoute, migration] =
+  const [hosting, schema, reportRoute, baselineRoute, baselineRequestRoute, baselineRejectRoute, snapshotRoute, snapshotService, snapshotReopenRoute, migration] =
     await Promise.all([
       readFile(new URL(".openai/hosting.json", templateRoot), "utf8"),
       readFile(new URL("db/schema.ts", templateRoot), "utf8"),
@@ -62,6 +62,7 @@ test("defines durable, authorized and auditable workflow APIs", async () => {
         "utf8",
       ),
       readFile(new URL("app/api/snapshots/lock/route.ts", templateRoot), "utf8"),
+      readFile(new URL("lib/snapshot-service.ts", templateRoot), "utf8"),
       readFile(
         new URL("app/api/snapshots/[id]/reopen/route.ts", templateRoot),
         "utf8",
@@ -89,10 +90,11 @@ test("defines durable, authorized and auditable workflow APIs", async () => {
   assert.match(baselineRoute, /baseline_change\.approve/);
   assert.match(baselineRequestRoute, /baseline_change\.request/);
   assert.match(baselineRejectRoute, /baseline_change\.reject/);
-  assert.match(snapshotRoute, /snapshot\.lock/);
-  assert.match(snapshotRoute, /dashboardAlerts/);
-  assert.match(snapshotRoute, /risk\.status !== "closed"/);
-  assert.match(snapshotRoute, /action\.status === "overdue"/);
+  assert.match(snapshotRoute, /lockPortfolioSnapshot/);
+  assert.match(snapshotService, /snapshot\.lock/);
+  assert.match(snapshotService, /dashboardAlerts/);
+  assert.match(snapshotService, /risk\.status !== "closed"/);
+  assert.match(snapshotService, /action\.status === "overdue"/);
   assert.match(snapshotRoute, /请先填写原因并重新打开/);
   assert.match(snapshotReopenRoute, /snapshot\.reopen/);
   assert.match(snapshotReopenRoute, /只能重新打开该周期的最新快照版本/);
@@ -210,7 +212,7 @@ test("persists the twelve-node standard template and project-level milestone gov
 });
 
 test("supports dynamic weekly drafts, immutable baselines and real project activity", async () => {
-  const [schema, migration, reportRoute, activityRoute, snapshotRoute, health, trends, page] =
+  const [schema, migration, reportRoute, activityRoute, snapshotService, health, trends, page] =
     await Promise.all([
       readFile(new URL("db/schema.ts", templateRoot), "utf8"),
       readFile(new URL("drizzle/0005_lethal_ogun.sql", templateRoot), "utf8"),
@@ -222,7 +224,7 @@ test("supports dynamic weekly drafts, immutable baselines and real project activ
         new URL("app/api/projects/[id]/activity/route.ts", templateRoot),
         "utf8",
       ),
-      readFile(new URL("app/api/snapshots/lock/route.ts", templateRoot), "utf8"),
+      readFile(new URL("lib/snapshot-service.ts", templateRoot), "utf8"),
       readFile(new URL("lib/health.ts", templateRoot), "utf8"),
       readFile(new URL("app/api/dashboard/trends/route.ts", templateRoot), "utf8"),
       readFile(new URL("app/page.tsx", templateRoot), "utf8"),
@@ -236,7 +238,7 @@ test("supports dynamic weekly drafts, immutable baselines and real project activ
   assert.match(reportRoute, /submitMode === "draft"/);
   assert.match(activityRoute, /baselineVersions/);
   assert.match(activityRoute, /auditLogs/);
-  assert.match(snapshotRoute, /ne\(weeklyReports\.status, "draft"\)/);
+  assert.match(snapshotService, /ne\(weeklyReports\.status, "draft"\)/);
   assert.match(health, /ne\(weeklyReports\.status, "draft"\)/);
   assert.match(trends, /\.slice\(0, 12\)/);
   assert.match(page, /已自动切换到下一填报周期/);
@@ -374,6 +376,7 @@ test("supports all required management heatmap filter dimensions", async () => {
   assert.match(page, /project\.owner === owner/);
   assert.match(page, /project\.type === projectType/);
   assert.match(page, /setPage\(0\)/);
+  assert.match(page, /COCKPIT_PAGE_SIZE = 7/);
 });
 
 test("shows a real authentication boundary instead of unauthenticated demo data", async () => {
@@ -393,21 +396,45 @@ test("shows a real authentication boundary instead of unauthenticated demo data"
 });
 
 test("freezes high risks and overdue actions into the management snapshot", async () => {
-  const [snapshotRoute, bootstrap, page] = await Promise.all([
-    readFile(new URL("app/api/snapshots/lock/route.ts", templateRoot), "utf8"),
+  const [snapshotService, bootstrap, page] = await Promise.all([
+    readFile(new URL("lib/snapshot-service.ts", templateRoot), "utf8"),
     readFile(new URL("app/api/bootstrap/route.ts", templateRoot), "utf8"),
     readFile(new URL("app/page.tsx", templateRoot), "utf8"),
   ]);
 
-  assert.match(snapshotRoute, /highRisks/);
-  assert.match(snapshotRoute, /overdueActions/);
-  assert.match(snapshotRoute, /capturedDate/);
+  assert.match(snapshotService, /highRisks/);
+  assert.match(snapshotService, /overdueActions/);
+  assert.match(snapshotService, /capturedDate/);
   assert.match(bootstrap, /payload\.dashboardAlerts/);
   assert.match(bootstrap, /dashboardAlerts,/);
   assert.match(page, /开放高风险/);
   assert.match(page, /逾期措施/);
   assert.match(page, /alerts\.highRisks/);
   assert.match(page, /alerts\.overdueActions/);
+});
+
+test("automates pre-deadline reminders, Friday locking and post-lock escalation", async () => {
+  const [automation, reportingPeriod, snapshotService, bootstrap, worker, vite] =
+    await Promise.all([
+      readFile(new URL("lib/portfolio-automation.ts", templateRoot), "utf8"),
+      readFile(new URL("lib/reporting-period.ts", templateRoot), "utf8"),
+      readFile(new URL("lib/snapshot-service.ts", templateRoot), "utf8"),
+      readFile(new URL("app/api/bootstrap/route.ts", templateRoot), "utf8"),
+      readFile(new URL("worker/index.ts", templateRoot), "utf8"),
+      readFile(new URL("vite.config.ts", templateRoot), "utf8"),
+    ]);
+
+  assert.match(reportingPeriod, /Asia\/Shanghai/);
+  assert.match(reportingPeriod, /LOCK_MINUTE = 17 \* 60/);
+  assert.match(automation, /createReportNotices/);
+  assert.match(automation, /createRedEscalations/);
+  assert.match(automation, /source: "automation"/);
+  assert.match(automation, /result\.outcome !== "reopened"/);
+  assert.match(snapshotService, /options\.source === "automation"/);
+  assert.match(snapshotService, /source: options\.source/);
+  assert.match(bootstrap, /runPortfolioAutomation/);
+  assert.match(worker, /async scheduled/);
+  assert.match(vite, /crons: \["0 \* \* \* \*"\]/);
 });
 
 test("offers a filterable list and milestone heatmap in the desktop workspace", async () => {

@@ -453,6 +453,8 @@ function LoginScreen() {
   </main>;
 }
 
+const COCKPIT_PAGE_SIZE = 7;
+
 function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = defaultTemplateData, trends = [], alerts }: { onNavigate: Navigate; projectData?: ProjectData[]; snapshot: DashboardSnapshot | null; templateData?: TemplateData[]; trends?: TrendPoint[]; alerts: DashboardAlerts }) {
   const [org, setOrg] = useState("全部组织");
   const [owner, setOwner] = useState("全部负责人");
@@ -475,8 +477,14 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
       ),
     [health, org, owner, projectData, projectType],
   );
-  const pageCount = Math.max(1, Math.ceil(matching.length / 10));
-  const filtered = matching.slice(page * 10, page * 10 + 10);
+  const pageCount = Math.max(
+    1,
+    Math.ceil(matching.length / COCKPIT_PAGE_SIZE),
+  );
+  const filtered = matching.slice(
+    page * COCKPIT_PAGE_SIZE,
+    page * COCKPIT_PAGE_SIZE + COCKPIT_PAGE_SIZE,
+  );
   const total = projectData.length;
   const green = projectData.filter((project) => project.status === "green").length;
   const yellow = projectData.filter((project) => project.status === "yellow").length;
@@ -2451,7 +2459,7 @@ function PmoPage({ onNavigate, onDataChanged, identity, projectData = projects }
       <div className="pmo-tabs">{["快照锁定","基线变更","节点模板","预警规则"].map(t => <button className={tab === t ? "active" : ""} onClick={() => setTab(t)} key={t}>{t}{t === "基线变更" && <b>{pendingChanges.length}</b>}</button>)}</div>
       {tab === "快照锁定" && <>
         <section className={`snapshot-banner ${locked ? "locked" : ""}`}>
-          <div className="snapshot-calendar"><span>{calendarMonth}</span><strong>{calendarDay}</strong></div><div><span className="kicker">{reportingPeriod.year}年第{reportingPeriod.week}周 · 周五17:00</span><h2>{locked ? "本周快照已锁定" : snapshotId ? "快照已重新打开，等待修订后锁定新版本" : countdown}</h2><p>{locked ? "管理层大屏已切换至最新锁定口径，历史版本已永久保留。" : `${reportingPeriod.fridayLabel}锁定；重新锁定将生成新版本，历史版本永久保留。`}</p></div><div className="snapshot-actions">{locked ? <><button className="locked-button" disabled>✓ 已锁定 · V{snapshotVersion}</button><button className="outline-button" onClick={() => setShowReopen(true)}>重新打开</button></> : <button className="primary-button" disabled={working} onClick={lockSnapshot}>{working ? "正在锁定…" : `锁定为 V${snapshotVersion + (snapshotId ? 1 : 0)}`}</button>}</div>
+          <div className="snapshot-calendar"><span>{calendarMonth}</span><strong>{calendarDay}</strong></div><div><span className="kicker">{reportingPeriod.year}年第{reportingPeriod.week}周 · 周五17:00 <b className="automation-badge">● 自动锁数已启用</b></span><h2>{locked ? "本周快照已锁定" : snapshotId ? "快照已重新打开，等待修订后锁定新版本" : countdown}</h2><p>{locked ? "管理层大屏已切换至最新锁定口径，历史版本已永久保留。" : snapshotId ? "人工重新打开后自动锁数暂停；完成修订与复核后请手动锁定新版本。" : `${reportingPeriod.fridayLabel}17:00系统自动锁定；PMO也可在检查通过后提前手动锁定。`}</p></div><div className="snapshot-actions">{locked ? <><button className="locked-button" disabled>✓ 已锁定 · V{snapshotVersion}</button><button className="outline-button" onClick={() => setShowReopen(true)}>重新打开</button></> : <button className="primary-button" disabled={working} onClick={lockSnapshot}>{working ? "正在锁定…" : `锁定为 V${snapshotVersion + (snapshotId ? 1 : 0)}`}</button>}</div>
         </section>
         {showReopen && <section className="content-card reopen-panel"><div><h3>重新打开第{reportingPeriod.week}周快照</h3><p>重新打开后该周期允许修订，下一次锁定将生成不可覆盖的新版本。</p></div><textarea value={reopenReason} onChange={(event) => setReopenReason(event.target.value)} placeholder="请说明重新打开原因、修订范围及授权依据" /><div><button className="outline-button" onClick={() => setShowReopen(false)}>取消</button><button className="danger-outline" disabled={working || reopenReason.trim().length < 5} onClick={reopenSnapshot}>{working ? "正在处理…" : "确认重新打开"}</button></div></section>}
         {operationError && <div className="form-error" role="alert">! {operationError}</div>}

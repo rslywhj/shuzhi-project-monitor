@@ -12,6 +12,7 @@ import {
   weeklyReports,
 } from "@/db/schema";
 import { apiError } from "@/lib/api-utils";
+import { runPortfolioAutomation } from "@/lib/portfolio-automation";
 import { ensureSeeded } from "@/lib/seed";
 import { getRequestIdentity, unauthorized } from "@/lib/server-auth";
 
@@ -35,6 +36,13 @@ export async function GET(request: Request) {
     const identity = await getRequestIdentity(request);
     if (!identity) return unauthorized();
     await ensureSeeded();
+    const automation = await runPortfolioAutomation(
+      new Date(),
+      "request",
+    ).catch((error) => {
+      console.error("request-triggered portfolio automation failed", error);
+      return null;
+    });
 
     const db = getDb();
     const [
@@ -204,6 +212,7 @@ export async function GET(request: Request) {
       })),
       activeRule: ruleRows[0] ?? null,
       milestoneTemplates: templateRows,
+      automation,
       generatedAt: new Date().toISOString(),
     });
   } catch (error) {

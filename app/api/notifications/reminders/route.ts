@@ -23,6 +23,12 @@ export const dynamic = "force-dynamic";
 
 type ReminderKind = "report_reminder" | "red_escalation";
 
+function chunks<T>(rows: T[], size = 5) {
+  return Array.from({ length: Math.ceil(rows.length / size) }, (_, index) =>
+    rows.slice(index * size, (index + 1) * size),
+  );
+}
+
 export async function POST(request: Request) {
   try {
     const identity = await getRequestIdentity(request);
@@ -108,30 +114,31 @@ export async function POST(request: Request) {
         readAt: null,
       }));
     });
-    await db
-      .insert(notifications)
-      .values(recipientRows)
-      .onConflictDoUpdate({
-        target: [
-          notifications.recipientEmail,
-          notifications.projectId,
-          notifications.type,
-          notifications.referenceKey,
-        ],
-        set: {
-          severity:
-            kind === "red_escalation" ? "critical" : "warning",
-          title: sql`excluded.title`,
-          message: sql`excluded.message`,
-          actionView: sql`excluded.action_view`,
-          status: "unread",
-          createdBy: identity.email,
-          createdAt: sql`CURRENT_TIMESTAMP`,
-          readAt: null,
-        },
-      });
-    await db.insert(auditLogs).values(
-      projectRows.map((project) => ({
+    for (const batch of chunks(recipientRows)) {
+      await db
+        .insert(notifications)
+        .values(batch)
+        .onConflictDoUpdate({
+          target: [
+            notifications.recipientEmail,
+            notifications.projectId,
+            notifications.type,
+            notifications.referenceKey,
+          ],
+          set: {
+            severity:
+              kind === "red_escalation" ? "critical" : "warning",
+            title: sql`excluded.title`,
+            message: sql`excluded.message`,
+            actionView: sql`excluded.action_view`,
+            status: "unread",
+            createdBy: identity.email,
+            createdAt: sql`CURRENT_TIMESTAMP`,
+            readAt: null,
+          },
+        });
+    }
+    const auditRows = projectRows.map((project) => ({
         actorEmail: identity.email,
         action:
           kind === "red_escalation"
@@ -145,8 +152,10 @@ export async function POST(request: Request) {
             (row) => row.projectId === project.id,
           ).length,
         }),
-      })),
-    );
+      }));
+    for (const batch of chunks(auditRows, 10)) {
+      await db.insert(auditLogs).values(batch);
+    }
     return Response.json(
       {
         sent: recipientRows.length,

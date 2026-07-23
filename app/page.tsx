@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PortfolioAnalytics from "./portfolio-analytics";
+import NotificationChannelPanel from "./notification-channel-panel";
 
 type Status = "green" | "yellow" | "red" | "na";
 type View =
@@ -2614,6 +2615,10 @@ function AdminPage({ onNavigate, identity }: { onNavigate: Navigate; identity: I
     "attachment.delete": "删除附件",
     "milestone_template.publish": "发布标准节点模板",
     "milestone_template.promote": "提升自定义节点",
+    "notification_channel.create": "新增通知渠道",
+    "notification_channel.update": "更新通知渠道",
+    "notification_channel.test": "测试通知渠道",
+    "notification_delivery.retry": "重试外部投递",
   };
 
   const loadAdminData = useCallback(async () => {
@@ -2715,7 +2720,7 @@ function AdminPage({ onNavigate, identity }: { onNavigate: Navigate; identity: I
     <div className="workspace-page">
       <WorkspaceHeader
         title="系统管理"
-        subtitle="用户角色、权限边界与全量操作审计"
+        subtitle="用户角色、权限边界、外部通知渠道与全量操作审计"
         onNavigate={onNavigate}
         identity={identity}
       />
@@ -2832,6 +2837,9 @@ function AdminPage({ onNavigate, identity }: { onNavigate: Navigate; identity: I
             )}
           </section>
         </div>
+        {(identity?.role === "pmo" || identity?.role === "admin") && (
+          <NotificationChannelPanel role={identity.role} />
+        )}
       </div>
       {showCreateUser && canEditUsers && (
         <div
@@ -3352,15 +3360,25 @@ function PmoPage({ onNavigate, onDataChanged, identity, projectData = projects }
         error?: string;
         sent?: number;
         projects?: number;
+        external?: {
+          channelCount?: number;
+          queued?: number;
+          processed?: number;
+          sent?: number;
+          failed?: number;
+        };
       };
       if (!response.ok) {
         throw new Error(result.error || "通知发送失败");
       }
-      setNotificationMessage(
+      const stationMessage =
         kind === "red_escalation"
           ? `已升级 ${result.projects ?? projectIds.length} 个红色项目，生成 ${result.sent ?? 0} 条站内通知。`
-          : `已催报 ${result.projects ?? projectIds.length} 个项目，生成 ${result.sent ?? 0} 条站内通知。`,
-      );
+          : `已催报 ${result.projects ?? projectIds.length} 个项目，生成 ${result.sent ?? 0} 条站内通知。`;
+      const externalMessage = result.external?.channelCount
+        ? ` 外部渠道新增${result.external.queued ?? 0}条，送达${result.external.sent ?? 0}条，失败${result.external.failed ?? 0}条。`
+        : " 当前未配置已启用的外部渠道。";
+      setNotificationMessage(`${stationMessage}${externalMessage}`);
     } catch (error) {
       setOperationError(
         error instanceof Error ? error.message : "通知发送失败",

@@ -17,6 +17,10 @@ import {
   type SnapshotLockResult,
 } from "@/lib/snapshot-service";
 import { ensureSeeded } from "@/lib/seed";
+import {
+  processDueExternalDeliveries,
+  queueExternalNotifications,
+} from "@/lib/notification-delivery";
 
 const AUTOMATION_ACTOR = "system:portfolio-automation";
 const NOTIFICATION_BATCH_SIZE = 5;
@@ -35,6 +39,9 @@ export type PortfolioAutomationResult = {
   reminderCount: number;
   overdueNoticeCount: number;
   redEscalationCount: number;
+  externalProcessed: number;
+  externalSent: number;
+  externalFailed: number;
   lockOutcome: SnapshotLockResult["outcome"] | "not_due";
 };
 
@@ -115,6 +122,26 @@ async function createReportNotices(
       detailJson: JSON.stringify({ created: created.length }),
     });
   }
+  await queueExternalNotifications(
+    missingProjects.map((project) => ({
+      projectId: project.id,
+      eventType: "report_reminder" as const,
+      referenceKey: `${weekKey}:auto-${phase}`,
+      title:
+        phase === "overdue"
+          ? `周报逾期：${project.name}`
+          : `自动催报：${project.name}`,
+      message:
+        phase === "overdue"
+          ? `${project.name}未在${weekKey}周五17:00前提交正式周报，该周期快照已锁定。请联系PMO说明原因并申请重新打开。`
+          : `${project.name}尚未完成${weekKey}周报，请在本周五17:00自动锁数前提交正式进度。`,
+      severity:
+        phase === "overdue"
+          ? ("critical" as const)
+          : ("warning" as const),
+    })),
+    AUTOMATION_ACTOR,
+  );
   return created.length;
 }
 
@@ -178,6 +205,17 @@ async function createRedEscalations(weekKey: string) {
       }),
     });
   }
+  await queueExternalNotifications(
+    redProjects.map((project) => ({
+      projectId: project.id,
+      eventType: "red_escalation" as const,
+      referenceKey: weekKey,
+      title: `自动红灯升级：${project.name}`,
+      message: `${project.name}在${weekKey}锁定口径下为红色，请立即核实关键节点、风险与纠偏措施并更新处置结论。`,
+      severity: "critical" as const,
+    })),
+    AUTOMATION_ACTOR,
+  );
   return created.length;
 }
 
@@ -190,6 +228,9 @@ export async function runPortfolioAutomation(
   let reminderCount = 0;
   let overdueNoticeCount = 0;
   let redEscalationCount = 0;
+  let externalProcessed = 0;
+  let externalSent = 0;
+  let externalFailed = 0;
   let lockOutcome: PortfolioAutomationResult["lockOutcome"] = "not_due";
 
   if (window.advanceReminderWeekKey) {
@@ -219,6 +260,10 @@ export async function runPortfolioAutomation(
       ]);
     }
   }
+  const externalDelivery = await processDueExternalDeliveries(20);
+  externalProcessed = externalDelivery.processed;
+  externalSent = externalDelivery.sent;
+  externalFailed = externalDelivery.failed;
 
   return {
     trigger,
@@ -226,6 +271,9 @@ export async function runPortfolioAutomation(
     reminderCount,
     overdueNoticeCount,
     redEscalationCount,
+    externalProcessed,
+    externalSent,
+    externalFailed,
     lockOutcome,
   };
 }

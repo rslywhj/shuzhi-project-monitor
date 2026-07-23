@@ -57,6 +57,13 @@
       "when": 1784805111497,
       "tag": "0007_soft_scream",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1784819328543,
+      "tag": "0008_open_nightcrawler",
+      "breakpoints": true
     }
   ]
 }

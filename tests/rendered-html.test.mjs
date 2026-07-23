@@ -369,6 +369,8 @@ test("delivers recipient-scoped notifications, report reminders and red escalati
     notificationRoute,
     notificationItemRoute,
     reminderRoute,
+    externalDelivery,
+    channelPanel,
     baselineApproveRoute,
     baselineRejectRoute,
     page,
@@ -382,6 +384,11 @@ test("delivers recipient-scoped notifications, report reminders and red escalati
     ),
     readFile(
       new URL("app/api/notifications/reminders/route.ts", templateRoot),
+      "utf8",
+    ),
+    readFile(new URL("lib/notification-delivery.ts", templateRoot), "utf8"),
+    readFile(
+      new URL("app/notification-channel-panel.tsx", templateRoot),
       "utf8",
     ),
     readFile(
@@ -404,6 +411,9 @@ test("delivers recipient-scoped notifications, report reminders and red escalati
   assert.match(reminderRoute, /project\.status !== "red"/);
   assert.match(reminderRoute, /notification\.remind_report/);
   assert.match(reminderRoute, /notification\.escalate_red/);
+  assert.match(reminderRoute, /queueExternalNotifications/);
+  assert.match(externalDelivery, /notification_deliveries_dedup_idx|dedupKey/);
+  assert.match(channelPanel, /站内通知始终保留为可靠兜底/);
   assert.match(baselineApproveRoute, /type: "baseline_decision"/);
   assert.match(baselineRejectRoute, /type: "baseline_decision"/);
   assert.match(page, /通知中心/);

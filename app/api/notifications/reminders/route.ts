@@ -13,6 +13,10 @@ import {
 } from "@/lib/api-utils";
 import { ensureSeeded } from "@/lib/seed";
 import {
+  processDueExternalDeliveries,
+  queueExternalNotifications,
+} from "@/lib/notification-delivery";
+import {
   canManagePortfolio,
   forbidden,
   getRequestIdentity,
@@ -156,12 +160,37 @@ export async function POST(request: Request) {
     for (const batch of chunks(auditRows, 10)) {
       await db.insert(auditLogs).values(batch);
     }
+    const externalQueue = await queueExternalNotifications(
+      projectRows.map((project) => ({
+        projectId: project.id,
+        eventType: kind,
+        referenceKey: weekKey,
+        title:
+          kind === "red_escalation"
+            ? `红灯升级：${project.name}`
+            : `周报催报：${project.name}`,
+        message:
+          kind === "red_escalation"
+            ? `${project.name}当前综合状态为红色，请立即核实关键节点、风险与纠偏措施并更新处置结论。`
+            : `${project.name}尚未完成${weekKey}周报，请在本周五17:00锁数前提交正式进度。`,
+        severity:
+          kind === "red_escalation"
+            ? ("critical" as const)
+            : ("warning" as const),
+      })),
+      identity.email,
+    );
+    const externalDelivery = await processDueExternalDeliveries(20);
     return Response.json(
       {
         sent: recipientRows.length,
         projects: projectRows.length,
         kind,
         weekKey,
+        external: {
+          ...externalQueue,
+          ...externalDelivery,
+        },
       },
       { status: 201 },
     );

@@ -99,6 +99,80 @@ export const notifications = sqliteTable(
   ],
 );
 
+export const notificationChannels = sqliteTable(
+  "notification_channels",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    name: text("name").notNull(),
+    provider: text("provider", {
+      enum: ["wecom", "dingtalk", "generic"],
+    }).notNull(),
+    webhookUrl: text("webhook_url").notNull(),
+    eventTypesJson: text("event_types_json")
+      .notNull()
+      .default('["report_reminder","red_escalation"]'),
+    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    createdBy: text("created_by").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("notification_channels_name_idx").on(table.name),
+    index("notification_channels_active_idx").on(table.active),
+  ],
+);
+
+export const notificationDeliveries = sqliteTable(
+  "notification_deliveries",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    channelId: integer("channel_id")
+      .notNull()
+      .references(() => notificationChannels.id, { onDelete: "cascade" }),
+    projectId: text("project_id").references(() => projects.id, {
+      onDelete: "set null",
+    }),
+    eventType: text("event_type", {
+      enum: ["report_reminder", "red_escalation", "test"],
+    }).notNull(),
+    referenceKey: text("reference_key").notNull(),
+    dedupKey: text("dedup_key").notNull(),
+    title: text("title").notNull(),
+    message: text("message").notNull(),
+    severity: text("severity", {
+      enum: ["info", "warning", "critical"],
+    })
+      .notNull()
+      .default("info"),
+    status: text("status", {
+      enum: ["pending", "sending", "sent", "failed"],
+    })
+      .notNull()
+      .default("pending"),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    maxAttempts: integer("max_attempts").notNull().default(3),
+    nextAttemptAt: text("next_attempt_at"),
+    responseStatus: integer("response_status"),
+    responseBody: text("response_body").notNull().default(""),
+    errorMessage: text("error_message").notNull().default(""),
+    createdBy: text("created_by").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    sentAt: text("sent_at"),
+  },
+  (table) => [
+    uniqueIndex("notification_deliveries_dedup_idx").on(table.dedupKey),
+    index("notification_deliveries_status_retry_idx").on(
+      table.status,
+      table.nextAttemptAt,
+    ),
+    index("notification_deliveries_channel_idx").on(
+      table.channelId,
+      table.createdAt,
+    ),
+  ],
+);
+
 export const milestoneTemplates = sqliteTable(
   "milestone_templates",
   {

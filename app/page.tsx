@@ -3532,9 +3532,35 @@ function PmoPage({ onNavigate, onDataChanged, identity, projectData = projects }
   </div>;
 }
 
+function EmptyProjectWorkspace({
+  onNavigate,
+  identity,
+}: {
+  onNavigate: Navigate;
+  identity: Identity | null;
+}) {
+  return (
+    <>
+      <WorkspaceHeader
+        title="尚未创建项目"
+        subtitle="先建立真实项目组合，再进入项目详情或周度填报"
+        onNavigate={onNavigate}
+        identity={identity}
+      />
+      <div className="page-content">
+        <section className="content-card">
+          <div className="empty-state">
+            当前项目库为空。请由 PMO 或管理员前往“项目组合”新建项目或导入 Excel。
+          </div>
+        </section>
+      </div>
+    </>
+  );
+}
+
 export default function Home() {
   const [view, setView] = useState<View>("cockpit");
-  const [projectData, setProjectData] = useState<ProjectData[]>(projects);
+  const [projectData, setProjectData] = useState<ProjectData[]>([]);
   const [identity, setIdentity] = useState<Identity | null>(null);
   const [dashboardData, setDashboardData] = useState<ProjectData[]>([]);
   const [dashboardSnapshot, setDashboardSnapshot] =
@@ -3575,7 +3601,7 @@ export default function Home() {
         milestoneTemplates?: TemplateData[];
         weeklyReports?: WeeklyReportRow[];
       };
-      if (data.projects?.length) setProjectData(data.projects);
+      if (Array.isArray(data.projects)) setProjectData(data.projects);
       if (data.dashboardProjects?.length) {
         setDashboardData(data.dashboardProjects);
       } else {
@@ -3618,5 +3644,5 @@ export default function Home() {
 
   if (dataState === "unauthenticated") return <LoginScreen />;
   if (view === "cockpit") return <><Cockpit onNavigate={navigate} projectData={dashboardData} snapshot={dashboardSnapshot} templateData={templateData} trends={trendData} alerts={dashboardAlerts} />{dataState === "fallback" && <div className="data-banner">当前数据服务不可用，管理大屏不展示未核实的演示数据。</div>}</>;
-  return <div className="app-shell"><Sidebar view={view} onNavigate={navigate} identity={identity} /><div className="workspace">{view === "portfolio" && <Portfolio onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} identity={identity} templateData={templateData} weeklyReports={weeklyReportData} />}{view === "analytics" && <PortfolioAnalytics onNavigate={(next, projectId) => navigate(next, projectId)} identity={identity} header={<WorkspaceHeader title="项目组合分析" subtitle="从组织、类型、负责人和标准节点维度识别共性瓶颈与基线漂移" onNavigate={navigate} identity={identity} />} />}{view === "project" && <ProjectDetail onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} projectId={selectedProjectId} identity={identity} />}{view === "report" && <WeeklyReport onNavigate={navigate} onDataChanged={refreshData} projectId={selectedProjectId} projectData={projectData} identity={identity} snapshot={dashboardSnapshot} />}{view === "pmo" && <PmoPage onNavigate={navigate} onDataChanged={refreshData} identity={identity} projectData={projectData} />}{view === "admin" && <AdminPage onNavigate={navigate} identity={identity} />}</div></div>;
+  return <div className="app-shell"><Sidebar view={view} onNavigate={navigate} identity={identity} /><div className="workspace">{view === "portfolio" && <Portfolio onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} identity={identity} templateData={templateData} weeklyReports={weeklyReportData} />}{view === "analytics" && <PortfolioAnalytics onNavigate={(next, projectId) => navigate(next, projectId)} identity={identity} header={<WorkspaceHeader title="项目组合分析" subtitle="从组织、类型、负责人和标准节点维度识别共性瓶颈与基线漂移" onNavigate={navigate} identity={identity} />} />}{view === "project" && (projectData.length ? <ProjectDetail onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} projectId={selectedProjectId} identity={identity} /> : <EmptyProjectWorkspace onNavigate={navigate} identity={identity} />)}{view === "report" && (projectData.length ? <WeeklyReport onNavigate={navigate} onDataChanged={refreshData} projectId={selectedProjectId} projectData={projectData} identity={identity} snapshot={dashboardSnapshot} /> : <EmptyProjectWorkspace onNavigate={navigate} identity={identity} />)}{view === "pmo" && <PmoPage onNavigate={navigate} onDataChanged={refreshData} identity={identity} projectData={projectData} />}{view === "admin" && <AdminPage onNavigate={navigate} identity={identity} />}</div></div>;
 }

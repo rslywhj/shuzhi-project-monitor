@@ -1,3 +1,4 @@
+import { env } from "cloudflare:workers";
 import { and, count, eq, isNull } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
@@ -117,6 +118,14 @@ function chunks<T>(rows: T[], size: number) {
   );
 }
 
+function demoSeedEnabled() {
+  return (
+    String(
+      (env as unknown as Record<string, unknown>).SEED_DEMO_DATA ?? "",
+    ).toLowerCase() === "true"
+  );
+}
+
 export async function ensureSeeded() {
   const db = getDb();
   await db
@@ -153,11 +162,19 @@ export async function ensureSeeded() {
         );
     }
   }
+  await db
+    .insert(ruleConfigs)
+    .values({
+      version: 1,
+      createdBy: "system",
+    })
+    .onConflictDoNothing();
   const [{ value }] = await db.select({ value: count() }).from(projects);
   if (value > 0) {
     await ensureBaselineVersionRows(db);
     return;
   }
+  if (!demoSeedEnabled()) return;
 
   const projectRows = seedProjects.map((p) => ({
         id: p[0],
@@ -217,11 +234,6 @@ export async function ensureSeeded() {
   for (const rows of chunks(milestoneRows, 4)) {
     await db.insert(milestones).values(rows).onConflictDoNothing();
   }
-
-  await db.insert(ruleConfigs).values({
-    version: 1,
-    createdBy: "system",
-  }).onConflictDoNothing();
 
   await db.insert(baselineChanges).values({
     projectId: "P02",

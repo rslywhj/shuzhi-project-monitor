@@ -451,6 +451,40 @@ test("shows a real authentication boundary instead of unauthenticated demo data"
   assert.match(auth, /isReservedAuthPath/);
 });
 
+test("keeps demo projects out of production and handles a real empty portfolio", async () => {
+  const [page, seed, envExample, readme] = await Promise.all([
+    readFile(new URL("app/page.tsx", templateRoot), "utf8"),
+    readFile(new URL("lib/seed.ts", templateRoot), "utf8"),
+    readFile(new URL(".env.example", templateRoot), "utf8"),
+    readFile(new URL("README.md", templateRoot), "utf8"),
+  ]);
+
+  const ruleSeed = seed.indexOf(".insert(ruleConfigs)");
+  const demoGate = seed.indexOf("if (!demoSeedEnabled()) return;");
+  const projectSeed = seed.indexOf("const projectRows = seedProjects.map");
+  assert(ruleSeed >= 0 && ruleSeed < demoGate);
+  assert(demoGate >= 0 && demoGate < projectSeed);
+  assert.match(seed, /SEED_DEMO_DATA/);
+  assert.match(seed, /\.toLowerCase\(\) === "true"/);
+  assert.match(envExample, /SEED_DEMO_DATA=false/);
+  assert.match(readme, /全新数据库只自动初始化标准节点模板与默认规则/);
+
+  assert.match(
+    page,
+    /useState<ProjectData\[\]>\(\[\]\)/,
+  );
+  assert.match(page, /Array\.isArray\(data\.projects\)/);
+  assert.match(page, /function EmptyProjectWorkspace/);
+  assert.match(
+    page,
+    /view === "project" && \(projectData\.length \?/,
+  );
+  assert.match(
+    page,
+    /view === "report" && \(projectData\.length \?/,
+  );
+});
+
 test("freezes high risks and overdue actions into the management snapshot", async () => {
   const [snapshotService, bootstrap, page] = await Promise.all([
     readFile(new URL("lib/snapshot-service.ts", templateRoot), "utf8"),

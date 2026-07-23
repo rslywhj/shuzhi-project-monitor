@@ -28,7 +28,7 @@ test("ships the complete prototype flow without starter artifacts", async () => 
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
 
-  for (const label of ["项目组合总览", "周度进度填报", "PMO 管理中心", "基线变更审批", "立即锁定快照"]) {
+  for (const label of ["项目组合总览", "周度进度填报", "PMO 管理中心", "基线变更审批", "重新打开第30周快照"]) {
     assert.match(page, new RegExp(label));
   }
   assert.match(page, /statusSymbol/);
@@ -41,7 +41,7 @@ test("ships the complete prototype flow without starter artifacts", async () => 
 });
 
 test("defines durable, authorized and auditable workflow APIs", async () => {
-  const [hosting, schema, reportRoute, baselineRoute, snapshotRoute, migration] =
+  const [hosting, schema, reportRoute, baselineRoute, baselineRequestRoute, baselineRejectRoute, snapshotRoute, snapshotReopenRoute, migration] =
     await Promise.all([
       readFile(new URL(".openai/hosting.json", templateRoot), "utf8"),
       readFile(new URL("db/schema.ts", templateRoot), "utf8"),
@@ -53,7 +53,19 @@ test("defines durable, authorized and auditable workflow APIs", async () => {
         new URL("app/api/baseline-changes/[id]/approve/route.ts", templateRoot),
         "utf8",
       ),
+      readFile(
+        new URL("app/api/baseline-changes/route.ts", templateRoot),
+        "utf8",
+      ),
+      readFile(
+        new URL("app/api/baseline-changes/[id]/reject/route.ts", templateRoot),
+        "utf8",
+      ),
       readFile(new URL("app/api/snapshots/lock/route.ts", templateRoot), "utf8"),
+      readFile(
+        new URL("app/api/snapshots/[id]/reopen/route.ts", templateRoot),
+        "utf8",
+      ),
       readFile(new URL("drizzle/0000_married_elektra.sql", templateRoot), "utf8"),
     ]);
 
@@ -75,8 +87,12 @@ test("defines durable, authorized and auditable workflow APIs", async () => {
   assert.match(reportRoute, /该周期快照已经锁定/);
   assert.match(baselineRoute, /canManagePortfolio/);
   assert.match(baselineRoute, /baseline_change\.approve/);
+  assert.match(baselineRequestRoute, /baseline_change\.request/);
+  assert.match(baselineRejectRoute, /baseline_change\.reject/);
   assert.match(snapshotRoute, /snapshot\.lock/);
-  assert.match(snapshotRoute, /重新锁定必须填写重新打开原因/);
+  assert.match(snapshotRoute, /请先填写原因并重新打开/);
+  assert.match(snapshotReopenRoute, /snapshot\.reopen/);
+  assert.match(snapshotReopenRoute, /只能重新打开该周期的最新快照版本/);
 });
 
 test("secures public access and exposes real administration workflows", async () => {
@@ -98,4 +114,58 @@ test("secures public access and exposes real administration workflows", async ()
   assert.match(page, /新建统建项目/);
   assert.match(page, /用户与角色/);
   assert.match(page, /预警规则配置/);
+});
+
+test("implements risk and corrective-action closure with explainable health scoring", async () => {
+  const [schema, riskRoute, actionRoute, health, page, migration] =
+    await Promise.all([
+      readFile(new URL("db/schema.ts", templateRoot), "utf8"),
+      readFile(
+        new URL("app/api/projects/[id]/risks/route.ts", templateRoot),
+        "utf8",
+      ),
+      readFile(
+        new URL("app/api/projects/[id]/actions/route.ts", templateRoot),
+        "utf8",
+      ),
+      readFile(new URL("lib/health.ts", templateRoot), "utf8"),
+      readFile(new URL("app/page.tsx", templateRoot), "utf8"),
+      readFile(
+        new URL("drizzle/0001_deep_peter_parker.sql", templateRoot),
+        "utf8",
+      ),
+    ]);
+
+  assert.match(schema, /export const risks/);
+  assert.match(schema, /riskId: integer/);
+  assert.match(riskRoute, /risk\.create/);
+  assert.match(actionRoute, /corrective_action\.create/);
+  assert.match(health, /schedulePenalty/);
+  assert.match(health, /forcedRed/);
+  assert.match(page, /风险与纠偏措施/);
+  assert.match(migration, /CREATE TABLE `risks`/);
+});
+
+test("serves management views from locked snapshots rather than mutable live rows", async () => {
+  const [bootstrap, heatmap, trends, snapshotRead, page] = await Promise.all([
+    readFile(new URL("app/api/bootstrap/route.ts", templateRoot), "utf8"),
+    readFile(
+      new URL("app/api/dashboard/heatmap/route.ts", templateRoot),
+      "utf8",
+    ),
+    readFile(
+      new URL("app/api/dashboard/trends/route.ts", templateRoot),
+      "utf8",
+    ),
+    readFile(new URL("app/api/snapshots/[id]/route.ts", templateRoot), "utf8"),
+    readFile(new URL("app/page.tsx", templateRoot), "utf8"),
+  ]);
+
+  assert.match(bootstrap, /dashboardProjects/);
+  assert.match(bootstrap, /lockedSnapshot/);
+  assert.match(heatmap, /snapshots\.status, "locked"/);
+  assert.match(trends, /latestByWeek/);
+  assert.match(snapshotRead, /payload: JSON\.parse/);
+  assert.match(page, /dashboardSnapshot/);
+  assert.match(page, /当前锁定快照口径/);
 });

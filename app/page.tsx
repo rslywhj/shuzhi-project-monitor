@@ -7,6 +7,14 @@ type View = "cockpit" | "portfolio" | "project" | "report" | "pmo" | "admin";
 type Role = "executive" | "pmo" | "manager" | "admin";
 type Identity = { email: string; displayName: string; role: Role };
 type Navigate = (view: View, projectId?: string) => void;
+type MilestoneData = {
+  id: number;
+  name: string;
+  sequence: number;
+  plannedFinish: string;
+  applicable: boolean;
+  critical: boolean;
+};
 
 const milestones = ["立项启动", "需求确认", "方案评审", "开发完成", "联调测试", "用户验收", "上线切换"];
 
@@ -26,6 +34,17 @@ type ProjectData = (typeof projects)[number] & {
   ownerEmail?: string;
   baselineVersion?: number;
   updatedAt?: string;
+  openRiskCount?: number;
+  openActionCount?: number;
+  milestones?: MilestoneData[];
+};
+type DashboardSnapshot = {
+  id: number;
+  weekKey: string;
+  version: number;
+  projectCount: number;
+  completeness: number;
+  lockedAt: string;
 };
 
 const statusLabel: Record<Status, string> = { green: "正常", yellow: "预警", red: "严重", na: "不适用" };
@@ -62,7 +81,7 @@ function AppLogo({ dark = false }: { dark?: boolean }) {
   </div>;
 }
 
-function Cockpit({ onNavigate, projectData = projects }: { onNavigate: Navigate; projectData?: ProjectData[] }) {
+function Cockpit({ onNavigate, projectData = projects, snapshot }: { onNavigate: Navigate; projectData?: ProjectData[]; snapshot: DashboardSnapshot | null }) {
   const [org, setOrg] = useState("全部组织");
   const [health, setHealth] = useState("全部状态");
   const [page, setPage] = useState(0);
@@ -90,6 +109,12 @@ function Cockpit({ onNavigate, projectData = projects }: { onNavigate: Navigate;
     : 0;
   const progressGap = actualProgress - planProgress;
   const organizations = [...new Set(projectData.map((project) => project.org))].sort();
+  const snapshotLabel = snapshot
+    ? `${snapshot.weekKey.replace("-W", "年第")}周 · V${snapshot.version}`
+    : "尚无锁定快照";
+  const snapshotTime = snapshot?.lockedAt
+    ? snapshot.lockedAt.replace("T", " ").slice(5, 16)
+    : "等待 PMO 锁定";
 
   useEffect(() => {
     if (pageCount <= 1) return;
@@ -108,8 +133,8 @@ function Cockpit({ onNavigate, projectData = projects }: { onNavigate: Navigate;
         <h1>管理数智军团统建项目进度监控</h1>
       </div>
       <div className="snapshot">
-        <span className="live-dot" /> 已锁定 · 2026年第29周
-        <strong>07月17日 17:00</strong>
+        <span className="live-dot" /> 已锁定 · {snapshotLabel}
+        <strong>{snapshotTime}</strong>
       </div>
       <button className="light-button" onClick={() => onNavigate("portfolio")}>进入工作台 <span>↗</span></button>
     </header>
@@ -120,7 +145,7 @@ function Cockpit({ onNavigate, projectData = projects }: { onNavigate: Navigate;
       <div className="metric-card yellow"><span>黄色 · 预警</span><strong>{yellow}</strong><small>较上周 +1</small></div>
       <div className="metric-card red"><span>红色 · 严重</span><strong>{red}</strong><small>需管理层关注</small></div>
       <div className="metric-card progress"><span>组合总体进度</span><div className="metric-progress"><strong>{actualProgress.toFixed(1)}%</strong><em>计划 {planProgress.toFixed(1)}%</em></div><ProgressBar value={actualProgress} /><small className={progressGap < 0 ? "negative" : "positive"}>{progressGap < 0 ? "落后" : "领先"}计划 {Math.abs(progressGap).toFixed(1)} 个百分点</small></div>
-      <div className="metric-card quality"><span>数据装载状态</span><strong>{total ? "100%" : "0%"}</strong><small>{total} / {total} 项目已载入</small></div>
+      <div className="metric-card quality"><span>周报完成率</span><strong>{snapshot?.completeness ?? 0}%</strong><small>当前锁定快照口径</small></div>
     </section>
 
     <section className="cockpit-controls">
@@ -334,9 +359,211 @@ function Portfolio({ onNavigate, onDataChanged, projectData = projects, identity
   </div>;
 }
 
-function ProjectDetail({ onNavigate, projectData = projects, projectId, identity }: { onNavigate: Navigate; projectData?: ProjectData[]; projectId: string; identity: Identity | null }) {
+function RiskActionPanel({ projectId, canEdit, onDataChanged }: { projectId: string; canEdit: boolean; onDataChanged: () => Promise<void> }) {
+  type RiskRow = {
+    id: number;
+    title: string;
+    category: string;
+    level: "low" | "medium" | "high";
+    status: "open" | "monitoring" | "closed";
+    description: string;
+    mitigation: string;
+    owner: string;
+    dueDate: string | null;
+  };
+  type ActionRow = {
+    id: number;
+    riskId: number | null;
+    name: string;
+    owner: string;
+    recoveryDate: string;
+    detail: string;
+    status: "pending" | "in_progress" | "completed" | "overdue";
+    progress: number;
+  };
+  const [riskRows, setRiskRows] = useState<RiskRow[]>([]);
+  const [actionRows, setActionRows] = useState<ActionRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [showRiskForm, setShowRiskForm] = useState(false);
+  const [showActionForm, setShowActionForm] = useState(false);
+  const [working, setWorking] = useState(false);
+
+  const loadRows = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const [riskResponse, actionResponse] = await Promise.all([
+        fetch(`/api/projects/${encodeURIComponent(projectId)}/risks`),
+        fetch(`/api/projects/${encodeURIComponent(projectId)}/actions`),
+      ]);
+      const riskResult = (await riskResponse.json()) as {
+        risks?: RiskRow[];
+        error?: string;
+      };
+      const actionResult = (await actionResponse.json()) as {
+        actions?: ActionRow[];
+        error?: string;
+      };
+      if (!riskResponse.ok) throw new Error(riskResult.error || "风险读取失败");
+      if (!actionResponse.ok) throw new Error(actionResult.error || "措施读取失败");
+      setRiskRows(riskResult.risks ?? []);
+      setActionRows(actionResult.actions ?? []);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "风险与措施读取失败");
+    } finally {
+      setLoading(false);
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void loadRows(), 0);
+    return () => window.clearTimeout(timer);
+  }, [loadRows]);
+
+  async function createRisk(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setWorking(true);
+    setError("");
+    const form = new FormData(event.currentTarget);
+    try {
+      const response = await fetch(
+        `/api/projects/${encodeURIComponent(projectId)}/risks`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            title: form.get("title"),
+            category: form.get("category"),
+            level: form.get("level"),
+            description: form.get("description"),
+            mitigation: form.get("mitigation"),
+            owner: form.get("owner"),
+            dueDate: form.get("dueDate"),
+          }),
+        },
+      );
+      const result = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(result.error || "风险创建失败");
+      setShowRiskForm(false);
+      await Promise.all([loadRows(), onDataChanged()]);
+    } catch (createError) {
+      setError(createError instanceof Error ? createError.message : "风险创建失败");
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function createAction(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setWorking(true);
+    setError("");
+    const form = new FormData(event.currentTarget);
+    try {
+      const response = await fetch(
+        `/api/projects/${encodeURIComponent(projectId)}/actions`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            riskId: Number(form.get("riskId")) || null,
+            name: form.get("name"),
+            owner: form.get("owner"),
+            recoveryDate: form.get("recoveryDate"),
+            detail: form.get("detail"),
+            progress: 0,
+          }),
+        },
+      );
+      const result = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(result.error || "措施创建失败");
+      setShowActionForm(false);
+      await loadRows();
+    } catch (createError) {
+      setError(createError instanceof Error ? createError.message : "措施创建失败");
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function patchRisk(id: number, status: RiskRow["status"]) {
+    setWorking(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/risks/${id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      const result = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(result.error || "风险更新失败");
+      await Promise.all([loadRows(), onDataChanged()]);
+    } catch (patchError) {
+      setError(patchError instanceof Error ? patchError.message : "风险更新失败");
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function patchAction(id: number, status: ActionRow["status"]) {
+    setWorking(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/actions/${id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      const result = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(result.error || "措施更新失败");
+      await loadRows();
+    } catch (patchError) {
+      setError(patchError instanceof Error ? patchError.message : "措施更新失败");
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  const openRisks = riskRows.filter((risk) => risk.status !== "closed");
+  const overdueActions = actionRows.filter(
+    (action) =>
+      action.status !== "completed" &&
+      action.recoveryDate < new Date().toISOString().slice(0, 10),
+  );
+  const levelNames = { low: "低", medium: "中", high: "高" };
+  const statusNames = {
+    open: "开放",
+    monitoring: "跟踪中",
+    closed: "已关闭",
+  };
+  const actionStatusNames = {
+    pending: "待启动",
+    in_progress: "进行中",
+    completed: "已完成",
+    overdue: "已逾期",
+  };
+
+  if (loading) return <section className="content-card"><div className="panel-loading">正在读取风险与措施…</div></section>;
+  return <section className="content-card risk-action-panel">
+    <div className="card-title"><div><h2>风险与纠偏措施</h2><p>风险、措施、责任人与恢复日期形成闭环跟踪</p></div>{canEdit && <div className="risk-toolbar"><button className="outline-button" onClick={() => setShowRiskForm((value) => !value)}>＋ 登记风险</button><button className="primary-button" onClick={() => setShowActionForm((value) => !value)}>＋ 新建措施</button></div>}</div>
+    <div className="risk-summary"><div><small>开放风险</small><strong>{openRisks.length}</strong></div><div><small>高风险</small><strong className="red-text">{openRisks.filter((risk) => risk.level === "high").length}</strong></div><div><small>执行中措施</small><strong>{actionRows.filter((action) => action.status === "in_progress").length}</strong></div><div><small>逾期措施</small><strong className={overdueActions.length ? "red-text" : ""}>{overdueActions.length}</strong></div></div>
+    {error && <div className="form-error" role="alert">! {error}</div>}
+    {showRiskForm && <form className="inline-manage-form" onSubmit={createRisk}><div className="form-grid"><label>风险标题<input name="title" required /></label><label>风险类别<select name="category"><option>进度</option><option>资源</option><option>质量</option><option>供应商</option><option>范围</option></select></label><label>风险等级<select name="level" defaultValue="medium"><option value="low">低</option><option value="medium">中</option><option value="high">高</option></select></label><label>责任人<input name="owner" required /></label><label>计划关闭日期<input name="dueDate" type="date" required /></label></div><label className="full-label">风险描述<textarea name="description" required /></label><label className="full-label">应对策略<textarea name="mitigation" /></label><div className="modal-actions"><button type="button" className="outline-button" onClick={() => setShowRiskForm(false)}>取消</button><button className="primary-button" disabled={working}>保存风险</button></div></form>}
+    {showActionForm && <form className="inline-manage-form" onSubmit={createAction}><div className="form-grid"><label>关联风险<select name="riskId"><option value="">不关联风险</option>{openRisks.map((risk) => <option key={risk.id} value={risk.id}>{risk.title}</option>)}</select></label><label>措施名称<input name="name" required /></label><label>责任人<input name="owner" required /></label><label>预计恢复日期<input name="recoveryDate" type="date" required /></label></div><label className="full-label">具体行动<textarea name="detail" required /></label><div className="modal-actions"><button type="button" className="outline-button" onClick={() => setShowActionForm(false)}>取消</button><button className="primary-button" disabled={working}>保存措施</button></div></form>}
+    <div className="risk-action-grid">
+      <div><h3>风险台账 <span>{riskRows.length}</span></h3>{riskRows.length ? riskRows.map((risk) => <article className={`risk-record ${risk.level}`} key={risk.id}><div className="record-head"><span className={`risk-level ${risk.level}`}>{levelNames[risk.level]}风险</span><em>{statusNames[risk.status]}</em></div><h4>{risk.title}</h4><p>{risk.description}</p><small>{risk.category} · 责任人 {risk.owner} · 计划关闭 {risk.dueDate || "未设置"}</small>{risk.mitigation && <div className="mitigation">应对：{risk.mitigation}</div>}{canEdit && risk.status !== "closed" && <button className="text-button" disabled={working} onClick={() => patchRisk(risk.id, "closed")}>标记已关闭</button>}</article>) : <div className="empty-state">暂无风险记录</div>}</div>
+      <div><h3>纠偏措施 <span>{actionRows.length}</span></h3>{actionRows.length ? actionRows.map((action) => <article className="action-record" key={action.id}><div className="record-head"><span>{actionStatusNames[action.status]}</span><em>{action.progress}%</em></div><h4>{action.name}</h4><p>{action.detail}</p><ProgressBar value={action.progress} tone={action.status === "completed" ? "green" : "blue"} /><small>责任人 {action.owner} · 恢复目标 {action.recoveryDate}</small>{canEdit && <select disabled={working} value={action.status} onChange={(event) => patchAction(action.id, event.target.value as ActionRow["status"])}><option value="pending">待启动</option><option value="in_progress">进行中</option><option value="completed">已完成</option><option value="overdue">已逾期</option></select>}</article>) : <div className="empty-state">暂无纠偏措施</div>}</div>
+    </div>
+  </section>;
+}
+
+function ProjectDetail({ onNavigate, onDataChanged, projectData = projects, projectId, identity }: { onNavigate: Navigate; onDataChanged: () => Promise<void>; projectData?: ProjectData[]; projectId: string; identity: Identity | null }) {
   const [tab, setTab] = useState("节点计划");
   const [expanded, setExpanded] = useState<number | null>(3);
+  const [showBaselineForm, setShowBaselineForm] = useState(false);
+  const [baselineWorking, setBaselineWorking] = useState(false);
+  const [baselineError, setBaselineError] = useState("");
+  const [baselineSuccess, setBaselineSuccess] = useState(false);
   const currentProject =
     projectData.find((project) => project.id === projectId) ??
     projectData[0] ??
@@ -348,6 +575,42 @@ function ProjectDetail({ onNavigate, projectData = projects, projectId, identity
     (identity?.role === "manager" &&
       Boolean(currentProject.ownerEmail) &&
       identity.email === currentProject.ownerEmail);
+  const adjustableMilestones =
+    currentProject.milestones?.filter((milestone) => milestone.applicable) ?? [];
+
+  async function requestBaselineChange(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBaselineWorking(true);
+    setBaselineError("");
+    const form = new FormData(event.currentTarget);
+    const milestoneId = Number(form.get("milestoneId"));
+    try {
+      const response = await fetch("/api/baseline-changes", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          projectId: currentProject.id,
+          reason: form.get("reason"),
+          impact: form.get("impact"),
+          changes: [{ milestoneId, to: form.get("to") }],
+        }),
+      });
+      const result = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(result.error || "基线变更申请失败");
+      setShowBaselineForm(false);
+      setBaselineSuccess(true);
+      setTimeout(() => setBaselineSuccess(false), 3000);
+      await onDataChanged();
+    } catch (requestError) {
+      setBaselineError(
+        requestError instanceof Error
+          ? requestError.message
+          : "基线变更申请失败",
+      );
+    } finally {
+      setBaselineWorking(false);
+    }
+  }
   return <div className="workspace-page">
     <WorkspaceHeader title="项目详情" subtitle={`项目台账 / ${currentProject.name}`} onNavigate={onNavigate} identity={identity} />
     <div className="page-content project-detail">
@@ -360,9 +623,9 @@ function ProjectDetail({ onNavigate, projectData = projects, projectId, identity
       <section className="score-explain">
         <div className="score-ring"><strong>{currentProject.score}</strong><span>综合健康度</span></div><div className="score-copy"><h3>项目{statusLabel[currentProject.status]}：评分与一票否决规则共同判定</h3><p>基础分 100，当前累计扣分 {100 - currentProject.score} 分。所有扣分均可追溯至节点、风险或数据更新记录。</p><div className="deductions"><span>进度偏差 <b>{variance}pp</b></span><span>节点预警 <b>{currentProject.cells.filter((cell) => cell === "yellow").length}项</b></span><span>严重节点 <b>{currentProject.cells.filter((cell) => cell === "red").length}项</b></span></div></div><button className="text-button">查看评分明细 →</button>
       </section>
-      <div className="tabs">{["节点计划","周报记录","风险与措施","基线版本","操作审计"].map(t => <button className={tab === t ? "active" : ""} onClick={() => setTab(t)} key={t}>{t}{t === "风险与措施" && <b>4</b>}</button>)}</div>
+      <div className="tabs">{["节点计划","周报记录","风险与措施","基线版本","操作审计"].map(t => <button className={tab === t ? "active" : ""} onClick={() => setTab(t)} key={t}>{t}{t === "风险与措施" && <b>{(currentProject.openRiskCount ?? 0) + (currentProject.openActionCount ?? 0)}</b>}</button>)}</div>
       {tab === "节点计划" && <section className="content-card milestone-card">
-        <div className="card-title"><div><h2>项目节点计划</h2><p>当前基线 V2 · 批准于 2026-06-18　<span>较原始基线累计延期 9 天</span></p></div><button className="outline-button">申请基线变更</button></div>
+        <div className="card-title"><div><h2>项目节点计划</h2><p>当前基线 V{currentProject.baselineVersion ?? 1} · 原始基线永久保留　<span>正式调整须经 PMO 审批</span></p></div>{canUpdate && <button className="outline-button" disabled={!adjustableMilestones.length} onClick={() => setShowBaselineForm(true)}>申请基线变更</button>}</div>
         <div className="milestone-list">
           {milestones.map((m, i) => {
             const status = currentProject.cells[i] ?? "na"; const complete = [100,100,100,Math.max(68, currentProject.actual),25,0,0][i];
@@ -377,8 +640,11 @@ function ProjectDetail({ onNavigate, projectData = projects, projectId, identity
           })}
         </div>
       </section>}
-      {tab !== "节点计划" && <section className="content-card placeholder-panel"><div className="placeholder-icon">{tab === "风险与措施" ? "!" : tab === "基线版本" ? "≋" : "◎"}</div><h2>{tab}</h2><p>该模块已纳入原型信息架构，可从主流程中的对应入口继续体验。</p><button className="primary-button" onClick={() => tab === "基线版本" ? onNavigate("pmo") : onNavigate("report")}>进入演示流程</button></section>}
+      {tab === "风险与措施" && <RiskActionPanel projectId={currentProject.id} canEdit={canUpdate} onDataChanged={onDataChanged} />}
+      {tab !== "节点计划" && tab !== "风险与措施" && <section className="content-card placeholder-panel"><div className="placeholder-icon">{tab === "基线版本" ? "≋" : "◎"}</div><h2>{tab}</h2><p>该模块已纳入原型信息架构，可从主流程中的对应入口继续体验。</p><button className="primary-button" onClick={() => tab === "基线版本" ? onNavigate("pmo") : onNavigate("report", currentProject.id)}>进入演示流程</button></section>}
     </div>
+    {showBaselineForm && <div className="modal-backdrop" onClick={() => setShowBaselineForm(false)}><section className="create-modal baseline-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowBaselineForm(false)}>×</button><span className="modal-kicker">BASELINE CHANGE</span><h2>申请基线变更</h2><p>{currentProject.name} · 当前批准基线 V{currentProject.baselineVersion ?? 1}</p><form onSubmit={requestBaselineChange}><div className="modal-form-grid"><label>调整节点<select name="milestoneId" required>{adjustableMilestones.map((milestone) => <option key={milestone.id} value={milestone.id}>{milestone.name}（当前 {milestone.plannedFinish}）</option>)}</select></label><label>新计划完成日<input name="to" type="date" required /></label></div><label className="full-label">变更原因<textarea name="reason" minLength={10} required placeholder="说明触发原因、决策依据和不可通过纠偏消化的原因" /></label><label className="full-label">影响评估<textarea name="impact" minLength={10} required placeholder="说明对总体工期、成本、范围、资源和年度目标的影响" /></label>{baselineError && <div className="form-error" role="alert">! {baselineError}</div>}<div className="modal-actions"><button type="button" className="outline-button" onClick={() => setShowBaselineForm(false)}>取消</button><button className="primary-button" disabled={baselineWorking}>{baselineWorking ? "正在提交…" : "提交 PMO 审批"}</button></div></form></section></div>}
+    {baselineSuccess && <div className="toast"><span>✓</span><div><strong>基线变更申请已提交</strong><p>PMO 审批前当前批准基线保持不变。</p></div></div>}
   </div>;
 }
 
@@ -561,6 +827,13 @@ function AdminPage({ onNavigate, identity }: { onNavigate: Navigate; identity: I
     "project.update": "更新项目",
     "user.update": "更新用户",
     "rule_config.publish": "发布规则",
+    "risk.create": "登记风险",
+    "risk.update": "更新风险",
+    "corrective_action.create": "新建纠偏措施",
+    "corrective_action.update": "更新纠偏措施",
+    "baseline_change.request": "申请基线变更",
+    "baseline_change.reject": "驳回基线变更",
+    "snapshot.reopen": "重新打开快照",
   };
 
   const loadAdminData = useCallback(async () => {
@@ -608,11 +881,47 @@ function AdminPage({ onNavigate, identity }: { onNavigate: Navigate; identity: I
   return <div className="workspace-page"><WorkspaceHeader title="系统管理" subtitle="用户角色、权限边界与全量操作审计" onNavigate={onNavigate} identity={identity} /><div className="page-content admin-page">{error && <div className="form-error" role="alert">! {error}</div>}<div className="admin-grid"><section className="content-card"><div className="card-title"><div><h2>用户与角色</h2><p>{canEditUsers ? "可调整账号角色；身份仍由登录平台确认" : "PMO 可查看账号，只有系统管理员可调整角色"}</p></div><span className="count-badge">{usersData.length} 个账号</span></div>{loading ? <div className="panel-loading">正在读取用户数据…</div> : <div className="user-table"><div className="table-head"><span>用户</span><span>角色</span><span>状态</span><span>加入时间</span></div>{usersData.map((user) => <div className="table-row" key={user.email}><span className="admin-user"><i>{user.displayName[0]}</i><b>{user.displayName}<small>{user.email}</small></b></span><select value={user.role} disabled={!canEditUsers} onChange={(event) => updateRole(user, event.target.value as UserRow["role"])}><option value="executive">管理层只读</option><option value="manager">项目经理</option><option value="pmo">PMO</option><option value="admin">系统管理员</option></select><span className={user.active ? "user-active" : "user-disabled"}>{user.active ? "● 正常" : "— 停用"}</span><span>{user.createdAt.slice(0, 10)}</span></div>)}</div>}</section><section className="content-card"><div className="card-title"><div><h2>操作审计</h2><p>记录所有关键数据与权限变更</p></div><button className="text-button" onClick={loadAdminData}>刷新</button></div>{loading ? <div className="panel-loading">正在读取审计记录…</div> : <div className="audit-list">{auditData.length ? auditData.map((row) => <div key={row.id}><span className="audit-dot" /><div><strong>{actionNames[row.action] ?? row.action}</strong><p>{row.actorEmail} · {row.entityType} / {row.entityId}</p></div><time>{row.createdAt.replace("T"," ").slice(0,16)}</time></div>) : <div className="empty-state">暂无审计记录</div>}</div>}</section></div></div></div>;
 }
 
-function PmoPage({ onNavigate, onDataChanged, identity }: { onNavigate: Navigate; onDataChanged: () => Promise<void>; identity: Identity | null }) {
+function PmoPage({ onNavigate, onDataChanged, identity, projectData = projects }: { onNavigate: Navigate; onDataChanged: () => Promise<void>; identity: Identity | null; projectData?: ProjectData[] }) {
+  type SnapshotRow = {
+    id: number;
+    weekKey: string;
+    version: number;
+    status: "locked" | "reopened";
+    projectCount: number;
+    completeness: number;
+    lockedAt: string;
+    lockedBy: string;
+  };
+  type BaselineRow = {
+    id: number;
+    projectId: string;
+    versionFrom: number;
+    versionTo: number;
+    reason: string;
+    impact: string;
+    status: "pending" | "approved" | "rejected";
+    requestedBy: string;
+    requestedAt: string;
+    rejectionReason?: string;
+    changes: Array<{
+      milestone: string;
+      from: string;
+      to: string;
+      days: number;
+    }>;
+  };
   const [locked, setLocked] = useState(false);
+  const [snapshotId, setSnapshotId] = useState<number | null>(null);
+  const [snapshotVersion, setSnapshotVersion] = useState(1);
+  const [snapshotRows, setSnapshotRows] = useState<SnapshotRow[]>([]);
+  const [showReopen, setShowReopen] = useState(false);
+  const [reopenReason, setReopenReason] = useState("");
   const [approved, setApproved] = useState(false);
   const [tab, setTab] = useState("快照锁定");
   const [changeId, setChangeId] = useState(1);
+  const [baselineRows, setBaselineRows] = useState<BaselineRow[]>([]);
+  const [showReject, setShowReject] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
   const [working, setWorking] = useState(false);
   const [operationError, setOperationError] = useState("");
 
@@ -623,11 +932,21 @@ function PmoPage({ onNavigate, onDataChanged, identity }: { onNavigate: Navigate
         return response.json();
       })
       .then((data: {
-        snapshots?: Array<{ weekKey: string }>;
-        baselineChanges?: Array<{ id: number; projectId: string; status: string }>;
+        snapshots?: SnapshotRow[];
+        baselineChanges?: BaselineRow[];
       }) => {
-        setLocked(Boolean(data.snapshots?.some((snapshot) => snapshot.weekKey === "2026-W30")));
-        const change = data.baselineChanges?.find((item) => item.projectId === "P02");
+        const rows = data.snapshots ?? [];
+        setSnapshotRows(rows);
+        const current = rows
+          .filter((snapshot) => snapshot.weekKey === "2026-W30")
+          .sort((a, b) => b.version - a.version)[0];
+        setLocked(current?.status === "locked");
+        setSnapshotId(current?.id ?? null);
+        setSnapshotVersion(current?.version ?? 1);
+        const changes = data.baselineChanges ?? [];
+        setBaselineRows(changes);
+        const change =
+          changes.find((item) => item.status === "pending") ?? changes[0];
         if (change) {
           setChangeId(change.id);
           setApproved(change.status === "approved");
@@ -645,12 +964,53 @@ function PmoPage({ onNavigate, onDataChanged, identity }: { onNavigate: Navigate
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ weekKey: "2026-W30" }),
       });
-      const result = (await response.json()) as { error?: string };
+      const result = (await response.json()) as {
+        error?: string;
+        snapshot?: SnapshotRow;
+      };
       if (!response.ok) throw new Error(result.error || "快照锁定失败");
       setLocked(true);
+      if (result.snapshot) {
+        setSnapshotId(result.snapshot.id);
+        setSnapshotVersion(result.snapshot.version);
+        setSnapshotRows((rows) => [result.snapshot!, ...rows]);
+      }
       await onDataChanged();
     } catch (error) {
       setOperationError(error instanceof Error ? error.message : "快照锁定失败");
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function reopenSnapshot() {
+    if (!snapshotId) return;
+    setWorking(true);
+    setOperationError("");
+    try {
+      const response = await fetch(`/api/snapshots/${snapshotId}/reopen`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ reason: reopenReason }),
+      });
+      const result = (await response.json()) as {
+        error?: string;
+        snapshot?: SnapshotRow;
+      };
+      if (!response.ok) throw new Error(result.error || "快照重新打开失败");
+      setLocked(false);
+      setShowReopen(false);
+      setReopenReason("");
+      setSnapshotRows((rows) =>
+        rows.map((row) =>
+          row.id === snapshotId ? { ...row, status: "reopened" } : row,
+        ),
+      );
+      await onDataChanged();
+    } catch (error) {
+      setOperationError(
+        error instanceof Error ? error.message : "快照重新打开失败",
+      );
     } finally {
       setWorking(false);
     }
@@ -668,6 +1028,11 @@ function PmoPage({ onNavigate, onDataChanged, identity }: { onNavigate: Navigate
       const result = (await response.json()) as { error?: string };
       if (!response.ok) throw new Error(result.error || "基线审批失败");
       setApproved(true);
+      setBaselineRows((rows) =>
+        rows.map((row) =>
+          row.id === changeId ? { ...row, status: "approved" } : row,
+        ),
+      );
       await onDataChanged();
     } catch (error) {
       setOperationError(error instanceof Error ? error.message : "基线审批失败");
@@ -675,36 +1040,92 @@ function PmoPage({ onNavigate, onDataChanged, identity }: { onNavigate: Navigate
       setWorking(false);
     }
   }
+  async function rejectBaseline() {
+    setWorking(true);
+    setOperationError("");
+    try {
+      const response = await fetch(
+        `/api/baseline-changes/${changeId}/reject`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ reason: rejectReason }),
+        },
+      );
+      const result = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(result.error || "基线变更驳回失败");
+      setBaselineRows((rows) =>
+        rows.map((row) =>
+          row.id === changeId
+            ? { ...row, status: "rejected", rejectionReason: rejectReason }
+            : row,
+        ),
+      );
+      setApproved(false);
+      setShowReject(false);
+      setRejectReason("");
+      await onDataChanged();
+    } catch (error) {
+      setOperationError(
+        error instanceof Error ? error.message : "基线变更驳回失败",
+      );
+    } finally {
+      setWorking(false);
+    }
+  }
+  const activeChange =
+    baselineRows.find((change) => change.id === changeId) ?? baselineRows[0];
+  const pendingChanges = baselineRows.filter(
+    (change) => change.status === "pending",
+  );
+  const activeProject = projectData.find(
+    (project) => project.id === activeChange?.projectId,
+  );
+  const currentSnapshotRow = snapshotRows.find(
+    (snapshot) => snapshot.id === snapshotId,
+  );
+  const snapshotProjectCount =
+    currentSnapshotRow?.projectCount ?? projectData.length;
+  const submittedProjectCount = Math.round(
+    (snapshotProjectCount * (currentSnapshotRow?.completeness ?? 0)) / 100,
+  );
+  const missingProjectCount = Math.max(
+    0,
+    snapshotProjectCount - submittedProjectCount,
+  );
   return <div className="workspace-page">
     <WorkspaceHeader title="PMO 管理中心" subtitle="统一规则、治理数据、锁定管理口径" onNavigate={onNavigate} identity={identity} />
     <div className="page-content pmo-page">
-      <div className="pmo-tabs">{["快照锁定","基线变更","节点模板","预警规则"].map(t => <button className={tab === t ? "active" : ""} onClick={() => setTab(t)} key={t}>{t}{t === "基线变更" && <b>3</b>}</button>)}</div>
+      <div className="pmo-tabs">{["快照锁定","基线变更","节点模板","预警规则"].map(t => <button className={tab === t ? "active" : ""} onClick={() => setTab(t)} key={t}>{t}{t === "基线变更" && <b>{pendingChanges.length}</b>}</button>)}</div>
       {tab === "快照锁定" && <>
         <section className={`snapshot-banner ${locked ? "locked" : ""}`}>
-          <div className="snapshot-calendar"><span>JUL</span><strong>24</strong></div><div><span className="kicker">2026年第30周</span><h2>{locked ? "本周快照已锁定" : "距离本周快照锁定还有 2天 02:21"}</h2><p>{locked ? "管理层大屏已切换至最新锁定口径，历史版本已永久保留。" : "计划于周五 17:00 自动锁定，PMO 可在数据检查通过后提前锁定。"}</p></div><button className={locked ? "locked-button" : "primary-button"} disabled={working || locked} onClick={lockSnapshot}>{locked ? "✓ 已锁定 · V1" : working ? "正在锁定…" : "立即锁定快照"}</button>
+          <div className="snapshot-calendar"><span>JUL</span><strong>24</strong></div><div><span className="kicker">2026年第30周</span><h2>{locked ? "本周快照已锁定" : snapshotId ? "快照已重新打开，等待修订后锁定新版本" : "距离本周快照锁定还有 2天 02:21"}</h2><p>{locked ? "管理层大屏已切换至最新锁定口径，历史版本已永久保留。" : "重新锁定将生成新版本，原版本及重新打开原因永久保留。"}</p></div><div className="snapshot-actions">{locked ? <><button className="locked-button" disabled>✓ 已锁定 · V{snapshotVersion}</button><button className="outline-button" onClick={() => setShowReopen(true)}>重新打开</button></> : <button className="primary-button" disabled={working} onClick={lockSnapshot}>{working ? "正在锁定…" : `锁定为 V${snapshotVersion + (snapshotId ? 1 : 0)}`}</button>}</div>
         </section>
+        {showReopen && <section className="content-card reopen-panel"><div><h3>重新打开第30周快照</h3><p>重新打开后该周期允许修订，下一次锁定将生成不可覆盖的新版本。</p></div><textarea value={reopenReason} onChange={(event) => setReopenReason(event.target.value)} placeholder="请说明重新打开原因、修订范围及授权依据" /><div><button className="outline-button" onClick={() => setShowReopen(false)}>取消</button><button className="danger-outline" disabled={working || reopenReason.trim().length < 5} onClick={reopenSnapshot}>{working ? "正在处理…" : "确认重新打开"}</button></div></section>}
         {operationError && <div className="form-error" role="alert">! {operationError}</div>}
         <div className="pmo-grid">
-          <section className="content-card quality-panel"><div className="card-title"><div><h2>锁定前数据检查</h2><p>系统自动检查完整性、时效性与规则异常</p></div><span className="quality-score">96.8分</span></div>
-            <div className="quality-items"><div className="ok"><span>✓</span><div><strong>周报提交</strong><small>42 / 44 已完成</small></div><b>95.5%</b></div><div className="ok"><span>✓</span><div><strong>关键字段完整性</strong><small>所有红黄节点均已填写原因</small></div><b>100%</b></div><div className="warn"><span>!</span><div><strong>待补交项目</strong><small>2个项目尚未提交本周数据</small></div><b>2 项</b></div><div className="warn"><span>!</span><div><strong>申报偏差异常</strong><small>申报进度与计算值相差超过5pp</small></div><b>3 项</b></div></div>
+          <section className="content-card quality-panel"><div className="card-title"><div><h2>锁定前数据检查</h2><p>系统自动检查完整性、时效性与规则异常</p></div><span className="quality-score">{currentSnapshotRow?.completeness ?? 0}分</span></div>
+            <div className="quality-items"><div className={missingProjectCount ? "warn" : "ok"}><span>{missingProjectCount ? "!" : "✓"}</span><div><strong>周报提交</strong><small>{submittedProjectCount} / {snapshotProjectCount} 已完成</small></div><b>{currentSnapshotRow?.completeness ?? 0}%</b></div><div className="ok"><span>✓</span><div><strong>关键字段完整性</strong><small>提交数据均已通过必填校验</small></div><b>已校验</b></div><div className={missingProjectCount ? "warn" : "ok"}><span>{missingProjectCount ? "!" : "✓"}</span><div><strong>待补交项目</strong><small>{missingProjectCount}个项目尚未进入当前快照</small></div><b>{missingProjectCount} 项</b></div><div className="warn"><span>!</span><div><strong>申报偏差异常</strong><small>申报进度与计算值相差超过5pp时需说明</small></div><b>规则启用</b></div></div>
           </section>
           <section className="content-card"><div className="card-title"><div><h2>待处理事项</h2><p>处理完成后可提高快照数据质量</p></div><button className="text-button">查看全部</button></div>
             <div className="todo-list"><div><span className="todo-icon red">!</span><div><strong>数字档案平台</strong><p>尚未提交第30周进度</p></div><em>催报</em></div><div><span className="todo-icon yellow">▲</span><div><strong>主数据治理一期</strong><p>申报进度与计算值相差 8pp</p></div><em>核验</em></div><div><span className="todo-icon blue">≋</span><div><strong>智慧采购平台</strong><p>基线变更申请待审批</p></div><em onClick={() => setTab("基线变更")}>审批</em></div></div>
           </section>
         </div>
         <section className="content-card history-card"><div className="card-title"><div><h2>历史快照</h2><p>已锁定版本不可覆盖，重新打开将生成新版本</p></div><button className="outline-button">导出快照</button></div>
-          <div className="snapshot-table"><div className="table-head"><span>周期</span><span>版本</span><span>项目数</span><span>数据完整度</span><span>锁定时间</span><span>操作人</span><span>状态</span><span /></div>{[["第29周","V1","44","100%","07-17 17:00","系统自动"],["第28周","V2","44","100%","07-10 18:26","周航"],["第27周","V1","42","97.6%","07-03 17:00","系统自动"]].map((r)=><div className="table-row" key={r[0]}>{r.map(c=><span key={c}>{c}</span>)}<span><StatusPill status="green" /></span><button>查看</button></div>)}</div>
+          <div className="snapshot-table"><div className="table-head"><span>周期</span><span>版本</span><span>项目数</span><span>数据完整度</span><span>锁定时间</span><span>操作人</span><span>状态</span><span /></div>{snapshotRows.length ? snapshotRows.map((row)=><div className="table-row" key={row.id}><span>{row.weekKey}</span><span>V{row.version}</span><span>{row.projectCount}</span><span>{row.completeness}%</span><span>{row.lockedAt.replace("T"," ").slice(5,16)}</span><span>{row.lockedBy}</span><span><StatusPill status={row.status === "locked" ? "green" : "yellow"} /></span><button>查看</button></div>) : <div className="empty-state">暂无历史快照</div>}</div>
         </section>
       </>}
       {tab === "基线变更" && <section className="content-card baseline-approval">
-        <div className="card-title"><div><h2>基线变更审批</h2><p>原始基线永久保留，批准后生成新的当前基线版本</p></div><span className="count-badge">3项待审批</span></div>
-        <div className="change-card"><div className="change-head"><div><span className="project-chip">P02</span><div><h3>智慧采购平台</h3><p>申请人 李程 · 07月21日 10:32</p></div></div><StatusPill status={approved ? "green" : "yellow"} /></div>
-          <div className="change-reason"><small>变更原因</small><p>核心供应商接口规范调整，经项目专题会确认增加开发与联调周期。</p></div>
-          <div className="date-change"><div><small>开发完成</small><span><s>2026-07-16</s><b>→</b><strong>2026-07-28</strong><em>+12天</em></span></div><div><small>联调测试</small><span><s>2026-08-18</s><b>→</b><strong>2026-08-22</strong><em>+4天</em></span></div><div><small>上线切换</small><span><s>2026-10-20</s><b>→</b><strong>2026-10-31</strong><em>+11天</em></span></div></div>
-          <div className="change-impact"><span>影响评估</span><p>较原始基线累计延期 23 天；不影响年度总体目标；项目成本预计增加 3.2%。</p></div>
+        <div className="card-title"><div><h2>基线变更审批</h2><p>原始基线永久保留，批准后生成新的当前基线版本</p></div><span className="count-badge">{pendingChanges.length}项待审批</span></div>
+        {pendingChanges.length > 1 && <div className="approval-queue">{pendingChanges.map((change) => <button key={change.id} className={change.id === changeId ? "active" : ""} onClick={() => { setChangeId(change.id); setApproved(false); }}>{change.projectId} · V{change.versionFrom} → V{change.versionTo}</button>)}</div>}
+        {activeChange ? <div className="change-card"><div className="change-head"><div><span className="project-chip">{activeChange.projectId}</span><div><h3>{activeProject?.name ?? activeChange.projectId}</h3><p>申请人 {activeChange.requestedBy} · {activeChange.requestedAt.replace("T"," ").slice(5,16)}</p></div></div><StatusPill status={activeChange.status === "approved" ? "green" : activeChange.status === "rejected" ? "red" : "yellow"} /></div>
+          <div className="change-reason"><small>变更原因</small><p>{activeChange.reason}</p></div>
+          <div className="date-change">{activeChange.changes.map((change) => <div key={`${change.milestone}-${change.to}`}><small>{change.milestone}</small><span><s>{change.from}</s><b>→</b><strong>{change.to}</strong><em>{change.days > 0 ? "+" : ""}{change.days}天</em></span></div>)}</div>
+          <div className="change-impact"><span>影响评估</span><p>{activeChange.impact}</p></div>
           {operationError && <div className="form-error" role="alert">! {operationError}</div>}
-          <div className="approval-actions">{approved ? <div className="approved-note">✓ 已批准，当前基线已更新为 V3</div> : <><button className="danger-outline">驳回申请</button><button className="primary-button" disabled={working} onClick={approveBaseline}>{working ? "正在审批…" : "批准并生成 V3"}</button></>}</div>
-        </div>
+          {showReject && <div className="reject-form"><textarea value={rejectReason} onChange={(event) => setRejectReason(event.target.value)} placeholder="填写驳回原因及需要补充的材料" /><button className="outline-button" onClick={() => setShowReject(false)}>取消</button><button className="danger-outline" disabled={working || rejectReason.trim().length < 5} onClick={rejectBaseline}>确认驳回</button></div>}
+          <div className="approval-actions">{activeChange.status === "approved" || approved ? <div className="approved-note">✓ 已批准，当前基线已更新为 V{activeChange.versionTo}</div> : activeChange.status === "rejected" ? <div className="rejected-note">■ 已驳回：{activeChange.rejectionReason}</div> : <><button className="danger-outline" onClick={() => setShowReject(true)}>驳回申请</button><button className="primary-button" disabled={working} onClick={approveBaseline}>{working ? "正在审批…" : `批准并生成 V${activeChange.versionTo}`}</button></>}</div>
+        </div> : <div className="empty-state">暂无基线变更申请</div>}
       </section>}
       {tab === "节点模板" && <section className="content-card placeholder-panel"><div className="placeholder-icon">▦</div><h2>节点模板</h2><p>统一节点模板包含7个标准节点、权重及关键节点标识，项目可标记不适用或申请新增。</p><button className="primary-button" onClick={() => onNavigate("portfolio")}>新建项目并套用模板</button></section>}
       {tab === "预警规则" && <RuleConfigPanel />}
@@ -717,6 +1138,9 @@ export default function Home() {
   const [view, setView] = useState<View>("cockpit");
   const [projectData, setProjectData] = useState<ProjectData[]>(projects);
   const [identity, setIdentity] = useState<Identity | null>(null);
+  const [dashboardData, setDashboardData] = useState<ProjectData[]>(projects);
+  const [dashboardSnapshot, setDashboardSnapshot] =
+    useState<DashboardSnapshot | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState("P02");
   const [dataState, setDataState] = useState<"loading" | "ready" | "fallback">("loading");
   const navigate: Navigate = (next, projectId) => {
@@ -732,8 +1156,16 @@ export default function Home() {
       const data = (await response.json()) as {
         projects?: ProjectData[];
         identity?: Identity;
+        dashboardProjects?: ProjectData[];
+        dashboardSnapshot?: DashboardSnapshot | null;
       };
       if (data.projects?.length) setProjectData(data.projects);
+      if (data.dashboardProjects?.length) {
+        setDashboardData(data.dashboardProjects);
+      } else if (data.projects?.length) {
+        setDashboardData(data.projects);
+      }
+      setDashboardSnapshot(data.dashboardSnapshot ?? null);
       if (data.identity) setIdentity(data.identity);
       setDataState("ready");
     } catch {
@@ -746,6 +1178,6 @@ export default function Home() {
     return () => window.clearTimeout(timer);
   }, [refreshData]);
 
-  if (view === "cockpit") return <><Cockpit onNavigate={navigate} projectData={projectData} />{dataState === "fallback" && <div className="data-banner">当前显示离线演示数据，数据服务恢复后将自动同步。</div>}</>;
-  return <div className="app-shell"><Sidebar view={view} onNavigate={navigate} identity={identity} /><div className="workspace">{view === "portfolio" && <Portfolio onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} identity={identity} />}{view === "project" && <ProjectDetail onNavigate={navigate} projectData={projectData} projectId={selectedProjectId} identity={identity} />}{view === "report" && <WeeklyReport onNavigate={navigate} onDataChanged={refreshData} projectId={selectedProjectId} projectData={projectData} identity={identity} />}{view === "pmo" && <PmoPage onNavigate={navigate} onDataChanged={refreshData} identity={identity} />}{view === "admin" && <AdminPage onNavigate={navigate} identity={identity} />}</div></div>;
+  if (view === "cockpit") return <><Cockpit onNavigate={navigate} projectData={dashboardData} snapshot={dashboardSnapshot} />{dataState === "fallback" && <div className="data-banner">当前显示离线演示数据，数据服务恢复后将自动同步。</div>}</>;
+  return <div className="app-shell"><Sidebar view={view} onNavigate={navigate} identity={identity} /><div className="workspace">{view === "portfolio" && <Portfolio onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} identity={identity} />}{view === "project" && <ProjectDetail onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} projectId={selectedProjectId} identity={identity} />}{view === "report" && <WeeklyReport onNavigate={navigate} onDataChanged={refreshData} projectId={selectedProjectId} projectData={projectData} identity={identity} />}{view === "pmo" && <PmoPage onNavigate={navigate} onDataChanged={refreshData} identity={identity} projectData={projectData} />}{view === "admin" && <AdminPage onNavigate={navigate} identity={identity} />}</div></div>;
 }

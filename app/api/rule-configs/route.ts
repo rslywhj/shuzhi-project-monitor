@@ -1,8 +1,9 @@
-import { desc, eq, sql } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { auditLogs, ruleConfigs } from "@/db/schema";
+import { auditLogs, projects, ruleConfigs } from "@/db/schema";
 import { apiError, safeNumber } from "@/lib/api-utils";
 import { ensureSeeded } from "@/lib/seed";
+import { recalculateProjectHealth } from "@/lib/health";
 import {
   canManagePortfolio,
   forbidden,
@@ -63,21 +64,48 @@ export async function PUT(request: Request) {
     }
 
     const db = getDb();
-    const [latest] = await db
+    const createdAt = new Date().toISOString();
+    await db.$client.batch([
+      db.$client.prepare("UPDATE rule_configs SET active = 0 WHERE active = 1"),
+      db.$client
+        .prepare(
+          `INSERT INTO rule_configs (
+            version,
+            normal_yellow_days,
+            normal_red_days,
+            critical_yellow_days,
+            critical_red_days,
+            green_score,
+            yellow_score,
+            active,
+            created_by,
+            created_at
+          )
+          SELECT
+            COALESCE(MAX(version), 0) + 1,
+            ?, ?, ?, ?, ?, ?, 1, ?, ?
+          FROM rule_configs`,
+        )
+        .bind(
+          values.normalYellowDays,
+          values.normalRedDays,
+          values.criticalYellowDays,
+          values.criticalRedDays,
+          values.greenScore,
+          values.yellowScore,
+          identity.email,
+          createdAt,
+        ),
+    ]);
+    const [rule] = await db
       .select()
       .from(ruleConfigs)
+      .where(eq(ruleConfigs.createdAt, createdAt))
       .orderBy(desc(ruleConfigs.version))
       .limit(1);
-    await db.update(ruleConfigs).set({ active: false }).where(eq(ruleConfigs.active, true));
-    const [rule] = await db
-      .insert(ruleConfigs)
-      .values({
-        ...values,
-        version: (latest?.version ?? 0) + 1,
-        createdBy: identity.email,
-        createdAt: sql`CURRENT_TIMESTAMP`,
-      })
-      .returning();
+    if (!rule) {
+      throw new Error("Published rule config could not be reloaded.");
+    }
     await db.insert(auditLogs).values({
       actorEmail: identity.email,
       action: "rule_config.publish",
@@ -85,7 +113,15 @@ export async function PUT(request: Request) {
       entityId: String(rule.id),
       detailJson: JSON.stringify(values),
     });
-    return Response.json({ rule });
+    const projectRows = await db.select({ id: projects.id }).from(projects);
+    for (let index = 0; index < projectRows.length; index += 5) {
+      await Promise.all(
+        projectRows
+          .slice(index, index + 5)
+          .map((project) => recalculateProjectHealth(project.id)),
+      );
+    }
+    return Response.json({ rule, recalculatedProjects: projectRows.length });
   } catch (error) {
     return apiError(error);
   }

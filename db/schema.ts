@@ -104,6 +104,35 @@ export const weeklyReports = sqliteTable(
   ],
 );
 
+export const risks = sqliteTable(
+  "risks",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    category: text("category").notNull().default("进度"),
+    level: text("level", { enum: ["low", "medium", "high"] })
+      .notNull()
+      .default("medium"),
+    status: text("status", { enum: ["open", "monitoring", "closed"] })
+      .notNull()
+      .default("open"),
+    description: text("description").notNull(),
+    mitigation: text("mitigation").notNull().default(""),
+    owner: text("owner").notNull(),
+    dueDate: text("due_date"),
+    createdBy: text("created_by").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("risks_project_status_idx").on(table.projectId, table.status),
+    index("risks_level_idx").on(table.level),
+  ],
+);
+
 export const correctiveActions = sqliteTable(
   "corrective_actions",
   {
@@ -114,6 +143,9 @@ export const correctiveActions = sqliteTable(
     milestoneId: integer("milestone_id").references(() => milestones.id, {
       onDelete: "set null",
     }),
+    riskId: integer("risk_id").references(() => risks.id, {
+      onDelete: "set null",
+    }),
     name: text("name").notNull(),
     owner: text("owner").notNull(),
     recoveryDate: text("recovery_date").notNull(),
@@ -121,8 +153,10 @@ export const correctiveActions = sqliteTable(
     status: text("status", { enum: ["pending", "in_progress", "completed", "overdue"] })
       .notNull()
       .default("in_progress"),
+    progress: integer("progress").notNull().default(0),
     createdBy: text("created_by").notNull(),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => [index("actions_project_status_idx").on(table.projectId, table.status)],
 );
@@ -146,8 +180,16 @@ export const baselineChanges = sqliteTable(
     requestedAt: text("requested_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     approvedBy: text("approved_by"),
     approvedAt: text("approved_at"),
+    rejectedBy: text("rejected_by"),
+    rejectedAt: text("rejected_at"),
+    rejectionReason: text("rejection_reason").notNull().default(""),
   },
-  (table) => [index("baseline_changes_status_idx").on(table.status)],
+  (table) => [
+    index("baseline_changes_status_idx").on(table.status),
+    uniqueIndex("baseline_changes_one_pending_project_idx")
+      .on(table.projectId)
+      .where(sql`${table.status} = 'pending'`),
+  ],
 );
 
 export const snapshots = sqliteTable(

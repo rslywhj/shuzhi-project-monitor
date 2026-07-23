@@ -1,8 +1,9 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLogs, baselineChanges, milestones, projects } from "@/db/schema";
 import { apiError } from "@/lib/api-utils";
 import { ensureSeeded } from "@/lib/seed";
+import { recalculateProjectHealth } from "@/lib/health";
 import {
   canManagePortfolio,
   forbidden,
@@ -43,36 +44,93 @@ export async function POST(
 
     const updates = JSON.parse(change.changesJson) as Array<{
       milestone: string;
+      milestoneId?: number;
       to: string;
     }>;
-    for (const update of updates) {
-      await db
+    const stillPending = sql`EXISTS (
+      SELECT 1
+      FROM ${baselineChanges}
+      WHERE ${baselineChanges.id} = ${changeId}
+        AND ${baselineChanges.status} = 'pending'
+    )`;
+    const projectAtExpectedBaseline = sql`EXISTS (
+      SELECT 1
+      FROM ${projects}
+      WHERE ${projects.id} = ${change.projectId}
+        AND ${projects.currentBaselineVersion} = ${change.versionFrom}
+    )`;
+    const milestoneStatements = updates.map((update) =>
+      db
         .update(milestones)
         .set({
           plannedFinish: update.to,
           forecastFinish: update.to,
+          deviationDays: 0,
           updatedAt: sql`CURRENT_TIMESTAMP`,
         })
         .where(
-          sql`${milestones.projectId} = ${change.projectId} AND ${milestones.name} = ${update.milestone}`,
-        );
+          update.milestoneId
+            ? and(
+                eq(milestones.projectId, change.projectId),
+                eq(milestones.id, update.milestoneId),
+                stillPending,
+                projectAtExpectedBaseline,
+              )
+            : and(
+                eq(milestones.projectId, change.projectId),
+                eq(milestones.name, update.milestone),
+                stillPending,
+                projectAtExpectedBaseline,
+              ),
+        ),
+    );
+    const approvedAt = new Date().toISOString();
+    const batchResults = await db.batch([
+      ...milestoneStatements,
+      db
+        .update(projects)
+        .set({
+          currentBaselineVersion: change.versionTo,
+          updatedAt: sql`CURRENT_TIMESTAMP`,
+        })
+        .where(
+          and(
+            eq(projects.id, change.projectId),
+            eq(projects.currentBaselineVersion, change.versionFrom),
+            stillPending,
+          ),
+        ),
+      db
+        .update(baselineChanges)
+        .set({
+          status: "approved",
+          approvedBy: identity.email,
+          approvedAt,
+        })
+        .where(
+          and(
+            eq(baselineChanges.id, changeId),
+            eq(baselineChanges.status, "pending"),
+            sql`EXISTS (
+              SELECT 1
+              FROM ${projects}
+              WHERE ${projects.id} = ${change.projectId}
+                AND ${projects.currentBaselineVersion} = ${change.versionTo}
+            )`,
+          ),
+        )
+        .returning(),
+    ]);
+    const approvedRows = batchResults.at(-1) as
+      | (typeof baselineChanges.$inferSelect)[]
+      | undefined;
+    const approvedChange = approvedRows?.[0];
+    if (!approvedChange) {
+      return Response.json(
+        { error: "该申请已被处理，或项目基线版本已发生变化。" },
+        { status: 409 },
+      );
     }
-
-    await db
-      .update(baselineChanges)
-      .set({
-        status: "approved",
-        approvedBy: identity.email,
-        approvedAt: sql`CURRENT_TIMESTAMP`,
-      })
-      .where(eq(baselineChanges.id, changeId));
-    await db
-      .update(projects)
-      .set({
-        currentBaselineVersion: change.versionTo,
-        updatedAt: sql`CURRENT_TIMESTAMP`,
-      })
-      .where(eq(projects.id, change.projectId));
     await db.insert(auditLogs).values({
       actorEmail: identity.email,
       action: "baseline_change.approve",
@@ -84,13 +142,14 @@ export async function POST(
         versionTo: change.versionTo,
       }),
     });
+    const health = await recalculateProjectHealth(change.projectId);
 
     return Response.json({
       change: {
-        ...change,
-        status: "approved",
-        approvedBy: identity.email,
+        ...approvedChange,
+        changes: updates,
       },
+      health,
     });
   } catch (error) {
     return apiError(error);

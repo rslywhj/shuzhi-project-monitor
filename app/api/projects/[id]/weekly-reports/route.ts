@@ -1,10 +1,11 @@
-import { eq, sql } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   auditLogs,
   correctiveActions,
   milestones,
   projects,
+  ruleConfigs,
   snapshots,
   weeklyReports,
 } from "@/db/schema";
@@ -16,6 +17,7 @@ import {
   safeNumber,
 } from "@/lib/api-utils";
 import { ensureSeeded } from "@/lib/seed";
+import { recalculateProjectHealth } from "@/lib/health";
 import {
   canWriteProject,
   forbidden,
@@ -35,6 +37,7 @@ type WeeklyReportPayload = {
     sequence?: number;
     completion?: number;
     forecastFinish?: string;
+    actualFinish?: string;
   };
   action?: {
     name?: string;
@@ -63,28 +66,146 @@ export async function POST(
 
     const payload = (await request.json()) as WeeklyReportPayload;
     const weekKey = requiredWeekKey(payload.weekKey, "填报周期");
-    const [lockedSnapshot] = await db
-      .select({ id: snapshots.id })
+    const [latestSnapshot] = await db
+      .select({ id: snapshots.id, status: snapshots.status })
       .from(snapshots)
-      .where(
-        sql`${snapshots.weekKey} = ${weekKey} AND ${snapshots.status} = 'locked'`,
-      )
+      .where(eq(snapshots.weekKey, weekKey))
+      .orderBy(desc(snapshots.version))
       .limit(1);
-    if (lockedSnapshot) {
+    if (latestSnapshot?.status === "locked") {
       return Response.json(
         { error: "该周期快照已经锁定，新的进度更新请提交到下一周期。" },
         { status: 409 },
       );
     }
-    const systemProgress = safeNumber(payload.systemProgress, "系统计算进度");
     const declaredProgress = safeNumber(payload.declaredProgress, "申报进度");
-    const variance = Number((declaredProgress - systemProgress).toFixed(2));
     const reason = requiredString(payload.reason, "偏差原因");
+    const milestoneRows = await db
+      .select()
+      .from(milestones)
+      .where(eq(milestones.projectId, id));
+    let milestoneId: number | null = null;
+    let milestoneUpdate:
+      | {
+          id: number;
+          completion: number;
+          forecastFinish: string | null;
+          actualFinish: string | null;
+          deviationDays: number;
+        }
+      | undefined;
+    if (payload.milestone?.sequence) {
+      const completion = safeNumber(payload.milestone.completion, "节点完成度");
+      const currentMilestone = milestoneRows.find(
+        (row) => row.sequence === payload.milestone?.sequence,
+      );
+      if (!currentMilestone) {
+        return Response.json({ error: "未找到需要更新的项目节点。" }, { status: 404 });
+      }
+      if (!currentMilestone.applicable) {
+        return Response.json(
+          { error: "不适用节点不能提交进度。" },
+          { status: 400 },
+        );
+      }
+      const forecastFinish = payload.milestone.forecastFinish
+        ? requiredIsoDate(payload.milestone.forecastFinish, "节点预测完成日")
+        : currentMilestone.forecastFinish;
+      const actualFinish =
+        completion === 100
+          ? requiredIsoDate(
+              payload.milestone.actualFinish ?? forecastFinish,
+              "节点实际完成日",
+            )
+          : null;
+      const effectiveFinish = actualFinish ?? forecastFinish;
+      const deviationDays = effectiveFinish
+        ? Math.round(
+            (Date.parse(`${effectiveFinish}T00:00:00Z`) -
+              Date.parse(`${currentMilestone.plannedFinish}T00:00:00Z`)) /
+              86_400_000,
+          )
+        : 0;
+      milestoneId = currentMilestone.id;
+      milestoneUpdate = {
+        id: currentMilestone.id,
+        completion,
+        forecastFinish,
+        actualFinish,
+        deviationDays,
+      };
+    }
+
+    const progressRows = milestoneRows.map((row) =>
+      milestoneUpdate?.id === row.id
+        ? { ...row, completion: milestoneUpdate.completion }
+        : row,
+    );
+    const applicableRows = progressRows.filter((row) => row.applicable);
+    const applicableWeight = applicableRows.reduce(
+      (sum, row) => sum + row.weight,
+      0,
+    );
+    const systemProgress =
+      applicableWeight === 0
+        ? 0
+        : Number(
+            (
+              applicableRows.reduce(
+                (sum, row) => sum + row.weight * row.completion,
+                0,
+              ) / applicableWeight
+            ).toFixed(1),
+          );
+    const variance = Number((declaredProgress - systemProgress).toFixed(2));
     if (Math.abs(variance) > 10 && reason.length < 10) {
       return Response.json(
         { error: "申报进度与计算值相差超过10个百分点，请填写完整差异说明。" },
         { status: 400 },
       );
+    }
+
+    let actionValues:
+      | typeof correctiveActions.$inferInsert
+      | undefined;
+    if (payload.action) {
+      actionValues = {
+        projectId: id,
+        milestoneId,
+        name: requiredString(payload.action.name, "措施名称"),
+        owner: requiredString(payload.action.owner, "措施责任人"),
+        recoveryDate: requiredIsoDate(payload.action.recoveryDate, "预计恢复日期"),
+        detail: requiredString(payload.action.detail, "具体行动"),
+        createdBy: identity.email,
+        updatedAt: sql`CURRENT_TIMESTAMP`,
+      };
+    }
+    if (milestoneUpdate) {
+      const [activeRule] = await db
+        .select()
+        .from(ruleConfigs)
+        .where(eq(ruleConfigs.active, true))
+        .orderBy(desc(ruleConfigs.version))
+        .limit(1);
+      const currentMilestone = milestoneRows.find(
+        (row) => row.id === milestoneUpdate?.id,
+      )!;
+      const yellowDays = currentMilestone.critical
+        ? (activeRule?.criticalYellowDays ?? 1)
+        : (activeRule?.normalYellowDays ?? 4);
+      const overdue =
+        milestoneUpdate.completion < 100 &&
+        currentMilestone.plannedFinish <
+          new Date().toISOString().slice(0, 10);
+      if (
+        (overdue || milestoneUpdate.deviationDays >= yellowDays) &&
+        !actionValues
+      ) {
+        return Response.json(
+          { error: "红黄节点必须同步填写纠偏措施、责任人和预计恢复日期。" },
+          { status: 400 },
+        );
+      }
     }
 
     const [report] = await db
@@ -117,6 +238,22 @@ export async function POST(
         },
       })
       .returning();
+    if (milestoneUpdate) {
+      await db
+        .update(milestones)
+        .set({
+          completion: milestoneUpdate.completion,
+          forecastFinish: milestoneUpdate.forecastFinish,
+          actualFinish: milestoneUpdate.actualFinish,
+          deviationDays: milestoneUpdate.deviationDays,
+          reason,
+          updatedAt: sql`CURRENT_TIMESTAMP`,
+        })
+        .where(eq(milestones.id, milestoneUpdate.id));
+    }
+    const [action] = actionValues
+      ? await db.insert(correctiveActions).values(actionValues).returning()
+      : [undefined];
 
     await db
       .update(projects)
@@ -126,48 +263,21 @@ export async function POST(
         updatedAt: sql`CURRENT_TIMESTAMP`,
       })
       .where(eq(projects.id, id));
-
-    let milestoneId: number | null = null;
-    if (payload.milestone?.sequence) {
-      const completion = safeNumber(payload.milestone.completion, "节点完成度");
-      const [updatedMilestone] = await db
-        .update(milestones)
-        .set({
-          completion,
-          forecastFinish: payload.milestone.forecastFinish
-            ? requiredIsoDate(payload.milestone.forecastFinish, "节点预测完成日")
-            : null,
-          reason,
-          updatedAt: sql`CURRENT_TIMESTAMP`,
-        })
-        .where(
-          sql`${milestones.projectId} = ${id} AND ${milestones.sequence} = ${payload.milestone.sequence}`,
-        )
-        .returning();
-      milestoneId = updatedMilestone?.id ?? null;
-    }
-
-    if (payload.action) {
-      await db.insert(correctiveActions).values({
-        projectId: id,
-        milestoneId,
-        name: requiredString(payload.action.name, "措施名称"),
-        owner: requiredString(payload.action.owner, "措施责任人"),
-        recoveryDate: requiredIsoDate(payload.action.recoveryDate, "预计恢复日期"),
-        detail: requiredString(payload.action.detail, "具体行动"),
-        createdBy: identity.email,
-      });
-    }
-
+    const health = await recalculateProjectHealth(id, weekKey);
     await db.insert(auditLogs).values({
       actorEmail: identity.email,
       action: "weekly_report.submit",
       entityType: "project",
       entityId: id,
-      detailJson: JSON.stringify({ reportId: report.id, weekKey, variance }),
+      detailJson: JSON.stringify({
+        reportId: report.id,
+        weekKey,
+        variance,
+        health,
+      }),
     });
 
-    return Response.json({ report }, { status: 201 });
+    return Response.json({ report, action, health }, { status: 201 });
   } catch (error) {
     return apiError(error);
   }

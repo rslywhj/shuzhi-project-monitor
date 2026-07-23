@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX `baseline_changes_one_pending_project_idx` ON `baseline_changes` (`project_id`) WHERE "baseline_changes"."status" = 'pending';

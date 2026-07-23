@@ -22,6 +22,9 @@ export function apiError(error: unknown) {
         : databaseUnavailable
           ? 503
           : 500;
+  if (status >= 500) {
+    console.error("API request failed", error);
+  }
   return Response.json(
     {
       error: databaseUnavailable

@@ -9,6 +9,7 @@ import {
 } from "@/db/schema";
 import { apiError, requiredWeekKey } from "@/lib/api-utils";
 import { ensureSeeded } from "@/lib/seed";
+import { recalculateProjectHealth } from "@/lib/health";
 import {
   canManagePortfolio,
   forbidden,
@@ -25,9 +26,17 @@ export async function POST(request: Request) {
     if (!canManagePortfolio(identity)) return forbidden();
     await ensureSeeded();
 
-    const payload = (await request.json()) as { weekKey?: string; reopenReason?: string };
+    const payload = (await request.json()) as { weekKey?: string };
     const weekKey = requiredWeekKey(payload.weekKey, "快照周期");
     const db = getDb();
+    const projectIds = await db.select({ id: projects.id }).from(projects);
+    for (let index = 0; index < projectIds.length; index += 5) {
+      await Promise.all(
+        projectIds
+          .slice(index, index + 5)
+          .map((project) => recalculateProjectHealth(project.id, weekKey)),
+      );
+    }
 
     const [[projectTotal], [reportTotal], previous, projectRows, milestoneRows] =
       await Promise.all([
@@ -47,9 +56,9 @@ export async function POST(request: Request) {
       ]);
 
     const version = (previous[0]?.version ?? 0) + 1;
-    if (previous[0] && !payload.reopenReason?.trim()) {
+    if (previous[0]?.status === "locked") {
       return Response.json(
-        { error: "该周期已有锁定快照。重新锁定必须填写重新打开原因。" },
+        { error: "该周期已有锁定快照，请先填写原因并重新打开。" },
         { status: 409 },
       );
     }
@@ -87,12 +96,20 @@ export async function POST(request: Request) {
         weekKey,
         version,
         completeness,
-        reopenReason: payload.reopenReason?.trim() || null,
       }),
     });
 
     return Response.json({ snapshot }, { status: 201 });
   } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message.includes("UNIQUE constraint failed: snapshots.week_key")
+    ) {
+      return Response.json(
+        { error: "该周期快照刚刚被其他操作锁定，请刷新后重试。" },
+        { status: 409 },
+      );
+    }
     return apiError(error);
   }
 }

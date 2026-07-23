@@ -783,6 +783,7 @@ function WorkspaceHeader({ title, subtitle, onNavigate, identity }: { title: str
 function Portfolio({ onNavigate, onDataChanged, projectData = projects, identity, templateData = defaultTemplateData, weeklyReports = [] }: { onNavigate: Navigate; onDataChanged: () => Promise<void>; projectData?: ProjectData[]; identity: Identity | null; templateData?: TemplateData[]; weeklyReports?: WeeklyReportRow[] }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("全部");
+  const [displayMode, setDisplayMode] = useState<"table" | "heatmap">("table");
   const [page, setPage] = useState(0);
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -818,6 +819,9 @@ function Portfolio({ onNavigate, onDataChanged, projectData = projects, identity
   const reportCompletion = counts.all
     ? Number(((submittedProjects / counts.all) * 100).toFixed(1))
     : 0;
+  const matrixTemplates = templateData
+    .filter((template) => template.active)
+    .sort((left, right) => left.sequence - right.sequence);
 
   async function createProject(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -871,8 +875,8 @@ function Portfolio({ onNavigate, onDataChanged, projectData = projects, identity
         <div className="summary-card wide"><div><small>{reportingWeek} 周报完成率</small><strong>{reportCompletion}%</strong></div><ProgressBar value={reportCompletion} /><span>{submittedProjects} / {counts.all}</span></div>
       </div>
       <section className="content-card">
-        <div className="table-toolbar"><div><h2>项目清单</h2><span>当前批准基线口径</span></div><div className="toolbar-actions"><label className="search"><span>⌕</span><input placeholder="搜索项目名称" value={query} onChange={e => { setQuery(e.target.value); setPage(0); }} /></label><select value={status} onChange={e => { setStatus(e.target.value); setPage(0); }}><option>全部</option><option>正常</option><option>预警</option><option>严重</option></select>{(identity?.role === "pmo" || identity?.role === "admin") && <button className="primary-button" onClick={() => setShowCreate(true)}>＋ 新建项目</button>}</div></div>
-        <div className="project-table">
+        <div className="table-toolbar"><div><h2>{displayMode === "table" ? "项目清单" : "项目节点热力矩阵"}</h2><span>当前批准基线口径</span></div><div className="toolbar-actions"><label className="search"><span>⌕</span><input placeholder="搜索项目名称" value={query} onChange={e => { setQuery(e.target.value); setPage(0); }} /></label><select value={status} onChange={e => { setStatus(e.target.value); setPage(0); }}><option>全部</option><option>正常</option><option>预警</option><option>严重</option></select><div className="view-switch" aria-label="项目视图"><button className={displayMode === "table" ? "active" : ""} onClick={() => setDisplayMode("table")}>列表</button><button className={displayMode === "heatmap" ? "active" : ""} onClick={() => setDisplayMode("heatmap")}>节点热力</button></div>{(identity?.role === "pmo" || identity?.role === "admin") && <button className="primary-button" onClick={() => setShowCreate(true)}>＋ 新建项目</button>}</div></div>
+        {displayMode === "table" ? <div className="project-table">
           <div className="table-head"><span>项目名称</span><span>健康状态</span><span>项目经理</span><span>计划 / 实际</span><span>进度偏差</span><span>风险</span><span>更新时间</span><span /></div>
           {filtered.map(p => <div className="table-row" key={p.id}>
             <button className="project-name" onClick={() => onNavigate("project", p.id)}><i>{p.id}</i><span><strong>{p.name}</strong><small>{p.org} · {p.type}</small></span></button>
@@ -881,7 +885,7 @@ function Portfolio({ onNavigate, onDataChanged, projectData = projects, identity
             <span className={p.actual - p.plan < -5 ? "negative" : "positive"}>{p.actual - p.plan > 0 ? "+" : ""}{(p.actual - p.plan).toFixed(1)} pp</span>
             <span className={`risk ${p.risk === "高" ? "high" : p.risk === "中" ? "medium" : "low"}`}>{p.risk}风险</span><span>{p.updatedAt ? p.updatedAt.replace("T", " ").slice(5, 16) : "数据未同步"}</span><button className="more" aria-label={`查看${p.name}`} onClick={() => onNavigate("project", p.id)}>•••</button>
           </div>)}
-        </div>
+        </div> : <div className="portfolio-matrix"><div className="portfolio-matrix-grid" style={{ "--portfolio-milestone-count": matrixTemplates.length } as React.CSSProperties}><div className="portfolio-matrix-head"><div>项目 / 健康度</div>{matrixTemplates.map((template) => <div key={template.id}><span>{template.code}</span>{template.name}</div>)}</div>{filtered.map((project) => <div className="portfolio-matrix-row" key={project.id}><button className="portfolio-project-cell" onClick={() => onNavigate("project", project.id)}><StatusPill status={project.status} compact /><span><strong>{project.name}</strong><small>{project.owner} · {project.org}</small></span><b>{project.score}</b></button>{matrixTemplates.map((template) => { const milestone = project.milestones?.find((row) => row.templateId === template.id || row.name === template.name); const cellStatus = milestone?.status ?? "na"; return <button key={template.id} className={`portfolio-heat-cell ${cellStatus}`} aria-label={`${project.name} ${template.name} ${statusLabel[cellStatus]}`} onClick={() => onNavigate("project", project.id)}><span>{statusSymbol[cellStatus]}</span><small>{cellStatus === "na" ? "N/A" : milestone && milestone.deviationDays > 0 ? `+${milestone.deviationDays}天` : `${milestone?.completion ?? 0}%`}</small></button>; })}</div>)}</div></div>}
         <div className="pagination"><span>共 {matching.length} 条，每页 10 条</span><div><button disabled={safePage === 0} onClick={() => setPage((current) => Math.max(0, current - 1))}>‹</button>{Array.from({ length: pageCount }, (_, index) => <button key={index} className={safePage === index ? "active" : ""} onClick={() => setPage(index)}>{index + 1}</button>)}<button disabled={safePage === pageCount - 1} onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))}>›</button></div></div>
       </section>
     </div>

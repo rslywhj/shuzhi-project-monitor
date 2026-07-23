@@ -409,3 +409,20 @@ test("freezes high risks and overdue actions into the management snapshot", asyn
   assert.match(page, /alerts\.highRisks/);
   assert.match(page, /alerts\.overdueActions/);
 });
+
+test("offers a filterable list and milestone heatmap in the desktop workspace", async () => {
+  const [page, css] = await Promise.all([
+    readFile(new URL("app/page.tsx", templateRoot), "utf8"),
+    readFile(new URL("app/globals.css", templateRoot), "utf8"),
+  ]);
+
+  assert.match(page, /"table" \| "heatmap"/);
+  assert.match(page, /项目节点热力矩阵/);
+  assert.match(page, /节点热力/);
+  assert.match(page, /portfolio-matrix-grid/);
+  assert.match(page, /project\.milestones\?\.find/);
+  assert.match(page, /statusSymbol\[cellStatus\]/);
+  assert.match(page, /statusLabel\[cellStatus\]/);
+  assert.match(css, /--portfolio-milestone-count/);
+  assert.match(css, /portfolio-heat-cell\.na/);
+});

@@ -225,6 +225,7 @@ function currentReportingPeriod(offsetDays = 0) {
     weekKey: `${isoYear}-W${String(week).padStart(2, "0")}`,
     year: isoYear,
     week,
+    fridayIso: `${friday.getUTCFullYear()}-${String(friday.getUTCMonth() + 1).padStart(2, "0")}-${String(friday.getUTCDate()).padStart(2, "0")}`,
     fridayLabel: `${String(friday.getUTCMonth() + 1).padStart(2, "0")}月${String(friday.getUTCDate()).padStart(2, "0")}日`,
   };
 }
@@ -945,6 +946,10 @@ function ProjectDetail({ onNavigate, onDataChanged, projectData = projects, proj
   const [milestoneDraft, setMilestoneDraft] = useState<MilestoneData[]>([]);
   const [milestoneWorking, setMilestoneWorking] = useState(false);
   const [milestoneError, setMilestoneError] = useState("");
+  const [showProjectEdit, setShowProjectEdit] = useState(false);
+  const [projectWorking, setProjectWorking] = useState(false);
+  const [projectError, setProjectError] = useState("");
+  const [projectSuccess, setProjectSuccess] = useState(false);
   const currentProject =
     projectData.find((project) => project.id === projectId) ??
     projectData[0] ??
@@ -958,11 +963,52 @@ function ProjectDetail({ onNavigate, onDataChanged, projectData = projects, proj
     (identity?.role === "manager" &&
       Boolean(currentProject.ownerEmail) &&
       identity.email === currentProject.ownerEmail);
+  const canChangeOwner =
+    identity?.role === "admin" || identity?.role === "pmo";
   const adjustableMilestones =
     currentProject.milestones?.filter((milestone) => milestone.applicable) ?? [];
   const displayMilestones = [...(currentProject.milestones ?? [])].sort(
     (left, right) => left.sequence - right.sequence,
   );
+
+  async function saveProject(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setProjectWorking(true);
+    setProjectError("");
+    const form = new FormData(event.currentTarget);
+    const payload: Record<string, FormDataEntryValue | null> = {
+      name: form.get("name"),
+      org: form.get("org"),
+      type: form.get("type"),
+      riskLevel: form.get("riskLevel"),
+    };
+    if (canChangeOwner) {
+      payload.ownerName = form.get("ownerName");
+      payload.ownerEmail = form.get("ownerEmail");
+    }
+    try {
+      const response = await fetch(
+        `/api/projects/${encodeURIComponent(currentProject.id)}`,
+        {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload),
+        },
+      );
+      const result = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(result.error || "项目信息保存失败");
+      await onDataChanged();
+      setShowProjectEdit(false);
+      setProjectSuccess(true);
+      window.setTimeout(() => setProjectSuccess(false), 3000);
+    } catch (error) {
+      setProjectError(
+        error instanceof Error ? error.message : "项目信息保存失败",
+      );
+    } finally {
+      setProjectWorking(false);
+    }
+  }
 
   async function requestBaselineChange(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1094,7 +1140,7 @@ function ProjectDetail({ onNavigate, onDataChanged, projectData = projects, proj
       <section className="project-hero">
         <div className="project-identity"><div className="project-code">{currentProject.name[0]}</div><div><div><StatusPill status={currentProject.status} /><span className="project-tag">{currentProject.type}</span>{currentProject.cells.some((cell) => cell === "red") && <span className="project-tag">重点关注</span>}</div><h2>{currentProject.name}</h2><p>项目经理 {currentProject.owner}　·　{currentProject.org}　·　当前批准基线口径</p></div></div>
         <div className="hero-metrics"><div><small>健康度</small><strong className={currentProject.status === "red" ? "red-text" : ""}>{currentProject.score}</strong><span>/100</span></div><div><small>计划进度</small><strong>{currentProject.plan}%</strong></div><div><small>实际进度</small><strong>{currentProject.actual}%</strong></div><div><small>进度偏差</small><strong className={variance < -5 ? "red-text" : ""}>{variance > 0 ? "+" : ""}{variance}pp</strong></div></div>
-        <div className="hero-actions"><button className="outline-button" onClick={() => window.print()}>导出报告</button>{canUpdate && <button className="primary-button" onClick={() => onNavigate("report", currentProject.id)}>更新本周进度</button>}</div>
+        <div className="hero-actions"><button className="outline-button" onClick={() => window.print()}>导出报告</button>{canUpdate && <><button className="outline-button" onClick={() => { setProjectError(""); setShowProjectEdit(true); }}>编辑信息</button><button className="primary-button" onClick={() => onNavigate("report", currentProject.id)}>更新本周进度</button></>}</div>
       </section>
       <section className="score-explain">
         <div className="score-ring"><strong>{currentProject.score}</strong><span>综合健康度</span></div><div className="score-copy"><h3>项目{statusLabel[currentProject.status]}：评分与一票否决规则共同判定</h3><p>基础分 100，当前累计扣分 {100 - currentProject.score} 分。所有扣分均可追溯至节点、风险或数据更新记录。</p><div className="deductions"><span>进度偏差 <b>{variance}pp</b></span><span>节点预警 <b>{currentProject.cells.filter((cell) => cell === "yellow").length}项</b></span><span>严重节点 <b>{currentProject.cells.filter((cell) => cell === "red").length}项</b></span></div></div><button className="text-button">查看评分明细 →</button>
@@ -1122,7 +1168,9 @@ function ProjectDetail({ onNavigate, onDataChanged, projectData = projects, proj
     </div>
     {showMilestoneGovernance && <div className="modal-backdrop" onClick={() => setShowMilestoneGovernance(false)}><section className="create-modal milestone-governance-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowMilestoneGovernance(false)}>×</button><span className="modal-kicker">PROJECT MILESTONE GOVERNANCE</span><h2>项目节点治理</h2><p>{currentProject.name} · 可调整节点顺序、权重、关键标识及适用性；计划完成日须通过基线变更调整。</p><div className="project-milestone-grid"><div className="project-milestone-head"><span>序号</span><span>节点名称</span><span>权重</span><span>关键</span><span>适用</span><span>来源</span></div>{milestoneDraft.map((row) => <div className={`project-milestone-row ${row.applicable ? "" : "inactive"}`} key={row.id}><input type="number" min="1" max="99" value={row.sequence} onChange={(event) => updateMilestoneDraft(row.id, "sequence", Number(event.target.value))} /><input value={row.name} onChange={(event) => updateMilestoneDraft(row.id, "name", event.target.value)} /><label className="weight-input"><input type="number" min="0" max="100" step="0.5" value={row.weight} onChange={(event) => updateMilestoneDraft(row.id, "weight", Number(event.target.value))} /><span>%</span></label><label className="template-check"><input type="checkbox" checked={row.critical} onChange={(event) => updateMilestoneDraft(row.id, "critical", event.target.checked)} /><span>关键</span></label><label className="template-check"><input type="checkbox" checked={row.applicable} onChange={(event) => updateMilestoneDraft(row.id, "applicable", event.target.checked)} /><span>适用</span></label><span className={row.custom ? "custom-source" : "standard-source"}>{row.custom ? "自定义" : "标准"}</span></div>)}</div><div className="governance-summary"><span>节点 {milestoneDraft.length} 个</span><span>适用 {milestoneDraft.filter((row) => row.applicable).length} 个</span><strong className={Math.abs(milestoneDraft.reduce((sum, row) => sum + Number(row.weight || 0), 0) - 100) < 0.01 ? "weight-ok" : "weight-error"}>权重合计 {milestoneDraft.reduce((sum, row) => sum + Number(row.weight || 0), 0).toFixed(1)}%</strong></div>{milestoneError && <div className="form-error">! {milestoneError}</div>}<form className="custom-milestone-form" onSubmit={createCustomMilestone}><h3>追加项目自定义节点</h3><div className="modal-form-grid"><label>节点名称<input name="name" required /></label><label>节点序号<input name="sequence" type="number" min="1" max="99" required /></label><label>计划开始日<input name="plannedStart" type="date" required /></label><label>计划完成日<input name="plannedFinish" type="date" required /></label></div><label className="template-check custom-critical"><input name="critical" type="checkbox" /><span>标记为关键节点</span></label><button className="outline-button" disabled={milestoneWorking}>＋ 新增零权重节点</button></form><div className="modal-actions"><button className="outline-button" onClick={() => setShowMilestoneGovernance(false)}>取消</button><button className="primary-button" disabled={milestoneWorking || Math.abs(milestoneDraft.reduce((sum, row) => sum + Number(row.weight || 0), 0) - 100) >= 0.01} onClick={saveMilestoneGovernance}>{milestoneWorking ? "正在保存…" : "保存节点治理"}</button></div></section></div>}
     {showBaselineForm && <div className="modal-backdrop" onClick={() => setShowBaselineForm(false)}><section className="create-modal baseline-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowBaselineForm(false)}>×</button><span className="modal-kicker">BASELINE CHANGE</span><h2>申请基线变更</h2><p>{currentProject.name} · 当前批准基线 V{currentProject.baselineVersion ?? 1}</p><form onSubmit={requestBaselineChange}><div className="modal-form-grid"><label>调整节点<select name="milestoneId" required>{adjustableMilestones.map((milestone) => <option key={milestone.id} value={milestone.id}>{milestone.name}（当前 {milestone.plannedFinish}）</option>)}</select></label><label>新计划完成日<input name="to" type="date" required /></label></div><label className="full-label">变更原因<textarea name="reason" minLength={10} required placeholder="说明触发原因、决策依据和不可通过纠偏消化的原因" /></label><label className="full-label">影响评估<textarea name="impact" minLength={10} required placeholder="说明对总体工期、成本、范围、资源和年度目标的影响" /></label>{baselineError && <div className="form-error" role="alert">! {baselineError}</div>}<div className="modal-actions"><button type="button" className="outline-button" onClick={() => setShowBaselineForm(false)}>取消</button><button className="primary-button" disabled={baselineWorking}>{baselineWorking ? "正在提交…" : "提交 PMO 审批"}</button></div></form></section></div>}
+    {showProjectEdit && <div className="modal-backdrop" onClick={() => setShowProjectEdit(false)}><section className="create-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowProjectEdit(false)}>×</button><span className="modal-kicker">PROJECT PROFILE</span><h2>编辑项目基本信息</h2><p>{currentProject.id} · 计划日期调整不在此处进行，须通过基线变更审批。</p><form onSubmit={saveProject}><div className="modal-form-grid"><label>项目名称<input name="name" defaultValue={currentProject.name} required /></label><label>所属组织<input name="org" defaultValue={currentProject.org} required /></label><label>项目类型<select name="type" defaultValue={currentProject.type}><option>核心系统</option><option>业务平台</option><option>数据平台</option><option>技术底座</option><option>其他</option></select></label><label>风险等级<select name="riskLevel" defaultValue={currentProject.risk === "高" ? "high" : currentProject.risk === "中" ? "medium" : "low"}><option value="low">低风险</option><option value="medium">中风险</option><option value="high">高风险</option></select></label><label>项目经理<input name="ownerName" defaultValue={currentProject.owner} disabled={!canChangeOwner} required /></label><label>项目经理邮箱<input name="ownerEmail" type="email" defaultValue={currentProject.ownerEmail ?? ""} disabled={!canChangeOwner} required={canChangeOwner} /></label></div>{!canChangeOwner && <div className="form-hint">项目经理可维护业务信息；负责人调整仅限 PMO 或系统管理员。</div>}{projectError && <div className="form-error" role="alert">! {projectError}</div>}<div className="modal-actions"><button type="button" className="outline-button" onClick={() => setShowProjectEdit(false)}>取消</button><button className="primary-button" disabled={projectWorking}>{projectWorking ? "正在保存…" : "保存项目信息"}</button></div></form></section></div>}
     {baselineSuccess && <div className="toast"><span>✓</span><div><strong>基线变更申请已提交</strong><p>PMO 审批前当前批准基线保持不变。</p></div></div>}
+    {projectSuccess && <div className="toast"><span>✓</span><div><strong>项目信息已更新</strong><p>修改已写入操作审计。</p></div></div>}
   </div>;
 }
 
@@ -1511,6 +1559,7 @@ function AdminPage({ onNavigate, identity }: { onNavigate: Navigate; identity: I
   const [usersData, setUsersData] = useState<UserRow[]>([]);
   const [auditData, setAuditData] = useState<AuditRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [updatingUser, setUpdatingUser] = useState("");
   const [error, setError] = useState("");
   const actionNames: Record<string, string> = {
     "weekly_report.submit": "提交周报",
@@ -1556,22 +1605,45 @@ function AdminPage({ onNavigate, identity }: { onNavigate: Navigate; identity: I
   }, [loadAdminData]);
 
   async function updateRole(user: UserRow, role: UserRow["role"]) {
+    setUpdatingUser(user.email);
     setError("");
-    const response = await fetch(`/api/users/${encodeURIComponent(user.email)}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ role }),
-    });
-    const result = (await response.json()) as { error?: string };
-    if (!response.ok) {
-      setError(result.error || "角色更新失败");
-      return;
+    try {
+      const response = await fetch(`/api/users/${encodeURIComponent(user.email)}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ role }),
+      });
+      const result = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(result.error || "角色更新失败");
+      await loadAdminData();
+    } catch (updateError) {
+      setError(updateError instanceof Error ? updateError.message : "角色更新失败");
+    } finally {
+      setUpdatingUser("");
     }
-    await loadAdminData();
+  }
+
+  async function toggleUser(user: UserRow) {
+    setUpdatingUser(user.email);
+    setError("");
+    try {
+      const response = await fetch(`/api/users/${encodeURIComponent(user.email)}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ active: !user.active }),
+      });
+      const result = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(result.error || "账号状态更新失败");
+      await loadAdminData();
+    } catch (updateError) {
+      setError(updateError instanceof Error ? updateError.message : "账号状态更新失败");
+    } finally {
+      setUpdatingUser("");
+    }
   }
 
   const canEditUsers = identity?.role === "admin";
-  return <div className="workspace-page"><WorkspaceHeader title="系统管理" subtitle="用户角色、权限边界与全量操作审计" onNavigate={onNavigate} identity={identity} /><div className="page-content admin-page">{error && <div className="form-error" role="alert">! {error}</div>}<div className="admin-grid"><section className="content-card"><div className="card-title"><div><h2>用户与角色</h2><p>{canEditUsers ? "可调整账号角色；身份仍由登录平台确认" : "PMO 可查看账号，只有系统管理员可调整角色"}</p></div><span className="count-badge">{usersData.length} 个账号</span></div>{loading ? <div className="panel-loading">正在读取用户数据…</div> : <div className="user-table"><div className="table-head"><span>用户</span><span>角色</span><span>状态</span><span>加入时间</span></div>{usersData.map((user) => <div className="table-row" key={user.email}><span className="admin-user"><i>{user.displayName[0]}</i><b>{user.displayName}<small>{user.email}</small></b></span><select value={user.role} disabled={!canEditUsers} onChange={(event) => updateRole(user, event.target.value as UserRow["role"])}><option value="executive">管理层只读</option><option value="manager">项目经理</option><option value="pmo">PMO</option><option value="admin">系统管理员</option></select><span className={user.active ? "user-active" : "user-disabled"}>{user.active ? "● 正常" : "— 停用"}</span><span>{user.createdAt.slice(0, 10)}</span></div>)}</div>}</section><section className="content-card"><div className="card-title"><div><h2>操作审计</h2><p>记录所有关键数据与权限变更</p></div><button className="text-button" onClick={loadAdminData}>刷新</button></div>{loading ? <div className="panel-loading">正在读取审计记录…</div> : <div className="audit-list">{auditData.length ? auditData.map((row) => <div key={row.id}><span className="audit-dot" /><div><strong>{actionNames[row.action] ?? row.action}</strong><p>{row.actorEmail} · {row.entityType} / {row.entityId}</p></div><time>{row.createdAt.replace("T"," ").slice(0,16)}</time></div>) : <div className="empty-state">暂无审计记录</div>}</div>}</section></div></div></div>;
+  return <div className="workspace-page"><WorkspaceHeader title="系统管理" subtitle="用户角色、权限边界与全量操作审计" onNavigate={onNavigate} identity={identity} /><div className="page-content admin-page">{error && <div className="form-error" role="alert">! {error}</div>}<div className="admin-grid"><section className="content-card"><div className="card-title"><div><h2>用户与角色</h2><p>{canEditUsers ? "可调整角色并启用或停用账号；身份仍由登录平台确认" : "PMO 可查看账号，只有系统管理员可调整权限"}</p></div><span className="count-badge">{usersData.filter((user) => user.active).length} / {usersData.length} 启用</span></div>{loading ? <div className="panel-loading">正在读取用户数据…</div> : <div className="user-table"><div className="table-head"><span>用户</span><span>角色</span><span>账号状态</span><span>加入时间</span></div>{usersData.map((user) => <div className={`table-row ${user.active ? "" : "inactive-user"}`} key={user.email}><span className="admin-user"><i>{user.displayName[0]}</i><b>{user.displayName}<small>{user.email}</small></b></span><select value={user.role} disabled={!canEditUsers || updatingUser === user.email || !user.active || user.email === identity?.email} onChange={(event) => updateRole(user, event.target.value as UserRow["role"])}><option value="executive">管理层只读</option><option value="manager">项目经理</option><option value="pmo">PMO</option><option value="admin">系统管理员</option></select><button type="button" className={`user-state-button ${user.active ? "active" : "disabled"}`} disabled={!canEditUsers || updatingUser === user.email || user.email === identity?.email} onClick={() => toggleUser(user)} aria-label={`${user.active ? "停用" : "启用"} ${user.displayName}`}>{updatingUser === user.email ? "处理中…" : user.active ? "● 已启用" : "— 已停用"}</button><span>{user.createdAt.slice(0, 10)}</span></div>)}</div>}</section><section className="content-card"><div className="card-title"><div><h2>操作审计</h2><p>记录所有关键数据与权限变更</p></div><button className="text-button" onClick={loadAdminData}>刷新</button></div>{loading ? <div className="panel-loading">正在读取审计记录…</div> : <div className="audit-list">{auditData.length ? auditData.map((row) => <div key={row.id}><span className="audit-dot" /><div><strong>{actionNames[row.action] ?? row.action}</strong><p>{row.actorEmail} · {row.entityType} / {row.entityId}</p></div><time>{row.createdAt.replace("T"," ").slice(0,16)}</time></div>) : <div className="empty-state">暂无审计记录</div>}</div>}</section></div></div></div>;
 }
 
 function PmoPage({ onNavigate, onDataChanged, identity, projectData = projects }: { onNavigate: Navigate; onDataChanged: () => Promise<void>; identity: Identity | null; projectData?: ProjectData[] }) {
@@ -1613,6 +1685,8 @@ function PmoPage({ onNavigate, onDataChanged, identity, projectData = projects }
     active: boolean;
     description: string;
   };
+  const reportingPeriod = useMemo(() => currentReportingPeriod(), []);
+  const [renderedAt] = useState(() => Date.now());
   const [locked, setLocked] = useState(false);
   const [snapshotId, setSnapshotId] = useState<number | null>(null);
   const [snapshotVersion, setSnapshotVersion] = useState(1);
@@ -1630,6 +1704,7 @@ function PmoPage({ onNavigate, onDataChanged, identity, projectData = projects }
   const [templateRows, setTemplateRows] = useState<TemplateRow[]>([]);
   const [templateSaving, setTemplateSaving] = useState(false);
   const [templateMessage, setTemplateMessage] = useState("");
+  const [reportRows, setReportRows] = useState<WeeklyReportRow[]>([]);
 
   useEffect(() => {
     fetch("/api/bootstrap")
@@ -1638,15 +1713,16 @@ function PmoPage({ onNavigate, onDataChanged, identity, projectData = projects }
         return response.json();
       })
       .then((data: {
-        snapshots?: SnapshotRow[];
-        baselineChanges?: BaselineRow[];
-        milestoneTemplates?: TemplateRow[];
-      }) => {
-        const rows = data.snapshots ?? [];
-        setSnapshotRows(rows);
-        const current = rows
-          .filter((snapshot) => snapshot.weekKey === "2026-W30")
-          .sort((a, b) => b.version - a.version)[0];
+         snapshots?: SnapshotRow[];
+         baselineChanges?: BaselineRow[];
+         milestoneTemplates?: TemplateRow[];
+         weeklyReports?: WeeklyReportRow[];
+       }) => {
+         const rows = data.snapshots ?? [];
+         setSnapshotRows(rows);
+         const current = rows
+           .filter((snapshot) => snapshot.weekKey === reportingPeriod.weekKey)
+           .sort((a, b) => b.version - a.version)[0];
         setLocked(current?.status === "locked");
         setSnapshotId(current?.id ?? null);
         setSnapshotVersion(current?.version ?? 1);
@@ -1657,11 +1733,12 @@ function PmoPage({ onNavigate, onDataChanged, identity, projectData = projects }
         if (change) {
           setChangeId(change.id);
           setApproved(change.status === "approved");
-        }
-        setTemplateRows(data.milestoneTemplates ?? []);
-      })
-      .catch(() => undefined);
-  }, []);
+         }
+         setTemplateRows(data.milestoneTemplates ?? []);
+         setReportRows(data.weeklyReports ?? []);
+       })
+       .catch(() => undefined);
+  }, [reportingPeriod.weekKey]);
 
   async function lockSnapshot() {
     setWorking(true);
@@ -1670,7 +1747,7 @@ function PmoPage({ onNavigate, onDataChanged, identity, projectData = projects }
       const response = await fetch("/api/snapshots/lock", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ weekKey: "2026-W30" }),
+        body: JSON.stringify({ weekKey: reportingPeriod.weekKey }),
       });
       const result = (await response.json()) as {
         error?: string;
@@ -1816,6 +1893,31 @@ function PmoPage({ onNavigate, onDataChanged, identity, projectData = projects }
     );
     setTemplateMessage("");
   }
+  async function exportSnapshot(snapshot: SnapshotRow) {
+    setOperationError("");
+    try {
+      const response = await fetch(`/api/snapshots/${snapshot.id}`);
+      const result = (await response.json()) as {
+        error?: string;
+        snapshot?: unknown;
+      };
+      if (!response.ok || !result.snapshot) {
+        throw new Error(result.error || "快照导出失败");
+      }
+      const url = URL.createObjectURL(
+        new Blob([JSON.stringify(result.snapshot, null, 2)], {
+          type: "application/json;charset=utf-8",
+        }),
+      );
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `项目进度快照-${snapshot.weekKey}-V${snapshot.version}.json`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      setOperationError(error instanceof Error ? error.message : "快照导出失败");
+    }
+  }
   const activeChange =
     baselineRows.find((change) => change.id === changeId) ?? baselineRows[0];
   const pendingChanges = baselineRows.filter(
@@ -1827,15 +1929,54 @@ function PmoPage({ onNavigate, onDataChanged, identity, projectData = projects }
   const currentSnapshotRow = snapshotRows.find(
     (snapshot) => snapshot.id === snapshotId,
   );
+  const submittedProjectIds = new Set(
+    reportRows
+      .filter(
+        (report) =>
+          report.weekKey === reportingPeriod.weekKey &&
+          report.status !== "draft",
+      )
+      .map((report) => report.projectId),
+  );
+  const submittedReports = reportRows.filter(
+    (report) =>
+      report.weekKey === reportingPeriod.weekKey &&
+      report.status !== "draft",
+  );
+  const missingProjects = projectData.filter(
+    (project) => !submittedProjectIds.has(project.id),
+  );
+  const varianceReports = submittedReports.filter(
+    (report) => Math.abs(report.variance) > 5,
+  );
   const snapshotProjectCount =
     currentSnapshotRow?.projectCount ?? projectData.length;
-  const submittedProjectCount = Math.round(
-    (snapshotProjectCount * (currentSnapshotRow?.completeness ?? 0)) / 100,
-  );
+  const submittedProjectCount = currentSnapshotRow
+    ? Math.round(
+        (snapshotProjectCount * currentSnapshotRow.completeness) / 100,
+      )
+    : submittedProjectIds.size;
   const missingProjectCount = Math.max(
     0,
     snapshotProjectCount - submittedProjectCount,
   );
+  const currentCompleteness =
+    currentSnapshotRow?.completeness ??
+    (snapshotProjectCount
+      ? Number(((submittedProjectCount / snapshotProjectCount) * 100).toFixed(1))
+      : 0);
+  const deadline = new Date(`${reportingPeriod.fridayIso}T17:00:00+08:00`);
+  const remainingMs = deadline.getTime() - renderedAt;
+  const remainingHours = Math.max(0, Math.floor(remainingMs / 3_600_000));
+  const countdown =
+    remainingMs <= 0
+      ? "已到本周锁定时间"
+      : `距离本周快照锁定还有 ${Math.floor(remainingHours / 24)}天 ${String(remainingHours % 24).padStart(2, "0")}小时`;
+  const deadlineDate = new Date(`${reportingPeriod.fridayIso}T12:00:00+08:00`);
+  const calendarMonth = deadlineDate
+    .toLocaleString("en-US", { month: "short", timeZone: "Asia/Shanghai" })
+    .toUpperCase();
+  const calendarDay = String(deadlineDate.getDate()).padStart(2, "0");
   const activeTemplateWeight = templateRows
     .filter((row) => row.active)
     .reduce((sum, row) => sum + Number(row.defaultWeight || 0), 0);
@@ -1845,20 +1986,20 @@ function PmoPage({ onNavigate, onDataChanged, identity, projectData = projects }
       <div className="pmo-tabs">{["快照锁定","基线变更","节点模板","预警规则"].map(t => <button className={tab === t ? "active" : ""} onClick={() => setTab(t)} key={t}>{t}{t === "基线变更" && <b>{pendingChanges.length}</b>}</button>)}</div>
       {tab === "快照锁定" && <>
         <section className={`snapshot-banner ${locked ? "locked" : ""}`}>
-          <div className="snapshot-calendar"><span>JUL</span><strong>24</strong></div><div><span className="kicker">2026年第30周</span><h2>{locked ? "本周快照已锁定" : snapshotId ? "快照已重新打开，等待修订后锁定新版本" : "距离本周快照锁定还有 2天 02:21"}</h2><p>{locked ? "管理层大屏已切换至最新锁定口径，历史版本已永久保留。" : "重新锁定将生成新版本，原版本及重新打开原因永久保留。"}</p></div><div className="snapshot-actions">{locked ? <><button className="locked-button" disabled>✓ 已锁定 · V{snapshotVersion}</button><button className="outline-button" onClick={() => setShowReopen(true)}>重新打开</button></> : <button className="primary-button" disabled={working} onClick={lockSnapshot}>{working ? "正在锁定…" : `锁定为 V${snapshotVersion + (snapshotId ? 1 : 0)}`}</button>}</div>
+          <div className="snapshot-calendar"><span>{calendarMonth}</span><strong>{calendarDay}</strong></div><div><span className="kicker">{reportingPeriod.year}年第{reportingPeriod.week}周 · 周五17:00</span><h2>{locked ? "本周快照已锁定" : snapshotId ? "快照已重新打开，等待修订后锁定新版本" : countdown}</h2><p>{locked ? "管理层大屏已切换至最新锁定口径，历史版本已永久保留。" : `${reportingPeriod.fridayLabel}锁定；重新锁定将生成新版本，历史版本永久保留。`}</p></div><div className="snapshot-actions">{locked ? <><button className="locked-button" disabled>✓ 已锁定 · V{snapshotVersion}</button><button className="outline-button" onClick={() => setShowReopen(true)}>重新打开</button></> : <button className="primary-button" disabled={working} onClick={lockSnapshot}>{working ? "正在锁定…" : `锁定为 V${snapshotVersion + (snapshotId ? 1 : 0)}`}</button>}</div>
         </section>
-        {showReopen && <section className="content-card reopen-panel"><div><h3>重新打开第30周快照</h3><p>重新打开后该周期允许修订，下一次锁定将生成不可覆盖的新版本。</p></div><textarea value={reopenReason} onChange={(event) => setReopenReason(event.target.value)} placeholder="请说明重新打开原因、修订范围及授权依据" /><div><button className="outline-button" onClick={() => setShowReopen(false)}>取消</button><button className="danger-outline" disabled={working || reopenReason.trim().length < 5} onClick={reopenSnapshot}>{working ? "正在处理…" : "确认重新打开"}</button></div></section>}
+        {showReopen && <section className="content-card reopen-panel"><div><h3>重新打开第{reportingPeriod.week}周快照</h3><p>重新打开后该周期允许修订，下一次锁定将生成不可覆盖的新版本。</p></div><textarea value={reopenReason} onChange={(event) => setReopenReason(event.target.value)} placeholder="请说明重新打开原因、修订范围及授权依据" /><div><button className="outline-button" onClick={() => setShowReopen(false)}>取消</button><button className="danger-outline" disabled={working || reopenReason.trim().length < 5} onClick={reopenSnapshot}>{working ? "正在处理…" : "确认重新打开"}</button></div></section>}
         {operationError && <div className="form-error" role="alert">! {operationError}</div>}
         <div className="pmo-grid">
-          <section className="content-card quality-panel"><div className="card-title"><div><h2>锁定前数据检查</h2><p>系统自动检查完整性、时效性与规则异常</p></div><span className="quality-score">{currentSnapshotRow?.completeness ?? 0}分</span></div>
-            <div className="quality-items"><div className={missingProjectCount ? "warn" : "ok"}><span>{missingProjectCount ? "!" : "✓"}</span><div><strong>周报提交</strong><small>{submittedProjectCount} / {snapshotProjectCount} 已完成</small></div><b>{currentSnapshotRow?.completeness ?? 0}%</b></div><div className="ok"><span>✓</span><div><strong>关键字段完整性</strong><small>提交数据均已通过必填校验</small></div><b>已校验</b></div><div className={missingProjectCount ? "warn" : "ok"}><span>{missingProjectCount ? "!" : "✓"}</span><div><strong>待补交项目</strong><small>{missingProjectCount}个项目尚未进入当前快照</small></div><b>{missingProjectCount} 项</b></div><div className="warn"><span>!</span><div><strong>申报偏差异常</strong><small>申报进度与计算值相差超过5pp时需说明</small></div><b>规则启用</b></div></div>
+          <section className="content-card quality-panel"><div className="card-title"><div><h2>锁定前数据检查</h2><p>{reportingPeriod.weekKey} · 系统自动检查完整性、时效性与规则异常</p></div><span className="quality-score">{currentCompleteness}分</span></div>
+            <div className="quality-items"><div className={missingProjectCount ? "warn" : "ok"}><span>{missingProjectCount ? "!" : "✓"}</span><div><strong>周报提交</strong><small>{submittedProjectCount} / {snapshotProjectCount} 已完成</small></div><b>{currentCompleteness}%</b></div><div className="ok"><span>✓</span><div><strong>关键字段完整性</strong><small>正式提交数据均已通过服务端必填校验</small></div><b>已校验</b></div><div className={missingProjectCount ? "warn" : "ok"}><span>{missingProjectCount ? "!" : "✓"}</span><div><strong>待补交项目</strong><small>{missingProjectCount}个项目尚未正式提交本周周报</small></div><b>{missingProjectCount} 项</b></div><div className={varianceReports.length ? "warn" : "ok"}><span>{varianceReports.length ? "!" : "✓"}</span><div><strong>申报偏差异常</strong><small>申报进度与计算值相差超过5pp</small></div><b>{varianceReports.length} 项</b></div></div>
           </section>
-          <section className="content-card"><div className="card-title"><div><h2>待处理事项</h2><p>处理完成后可提高快照数据质量</p></div><button className="text-button">查看全部</button></div>
-            <div className="todo-list"><div><span className="todo-icon red">!</span><div><strong>数字档案平台</strong><p>尚未提交第30周进度</p></div><em>催报</em></div><div><span className="todo-icon yellow">▲</span><div><strong>主数据治理一期</strong><p>申报进度与计算值相差 8pp</p></div><em>核验</em></div><div><span className="todo-icon blue">≋</span><div><strong>智慧采购平台</strong><p>基线变更申请待审批</p></div><em onClick={() => setTab("基线变更")}>审批</em></div></div>
+          <section className="content-card"><div className="card-title"><div><h2>待处理事项</h2><p>由当前周报、差异校验和审批队列实时生成</p></div><span className="count-badge">{missingProjects.length + varianceReports.length + pendingChanges.length} 项</span></div>
+            <div className="todo-list">{missingProjects.slice(0, 2).map((project) => <div key={`missing-${project.id}`}><span className="todo-icon red">!</span><div><strong>{project.name}</strong><p>尚未提交第{reportingPeriod.week}周正式进度</p></div><button onClick={() => onNavigate("project", project.id)}>查看</button></div>)}{varianceReports.slice(0, 2).map((report) => { const project = projectData.find((item) => item.id === report.projectId); return <div key={`variance-${report.id}`}><span className="todo-icon yellow">▲</span><div><strong>{project?.name ?? report.projectId}</strong><p>申报进度与计算值相差 {Math.abs(report.variance).toFixed(1)}pp</p></div><button onClick={() => onNavigate("project", report.projectId)}>核验</button></div>; })}{pendingChanges.slice(0, 2).map((change) => <div key={`change-${change.id}`}><span className="todo-icon blue">≋</span><div><strong>{projectData.find((project) => project.id === change.projectId)?.name ?? change.projectId}</strong><p>基线变更 V{change.versionFrom} → V{change.versionTo} 待审批</p></div><button onClick={() => { setChangeId(change.id); setTab("基线变更"); }}>审批</button></div>)}{missingProjects.length + varianceReports.length + pendingChanges.length === 0 && <div className="todo-empty"><span className="todo-icon blue">✓</span><div><strong>当前没有待处理事项</strong><p>本周数据已达到锁定前检查要求</p></div></div>}</div>
           </section>
         </div>
-        <section className="content-card history-card"><div className="card-title"><div><h2>历史快照</h2><p>已锁定版本不可覆盖，重新打开将生成新版本</p></div><button className="outline-button">导出快照</button></div>
-          <div className="snapshot-table"><div className="table-head"><span>周期</span><span>版本</span><span>项目数</span><span>数据完整度</span><span>锁定时间</span><span>操作人</span><span>状态</span><span /></div>{snapshotRows.length ? snapshotRows.map((row)=><div className="table-row" key={row.id}><span>{row.weekKey}</span><span>V{row.version}</span><span>{row.projectCount}</span><span>{row.completeness}%</span><span>{row.lockedAt.replace("T"," ").slice(5,16)}</span><span>{row.lockedBy}</span><span><StatusPill status={row.status === "locked" ? "green" : "yellow"} /></span><button>查看</button></div>) : <div className="empty-state">暂无历史快照</div>}</div>
+        <section className="content-card history-card"><div className="card-title"><div><h2>历史快照</h2><p>已锁定版本不可覆盖，导出文件包含当时的完整项目与节点数据</p></div><button className="outline-button" disabled={!snapshotRows.length} onClick={() => snapshotRows[0] && exportSnapshot(snapshotRows[0])}>导出最新快照</button></div>
+          <div className="snapshot-table"><div className="table-head"><span>周期</span><span>版本</span><span>项目数</span><span>数据完整度</span><span>锁定时间</span><span>操作人</span><span>状态</span><span /></div>{snapshotRows.length ? snapshotRows.map((row)=><div className="table-row" key={row.id}><span>{row.weekKey}</span><span>V{row.version}</span><span>{row.projectCount}</span><span>{row.completeness}%</span><span>{row.lockedAt.replace("T"," ").slice(5,16)}</span><span>{row.lockedBy}</span><span><StatusPill status={row.status === "locked" ? "green" : "yellow"} /></span><button onClick={() => exportSnapshot(row)}>导出</button></div>) : <div className="empty-state">暂无历史快照</div>}</div>
         </section>
       </>}
       {tab === "基线变更" && <section className="content-card baseline-approval">
@@ -1876,7 +2017,7 @@ function PmoPage({ onNavigate, onDataChanged, identity, projectData = projects }
       {tab === "节点模板" && <section className="content-card template-governance"><div className="card-title"><div><h2>标准节点模板</h2><p>统一维护节点编码、顺序、默认权重与关键节点标识；启用节点权重合计必须为100%</p></div><div className="template-publish"><span className={Math.abs(activeTemplateWeight - 100) < 0.01 ? "weight-ok" : "weight-error"}>启用权重 {activeTemplateWeight.toFixed(1)}%</span><button className="primary-button" disabled={templateSaving || Math.abs(activeTemplateWeight - 100) >= 0.01} onClick={saveTemplates}>{templateSaving ? "正在发布…" : "发布模板"}</button></div></div>{templateMessage && <div className={templateMessage.includes("已发布") ? "form-success" : "form-error"}>{templateMessage}</div>}<div className="template-grid"><div className="template-grid-head"><span>序号</span><span>编码</span><span>节点名称</span><span>权重</span><span>关键</span><span>启用</span><span>口径说明</span></div>{templateRows.map((row) => <div className={`template-grid-row ${row.active ? "" : "inactive"}`} key={row.id}><input aria-label={`${row.name}序号`} type="number" min="1" max="99" value={row.sequence} onChange={(event) => updateTemplate(row.id, "sequence", Number(event.target.value))} /><input aria-label={`${row.name}编码`} value={row.code} onChange={(event) => updateTemplate(row.id, "code", event.target.value.toUpperCase())} /><input aria-label={`${row.name}名称`} value={row.name} onChange={(event) => updateTemplate(row.id, "name", event.target.value)} /><label className="weight-input"><input aria-label={`${row.name}权重`} type="number" min="0" max="100" step="0.5" value={row.defaultWeight} onChange={(event) => updateTemplate(row.id, "defaultWeight", Number(event.target.value))} /><span>%</span></label><label className="template-check"><input type="checkbox" checked={row.critical} onChange={(event) => updateTemplate(row.id, "critical", event.target.checked)} /><span>关键</span></label><label className="template-check"><input type="checkbox" checked={row.active} onChange={(event) => updateTemplate(row.id, "active", event.target.checked)} /><span>启用</span></label><input aria-label={`${row.name}说明`} value={row.description} onChange={(event) => updateTemplate(row.id, "description", event.target.value)} /></div>)}</div><div className="template-footnote">项目可在本项目范围内标记节点不适用或追加零权重自定义节点；正式计划完成日调整仍须走基线变更审批。</div></section>}
       {tab === "预警规则" && <RuleConfigPanel />}
     </div>
-    {locked && <div className="toast"><span>✓</span><div><strong>第30周快照已锁定</strong><p>管理大屏已切换至最新数据。</p></div></div>}
+    {locked && <div className="toast"><span>✓</span><div><strong>第{reportingPeriod.week}周快照已锁定</strong><p>管理大屏已切换至最新数据。</p></div></div>}
   </div>;
 }
 

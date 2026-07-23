@@ -28,7 +28,7 @@ test("ships the complete prototype flow without starter artifacts", async () => 
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
 
-  for (const label of ["项目组合总览", "周度进度填报", "PMO 管理中心", "基线变更审批", "重新打开第30周快照"]) {
+  for (const label of ["项目组合总览", "周度进度填报", "PMO 管理中心", "基线变更审批", "重新打开第"]) {
     assert.match(page, new RegExp(label));
   }
   assert.match(page, /statusSymbol/);
@@ -240,4 +240,25 @@ test("supports dynamic weekly drafts, immutable baselines and real project activ
   assert.match(page, /已恢复本周服务器草稿/);
   assert.match(page, /暂无已锁定周度快照/);
   assert.match(page, /ProjectActivityPanel/);
+});
+
+test("closes project maintenance, account lifecycle and dynamic PMO operations", async () => {
+  const [page, projectRoute, userRoute, snapshotRead] = await Promise.all([
+    readFile(new URL("app/page.tsx", templateRoot), "utf8"),
+    readFile(new URL("app/api/projects/[id]/route.ts", templateRoot), "utf8"),
+    readFile(new URL("app/api/users/[email]/route.ts", templateRoot), "utf8"),
+    readFile(new URL("app/api/snapshots/[id]/route.ts", templateRoot), "utf8"),
+  ]);
+
+  assert.match(page, /编辑项目基本信息/);
+  assert.match(page, /saveProject/);
+  assert.match(projectRoute, /project\.update/);
+  assert.match(page, /toggleUser/);
+  assert.match(page, /已停用/);
+  assert.match(userRoute, /typeof payload\.active === "boolean"/);
+  assert.match(page, /reportingPeriod\.weekKey/);
+  assert.doesNotMatch(page, /body: JSON\.stringify\(\{ weekKey: "2026-W30" \}\)/);
+  assert.match(page, /由当前周报、差异校验和审批队列实时生成/);
+  assert.match(page, /项目进度快照-/);
+  assert.match(snapshotRead, /payload: JSON\.parse/);
 });

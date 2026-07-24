@@ -7,6 +7,7 @@ import {
   resources,
 } from "@/db/schema";
 import { apiError } from "@/lib/api-utils";
+import { shanghaiDateIso } from "@/lib/date-time";
 import {
   buildResourceCapacity,
   resourceCapacityCsv,
@@ -74,7 +75,7 @@ export async function GET(request: Request) {
     const weeks = Number.isFinite(requestedWeeks)
       ? Math.min(26, Math.max(4, requestedWeeks))
       : 12;
-    const asOfDate = new Date().toISOString().slice(0, 10);
+    const asOfDate = shanghaiDateIso();
     const analysis = buildResourceCapacity({
       resources: resourceRows,
       allocations: allocationRows,

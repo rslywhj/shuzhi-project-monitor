@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { shanghaiDateIso } from "@/lib/date-time";
 
 type Identity = {
   email: string;
@@ -190,7 +191,7 @@ const capacityStatusNames = {
 } as const;
 
 function today() {
-  return new Date().toISOString().slice(0, 10);
+  return shanghaiDateIso();
 }
 
 function addDays(value: string, days: number) {

@@ -12,7 +12,11 @@ import {
   validateProjectSchedule,
 } from "@/lib/project-schedule";
 import {
+  formatShanghaiCalendarDay,
+  formatShanghaiCalendarMonth,
+  formatShanghaiDate,
   formatShanghaiDateTime,
+  formatShanghaiMonthDayTime,
   SHANGHAI_TIME_ZONE_LABEL,
 } from "@/lib/date-time";
 
@@ -698,7 +702,7 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
     ? `${snapshot.weekKey.replace("-W", "年第")}周 · V${snapshot.version}`
     : "尚无锁定快照";
   const snapshotTime = snapshot?.lockedAt
-    ? snapshot.lockedAt.replace("T", " ").slice(5, 16)
+    ? formatShanghaiMonthDayTime(snapshot.lockedAt)
     : "等待 PMO 锁定";
   const predictionByProject = new Map(
     (alerts.predictedDelays ?? []).map((prediction) => [
@@ -1074,7 +1078,7 @@ function WorkspaceHeader({ title, subtitle, onNavigate, identity }: { title: str
     <header className="workspace-header">
       <div><h1>{title}</h1><p>{subtitle}</p></div>
       <div className="header-actions"><button className="icon-button" aria-label="搜索项目" onClick={() => onNavigate("portfolio")}>⌕</button><button className="icon-button notice" aria-label={`通知${unreadCount ? `，${unreadCount}条未读` : ""}`} aria-expanded={noticeOpen} onClick={() => { setNoticeOpen((value) => !value); setMenu(false); if (!noticeOpen) void loadNotifications(); }}>♢{unreadCount > 0 && <b>{unreadCount > 9 ? "9+" : unreadCount}</b>}</button><button className="user-button" onClick={() => { setMenu(!menu); setNoticeOpen(false); }}><span className="avatar">{displayName[0]}</span><span><strong>{displayName}</strong><small>{roleName}</small></span><em>⌄</em></button></div>
-      {noticeOpen && <section className="notification-center"><div className="notification-head"><div><strong>通知中心</strong><span>{unreadCount} 条未读</span></div>{unreadCount > 0 && <button onClick={markAllNotificationsRead}>全部已读</button>}</div>{notificationError ? <div className="notification-error">! {notificationError}</div> : notificationRows.filter((row) => row.status !== "dismissed").length ? <div className="notification-list">{notificationRows.filter((row) => row.status !== "dismissed").slice(0, 20).map((notification) => <button className={`${notification.severity} ${notification.status}`} key={notification.id} onClick={() => openNotification(notification)}><span className="notification-symbol">{notification.severity === "critical" ? "■" : notification.severity === "warning" ? "▲" : "●"}</span><div><strong>{notification.title}</strong><p>{notification.message}</p><small>{notification.createdAt.replace("T"," ").slice(0,16)} · {notification.createdBy}</small></div>{notification.status === "unread" && <i />}</button>)}</div> : <div className="notification-empty">暂无通知</div>}<div className="notification-foot">{canGovern ? <button onClick={() => onNavigate("pmo")}>进入 PMO 待办</button> : <span>通知由 PMO 与系统工作流生成</span>}</div></section>}
+      {noticeOpen && <section className="notification-center"><div className="notification-head"><div><strong>通知中心</strong><span>{unreadCount} 条未读</span></div>{unreadCount > 0 && <button onClick={markAllNotificationsRead}>全部已读</button>}</div>{notificationError ? <div className="notification-error">! {notificationError}</div> : notificationRows.filter((row) => row.status !== "dismissed").length ? <div className="notification-list">{notificationRows.filter((row) => row.status !== "dismissed").slice(0, 20).map((notification) => <button className={`${notification.severity} ${notification.status}`} key={notification.id} onClick={() => openNotification(notification)}><span className="notification-symbol">{notification.severity === "critical" ? "■" : notification.severity === "warning" ? "▲" : "●"}</span><div><strong>{notification.title}</strong><p>{notification.message}</p><small title={SHANGHAI_TIME_ZONE_LABEL}>{formatShanghaiDateTime(notification.createdAt)} · {notification.createdBy}</small></div>{notification.status === "unread" && <i />}</button>)}</div> : <div className="notification-empty">暂无通知</div>}<div className="notification-foot">{canGovern ? <button onClick={() => onNavigate("pmo")}>进入 PMO 待办</button> : <span>通知由 PMO 与系统工作流生成</span>}</div></section>}
       {menu && (
         <div className="user-menu">
           {canGovern && <button onClick={() => onNavigate("admin")}>用户与权限</button>}
@@ -1990,7 +1994,7 @@ function Portfolio({
             <span><StatusPill status={p.status} /></span><span className="owner"><i>{p.owner[0]}</i>{p.owner}</span>
             <span className="dual-progress"><b>{p.actual}%</b><ProgressBar value={p.actual} tone={p.status} /><small>计划 {p.plan}%</small></span>
             <span className={p.actual - p.plan < -5 ? "negative" : "positive"}>{p.actual - p.plan > 0 ? "+" : ""}{(p.actual - p.plan).toFixed(1)} pp</span>
-            <span className={`risk ${p.risk === "高" ? "high" : p.risk === "中" ? "medium" : "low"}`}>{p.risk}风险</span><span>{p.updatedAt ? p.updatedAt.replace("T", " ").slice(5, 16) : "数据未同步"}</span><button className="more" aria-label={`查看${p.name}`} onClick={() => onNavigate("project", p.id)}>•••</button>
+            <span className={`risk ${p.risk === "高" ? "high" : p.risk === "中" ? "medium" : "low"}`}>{p.risk}风险</span><span title={p.updatedAt ? SHANGHAI_TIME_ZONE_LABEL : undefined}>{p.updatedAt ? formatShanghaiMonthDayTime(p.updatedAt) : "数据未同步"}</span><button className="more" aria-label={`查看${p.name}`} onClick={() => onNavigate("project", p.id)}>•••</button>
           </div>)}
         </div> : <div className="portfolio-matrix"><div className="portfolio-matrix-grid" style={{ "--portfolio-milestone-count": matrixTemplates.length } as React.CSSProperties}><div className="portfolio-matrix-head"><div>项目 / 健康度</div>{matrixTemplates.map((template) => <div key={template.id}><span>{template.code}</span>{template.name}</div>)}</div>{filtered.map((project) => <div className="portfolio-matrix-row" key={project.id}><button className="portfolio-project-cell" onClick={() => onNavigate("project", project.id)}><StatusPill status={project.status} compact /><span><strong>{project.name} <em className={`lifecycle-badge ${projectLifecycle(project)}`}>{lifecycleLabel[projectLifecycle(project)]}</em></strong><small>{project.owner} · {project.org}</small></span><b>{project.score}</b></button>{matrixTemplates.map((template) => { const milestone = project.milestones?.find((row) => row.templateId === template.id || row.name === template.name); const cellStatus = milestone?.status ?? "na"; return <button key={template.id} className={`portfolio-heat-cell ${cellStatus}`} aria-label={`${project.name} ${template.name} ${statusLabel[cellStatus]}`} onClick={() => onNavigate("project", project.id)}><span>{statusSymbol[cellStatus]}</span><small>{cellStatus === "na" ? "N/A" : milestone && milestone.deviationDays > 0 ? `+${milestone.deviationDays}天` : `${milestone?.completion ?? 0}%`}</small></button>; })}</div>)}</div></div>}
         <div className="pagination"><span>共 {matching.length} 条，每页 10 条</span><div><button disabled={safePage === 0} onClick={() => setPage((current) => Math.max(0, current - 1))}>‹</button>{Array.from({ length: pageCount }, (_, index) => <button key={index} className={safePage === index ? "active" : ""} onClick={() => setPage(index)}>{index + 1}</button>)}<button disabled={safePage === pageCount - 1} onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))}>›</button></div></div>
@@ -2368,7 +2372,7 @@ function RiskActionPanel({ projectId, canEdit, onDataChanged }: { projectId: str
   const overdueActions = actionRows.filter(
     (action) =>
       action.status !== "completed" &&
-      action.recoveryDate < new Date().toISOString().slice(0, 10),
+      action.recoveryDate < shanghaiTodayIso(),
   );
   const levelNames = { low: "低", medium: "中", high: "高" };
   const statusNames = {
@@ -2462,7 +2466,7 @@ function ProjectActivityPanel({
           <span className={Math.abs(report.variance) > 5 ? "red-text" : ""}>{report.variance > 0 ? "+" : ""}{report.variance.toFixed(1)}pp</span>
           <span className={`report-status ${report.status}`}>{reportStatus[report.status]}</span>
           <span>{report.submittedBy}</span>
-          <time>{report.submittedAt.replace("T", " ").slice(0, 16)}</time>
+          <time dateTime={report.submittedAt} title={SHANGHAI_TIME_ZONE_LABEL}>{formatShanghaiDateTime(report.submittedAt)}</time>
           {report.reason && <p>{report.reason}</p>}
           {data.attachments.some((attachment) => attachment.weekKey === report.weekKey) && <div className="history-attachments"><strong>支撑附件</strong>{data.attachments.filter((attachment) => attachment.weekKey === report.weekKey).map((attachment) => <a key={attachment.id} href={`/api/attachments/${attachment.id}`} target="_blank" rel="noreferrer"><span>↧</span>{attachment.filename}<small>{formatFileSize(attachment.sizeBytes)}</small></a>)}</div>}
         </article>)}
@@ -2505,7 +2509,7 @@ function ProjectActivityPanel({
         return <article className="baseline-version" key={version.id}>
           <button className="baseline-version-head" onClick={() => setExpandedVersion(expandedVersion === version.version ? null : version.version)}>
             <span className={`version-badge ${version.kind}`}>V{version.version}</span>
-            <span><strong>{kindNames[version.kind]}</strong><small>{version.createdBy} · {version.createdAt.replace("T", " ").slice(0, 16)}</small></span>
+            <span><strong>{kindNames[version.kind]}</strong><small title={SHANGHAI_TIME_ZONE_LABEL}>{version.createdBy} · {formatShanghaiDateTime(version.createdAt)}</small></span>
             <span>{version.version === 1 ? "冻结的原始计划" : `相对原始基线变更 ${changedCount} 个节点`}</span>
             <em>{expandedVersion === version.version ? "⌃" : "⌄"}</em>
           </button>
@@ -2519,7 +2523,7 @@ function ProjectActivityPanel({
           </div>}
         </article>;
       })}</div> : <div className="empty-state">暂无基线版本</div>}
-      {data.baselineChanges.length > 0 && <div className="baseline-change-history"><h3>变更申请记录</h3>{data.baselineChanges.map((change) => <div key={change.id}><span className={`change-status ${change.status}`}>{change.status === "pending" ? "待审批" : change.status === "approved" ? "已批准" : "已驳回"}</span><strong>V{change.versionFrom} → V{change.versionTo}</strong><p>{change.reason}</p><small>{change.requestedBy} · {change.requestedAt.replace("T", " ").slice(0, 16)}</small></div>)}</div>}
+      {data.baselineChanges.length > 0 && <div className="baseline-change-history"><h3>变更申请记录</h3>{data.baselineChanges.map((change) => <div key={change.id}><span className={`change-status ${change.status}`}>{change.status === "pending" ? "待审批" : change.status === "approved" ? "已批准" : "已驳回"}</span><strong>V{change.versionFrom} → V{change.versionTo}</strong><p>{change.reason}</p><small title={SHANGHAI_TIME_ZONE_LABEL}>{change.requestedBy} · {formatShanghaiDateTime(change.requestedAt)}</small></div>)}</div>}
     </section>;
   }
 
@@ -3435,7 +3439,7 @@ function WeeklyReport({ onNavigate, onDataChanged, projectId, projectData = proj
           </section>}
           <section className="content-card form-section attachment-section">
             <div className="form-title"><span>04</span><div><h3>支撑附件</h3><p>上传会议纪要、验收材料、进度截图或问题清单；单个文件不超过10MB。</p></div><label className={`attachment-upload ${uploadingAttachment || lifecycleLocked ? "disabled" : ""}`}>＋ {uploadingAttachment ? "正在处理…" : "选择文件"}<input type="file" disabled={uploadingAttachment || lifecycleLocked} accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.png,.jpg,.jpeg,.txt,.csv,.zip" onChange={uploadAttachment} /></label></div>
-            {attachmentRows.length ? <div className="attachment-list">{attachmentRows.map((attachment) => <div key={attachment.id}><span className="attachment-type">↧</span><div><a href={`/api/attachments/${attachment.id}`} target="_blank" rel="noreferrer">{attachment.filename}</a><small>{formatFileSize(attachment.sizeBytes)} · {attachment.uploadedBy} · {attachment.createdAt.replace("T", " ").slice(0, 16)}</small></div><button type="button" disabled={uploadingAttachment || lifecycleLocked} onClick={() => deleteAttachment(attachment)}>删除</button></div>)}</div> : <div className="attachment-empty">尚未上传附件，本项为选填。</div>}
+            {attachmentRows.length ? <div className="attachment-list">{attachmentRows.map((attachment) => <div key={attachment.id}><span className="attachment-type">↧</span><div><a href={`/api/attachments/${attachment.id}`} target="_blank" rel="noreferrer">{attachment.filename}</a><small title={SHANGHAI_TIME_ZONE_LABEL}>{formatFileSize(attachment.sizeBytes)} · {attachment.uploadedBy} · {formatShanghaiDateTime(attachment.createdAt)}</small></div><button type="button" disabled={uploadingAttachment || lifecycleLocked} onClick={() => deleteAttachment(attachment)}>删除</button></div>)}</div> : <div className="attachment-empty">尚未上传附件，本项为选填。</div>}
           </section>
           {submitError && <div className="form-error" role="alert">! {submitError}</div>}
           <div className="report-actions"><button className="outline-button" disabled={lifecycleLocked || submitting || loadingDraft} onClick={() => saveWeeklyReport("draft")}>{submitting ? "处理中…" : "保存草稿"}</button><button className="primary-button" disabled={lifecycleLocked || submitting || loadingDraft || !selectedMilestone} onClick={() => saveWeeklyReport("submitted")}>{submitting ? "正在提交…" : "提交本周进度"}</button></div>
@@ -3578,7 +3582,7 @@ function RuleConfigPanel() {
   ) => <label className="rule-veto"><input type="checkbox" checked={values[key]} onChange={(event) => setValues((current) => ({ ...current, [key]: event.target.checked }))} /><span>{label}</span></label>;
 
   // 预警规则配置与综合评分规则在同一版本中原子发布。
-  return <section className="content-card rule-panel"><div className="card-title"><div><h2>预警与综合评分规则</h2><p>当前生效版本 V{version} · 阈值、扣分、封顶和一票否决统一版本化</p></div><span className="count-badge">V{version} 生效中</span></div><div className="rule-sections scoring-rules"><div><h3>节点时间阈值</h3><p>按预测或实际完成日相对批准基线判灯。</p><div className="rule-fields">{field("normalYellowDays","普通黄","天")}{field("normalRedDays","普通红","天")}{field("criticalYellowDays","关键黄","天")}{field("criticalRedDays","关键红","天")}</div></div><div><h3>项目状态阈值</h3><p>综合得分达到绿色阈值为正常，低于黄色阈值为严重。</p><div className="rule-fields">{field("greenScore","绿色最低分","分")}{field("yellowScore","黄色最低分","分")}{field("progressYellowGap","进度落后起扣","pp")}{field("progressRedGap","进度严重落后","pp")}</div></div><div><h3>进度与节点扣分</h3><p>进度类扣分包含总体偏差和节点灯色，并应用统一封顶。</p><div className="rule-fields">{field("progressYellowPenalty","落后扣分","分")}{field("progressRedPenalty","严重落后","分")}{field("normalYellowPenalty","普通黄","分")}{field("normalRedPenalty","普通红","分")}{field("criticalYellowPenalty","关键黄","分")}{field("criticalRedPenalty","关键红","分")}{field("schedulePenaltyCap","进度封顶","分")}</div></div><div><h3>风险、措施与周报</h3><p>按开放风险、逾期措施和数据新鲜度累计扣分。</p><div className="rule-fields">{field("mediumRiskPenalty","中风险","分")}{field("highRiskPenalty","高风险","分")}{field("riskPenaltyCap","风险封顶","分")}{field("overdueActionPenalty","逾期措施","分")}{field("actionPenaltyCap","措施封顶","分")}{field("missingReportPenalty","本周缺报","分")}{field("consecutiveMissingPenalty","连续缺报","分")}</div></div><div><h3>一票否决</h3><p>启用后，对应条件直接将项目判为红色，仍保留评分明细。</p><div className="rule-veto-list">{vetoField("vetoCriticalRed","关键节点红色")}{vetoField("vetoHighRiskOverdue","高风险关联措施逾期")}{vetoField("vetoConsecutiveMissing","连续两个周期未填报")}</div></div></div>{showHistory && <div className="rule-history"><div className="table-head"><span>版本</span><span>节点阈值</span><span>进度扣分</span><span>风险/措施/周报</span><span>发布人</span><span>发布时间</span></div>{history.map((rule) => <div className="table-row" key={rule.id}><span><strong>V{rule.version}</strong>{rule.active && <small>当前</small>}</span><span>普黄 {rule.normalYellowDays} / 普红 {rule.normalRedDays} / 关红 {rule.criticalRedDays}</span><span>落后 {rule.progressYellowPenalty} / 严重 {rule.progressRedPenalty} / 封顶 {rule.schedulePenaltyCap}</span><span>高风险 {rule.highRiskPenalty} / 措施 {rule.overdueActionPenalty} / 缺报 {rule.missingReportPenalty}</span><span>{rule.createdBy}</span><span>{rule.createdAt.replace("T"," ").slice(0,16)}</span></div>)}</div>}{message && <div className={message.includes("已发布") ? "success-message" : "form-error"}>{message}</div>}<div className="rule-actions"><button className="outline-button" onClick={() => setShowHistory((value) => !value)}>{showHistory ? "收起历史版本" : `查看历史版本（${history.length}）`}</button><button className="primary-button" disabled={saving} onClick={publishRule}>{saving ? "正在发布并重算…" : "发布新版本并重算在建项目"}</button></div></section>;
+  return <section className="content-card rule-panel"><div className="card-title"><div><h2>预警与综合评分规则</h2><p>当前生效版本 V{version} · 阈值、扣分、封顶和一票否决统一版本化</p></div><span className="count-badge">V{version} 生效中</span></div><div className="rule-sections scoring-rules"><div><h3>节点时间阈值</h3><p>按预测或实际完成日相对批准基线判灯。</p><div className="rule-fields">{field("normalYellowDays","普通黄","天")}{field("normalRedDays","普通红","天")}{field("criticalYellowDays","关键黄","天")}{field("criticalRedDays","关键红","天")}</div></div><div><h3>项目状态阈值</h3><p>综合得分达到绿色阈值为正常，低于黄色阈值为严重。</p><div className="rule-fields">{field("greenScore","绿色最低分","分")}{field("yellowScore","黄色最低分","分")}{field("progressYellowGap","进度落后起扣","pp")}{field("progressRedGap","进度严重落后","pp")}</div></div><div><h3>进度与节点扣分</h3><p>进度类扣分包含总体偏差和节点灯色，并应用统一封顶。</p><div className="rule-fields">{field("progressYellowPenalty","落后扣分","分")}{field("progressRedPenalty","严重落后","分")}{field("normalYellowPenalty","普通黄","分")}{field("normalRedPenalty","普通红","分")}{field("criticalYellowPenalty","关键黄","分")}{field("criticalRedPenalty","关键红","分")}{field("schedulePenaltyCap","进度封顶","分")}</div></div><div><h3>风险、措施与周报</h3><p>按开放风险、逾期措施和数据新鲜度累计扣分。</p><div className="rule-fields">{field("mediumRiskPenalty","中风险","分")}{field("highRiskPenalty","高风险","分")}{field("riskPenaltyCap","风险封顶","分")}{field("overdueActionPenalty","逾期措施","分")}{field("actionPenaltyCap","措施封顶","分")}{field("missingReportPenalty","本周缺报","分")}{field("consecutiveMissingPenalty","连续缺报","分")}</div></div><div><h3>一票否决</h3><p>启用后，对应条件直接将项目判为红色，仍保留评分明细。</p><div className="rule-veto-list">{vetoField("vetoCriticalRed","关键节点红色")}{vetoField("vetoHighRiskOverdue","高风险关联措施逾期")}{vetoField("vetoConsecutiveMissing","连续两个周期未填报")}</div></div></div>{showHistory && <div className="rule-history"><div className="table-head"><span>版本</span><span>节点阈值</span><span>进度扣分</span><span>风险/措施/周报</span><span>发布人</span><span>发布时间</span></div>{history.map((rule) => <div className="table-row" key={rule.id}><span><strong>V{rule.version}</strong>{rule.active && <small>当前</small>}</span><span>普黄 {rule.normalYellowDays} / 普红 {rule.normalRedDays} / 关红 {rule.criticalRedDays}</span><span>落后 {rule.progressYellowPenalty} / 严重 {rule.progressRedPenalty} / 封顶 {rule.schedulePenaltyCap}</span><span>高风险 {rule.highRiskPenalty} / 措施 {rule.overdueActionPenalty} / 缺报 {rule.missingReportPenalty}</span><span>{rule.createdBy}</span><span title={SHANGHAI_TIME_ZONE_LABEL}>{formatShanghaiDateTime(rule.createdAt)}</span></div>)}</div>}{message && <div className={message.includes("已发布") ? "success-message" : "form-error"}>{message}</div>}<div className="rule-actions"><button className="outline-button" onClick={() => setShowHistory((value) => !value)}>{showHistory ? "收起历史版本" : `查看历史版本（${history.length}）`}</button><button className="primary-button" disabled={saving} onClick={publishRule}>{saving ? "正在发布并重算…" : "发布新版本并重算在建项目"}</button></div></section>;
 }
 
 function AdminPage({ onNavigate, identity }: { onNavigate: Navigate; identity: Identity | null }) {
@@ -3905,7 +3909,7 @@ function AdminPage({ onNavigate, identity }: { onNavigate: Navigate; identity: I
                           ? "● 已启用"
                           : "— 已停用"}
                     </button>
-                     <span>{user.createdAt.slice(0, 10)}</span>
+                     <span title={SHANGHAI_TIME_ZONE_LABEL}>{formatShanghaiDate(user.createdAt)}</span>
                      <button
                        type="button"
                        className="reset-password-button"
@@ -4770,10 +4774,8 @@ function PmoPage({ onNavigate, onDataChanged, identity, projectData = projects }
       ? "已到本周锁定时间"
       : `距离本周快照锁定还有 ${Math.floor(remainingHours / 24)}天 ${String(remainingHours % 24).padStart(2, "0")}小时`;
   const deadlineDate = new Date(`${reportingPeriod.fridayIso}T12:00:00+08:00`);
-  const calendarMonth = deadlineDate
-    .toLocaleString("en-US", { month: "short", timeZone: "Asia/Shanghai" })
-    .toUpperCase();
-  const calendarDay = String(deadlineDate.getDate()).padStart(2, "0");
+  const calendarMonth = formatShanghaiCalendarMonth(deadlineDate);
+  const calendarDay = formatShanghaiCalendarDay(deadlineDate);
   const activeTemplateWeight = templateRows
     .filter((row) => row.active)
     .reduce((sum, row) => sum + Number(row.defaultWeight || 0), 0);
@@ -4797,13 +4799,13 @@ function PmoPage({ onNavigate, onDataChanged, identity, projectData = projects }
           </section>
         </div>
         <section className="content-card history-card"><div className="card-title"><div><h2>历史快照</h2><p>已锁定版本不可覆盖，导出文件包含当时的完整项目与节点数据</p></div><button className="outline-button" disabled={!snapshotRows.length} onClick={() => snapshotRows[0] && exportSnapshot(snapshotRows[0])}>导出最新快照</button></div>
-          <div className="snapshot-table"><div className="table-head"><span>周期</span><span>版本</span><span>项目数</span><span>数据完整度</span><span>锁定时间</span><span>操作人</span><span>状态</span><span /></div>{snapshotRows.length ? snapshotRows.map((row)=><div className="table-row" key={row.id}><span>{row.weekKey}</span><span>V{row.version}</span><span>{row.projectCount}</span><span>{row.completeness}%</span><span>{row.lockedAt.replace("T"," ").slice(5,16)}</span><span>{row.lockedBy}</span><span title={row.reopenReason ?? undefined}><StatusPill status={row.status === "locked" ? "green" : "yellow"} /></span><button onClick={() => exportSnapshot(row)}>导出</button></div>) : <div className="empty-state">暂无历史快照</div>}</div>
+          <div className="snapshot-table"><div className="table-head"><span>周期</span><span>版本</span><span>项目数</span><span>数据完整度</span><span>锁定时间</span><span>操作人</span><span>状态</span><span /></div>{snapshotRows.length ? snapshotRows.map((row)=><div className="table-row" key={row.id}><span>{row.weekKey}</span><span>V{row.version}</span><span>{row.projectCount}</span><span>{row.completeness}%</span><span title={SHANGHAI_TIME_ZONE_LABEL}>{formatShanghaiMonthDayTime(row.lockedAt)}</span><span>{row.lockedBy}</span><span title={row.reopenReason ?? undefined}><StatusPill status={row.status === "locked" ? "green" : "yellow"} /></span><button onClick={() => exportSnapshot(row)}>导出</button></div>) : <div className="empty-state">暂无历史快照</div>}</div>
         </section>
       </>}
       {tab === "基线变更" && <section className="content-card baseline-approval">
         <div className="card-title"><div><h2>基线变更审批</h2><p>原始基线永久保留，批准后生成新的当前基线版本</p></div><span className="count-badge">{pendingChanges.length}项待审批</span></div>
         {pendingChanges.length > 1 && <div className="approval-queue">{pendingChanges.map((change) => <button key={change.id} className={change.id === changeId ? "active" : ""} onClick={() => { setChangeId(change.id); setApproved(false); }}>{change.projectId} · V{change.versionFrom} → V{change.versionTo}</button>)}</div>}
-        {activeChange ? <div className="change-card"><div className="change-head"><div><span className="project-chip">{activeChange.projectId}</span><div><h3>{activeProject?.name ?? activeChange.projectId}</h3><p>申请人 {activeChange.requestedBy} · {activeChange.requestedAt.replace("T"," ").slice(5,16)}</p></div></div><StatusPill status={activeChange.status === "approved" ? "green" : activeChange.status === "rejected" ? "red" : "yellow"} /></div>
+        {activeChange ? <div className="change-card"><div className="change-head"><div><span className="project-chip">{activeChange.projectId}</span><div><h3>{activeProject?.name ?? activeChange.projectId}</h3><p title={SHANGHAI_TIME_ZONE_LABEL}>申请人 {activeChange.requestedBy} · {formatShanghaiMonthDayTime(activeChange.requestedAt)}</p></div></div><StatusPill status={activeChange.status === "approved" ? "green" : activeChange.status === "rejected" ? "red" : "yellow"} /></div>
           <div className="change-reason"><small>变更原因</small><p>{activeChange.reason}</p></div>
           <div className="date-change">{activeChange.changes.map((change) => <div key={`${change.milestone}-${change.to}`}><small>{change.milestone}</small><span><s>{change.from}</s><b>→</b><strong>{change.to}</strong><em>{change.days > 0 ? "+" : ""}{change.days}天</em></span></div>)}</div>
           <div className="change-impact"><span>影响评估</span><p>{activeChange.impact}</p></div>

@@ -16,6 +16,7 @@ import {
   requiredWeekKey,
   safeNumber,
 } from "@/lib/api-utils";
+import { shanghaiDateIso } from "@/lib/date-time";
 import { ensureSeeded } from "@/lib/seed";
 import { recalculateProjectHealth } from "@/lib/health";
 import {
@@ -247,7 +248,7 @@ export async function POST(
       const overdue =
         milestoneUpdate.completion < 100 &&
         currentMilestone.plannedFinish <
-          new Date().toISOString().slice(0, 10);
+          shanghaiDateIso();
       if (
         submitMode === "submitted" &&
         (overdue || milestoneUpdate.deviationDays >= yellowDays) &&

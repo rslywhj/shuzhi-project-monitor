@@ -12,21 +12,73 @@ function parseDatabaseTimestamp(value: string) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-export function formatShanghaiDateTime(value: string) {
-  const date = parseDatabaseTimestamp(value);
-  if (!date) return value.trim() || "—";
-  const parts = new Intl.DateTimeFormat("en-CA", {
+function shanghaiParts(
+  value: string | Date,
+  includeTime: boolean,
+) {
+  const date =
+    value instanceof Date ? value : parseDatabaseTimestamp(value);
+  if (!date || Number.isNaN(date.getTime())) return null;
+  return new Intl.DateTimeFormat("en-CA", {
     timeZone: SHANGHAI_TIME_ZONE,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
+    ...(includeTime
+      ? {
+          hour: "2-digit" as const,
+          minute: "2-digit" as const,
+          hourCycle: "h23" as const,
+        }
+      : {}),
   }).formatToParts(date);
-  const get = (type: Intl.DateTimeFormatPartTypes) =>
-    parts.find((part) => part.type === type)?.value ?? "";
-  return `${get("year")}-${get("month")}-${get("day")} ${get("hour")}:${get("minute")}`;
+}
+
+function part(
+  parts: Intl.DateTimeFormatPart[],
+  type: Intl.DateTimeFormatPartTypes,
+) {
+  return parts.find((item) => item.type === type)?.value ?? "";
+}
+
+export function formatShanghaiDateTime(value: string) {
+  const parts = shanghaiParts(value, true);
+  if (!parts) return value.trim() || "—";
+  return `${part(parts, "year")}-${part(parts, "month")}-${part(parts, "day")} ${part(parts, "hour")}:${part(parts, "minute")}`;
+}
+
+export function formatShanghaiMonthDayTime(value: string) {
+  const parts = shanghaiParts(value, true);
+  if (!parts) return value.trim() || "—";
+  return `${part(parts, "month")}-${part(parts, "day")} ${part(parts, "hour")}:${part(parts, "minute")}`;
+}
+
+export function formatShanghaiDate(value: string) {
+  const parts = shanghaiParts(value, false);
+  if (!parts) return value.trim() || "—";
+  return `${part(parts, "year")}-${part(parts, "month")}-${part(parts, "day")}`;
+}
+
+export function shanghaiDateIso(value = new Date()) {
+  const parts = shanghaiParts(value, false);
+  if (!parts) return "";
+  return `${part(parts, "year")}-${part(parts, "month")}-${part(parts, "day")}`;
+}
+
+export function formatShanghaiCalendarDay(value: Date) {
+  const parts = shanghaiParts(value, false);
+  if (!parts) return "";
+  return part(parts, "day");
+}
+
+export function formatShanghaiCalendarMonth(value: Date) {
+  const date = value instanceof Date ? value : new Date(value);
+  return date
+    .toLocaleString("en-US", {
+      month: "short",
+      timeZone: SHANGHAI_TIME_ZONE,
+    })
+    .toUpperCase();
 }
 
 export const SHANGHAI_TIME_ZONE_LABEL = "UTC+8（Asia/Shanghai）";

@@ -9,6 +9,7 @@ import {
   weeklyReports,
 } from "@/db/schema";
 import { apiError } from "@/lib/api-utils";
+import { shanghaiDateIso } from "@/lib/date-time";
 import { buildPortfolioDelayForecast } from "@/lib/delay-forecast";
 import {
   buildPortfolioAnalytics,
@@ -82,13 +83,13 @@ export async function GET(request: Request) {
       weeklyReports: reportRows,
       risks: riskRows,
       actions: actionRows,
-      asOfDate: new Date().toISOString().slice(0, 10),
+      asOfDate: shanghaiDateIso(),
       scopeProjectIds: new Set(
         analytics.projects.map((project) => project.id),
       ),
     });
     if (url.searchParams.get("format") === "csv") {
-      const timestamp = new Date().toISOString().slice(0, 10);
+      const timestamp = shanghaiDateIso();
       return new Response(
         `\uFEFF${portfolioAnalyticsCsv(
           analytics.projects,

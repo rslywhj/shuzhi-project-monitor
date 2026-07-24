@@ -1,6 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import {
+  formatShanghaiMonthDayTime,
+  SHANGHAI_TIME_ZONE_LABEL,
+} from "@/lib/date-time";
 
 type Provider = "wecom" | "dingtalk" | "generic" | "email";
 type EventType = "report_reminder" | "red_escalation";
@@ -435,7 +439,14 @@ export default function NotificationChannelPanel({
                   {statusNames[delivery.status]}
                 </span>
                 <span>{delivery.attemptCount} / {delivery.maxAttempts}</span>
-                <time>{(delivery.sentAt ?? delivery.createdAt).replace("T", " ").slice(5, 16)}</time>
+                <time
+                  dateTime={delivery.sentAt ?? delivery.createdAt}
+                  title={SHANGHAI_TIME_ZONE_LABEL}
+                >
+                  {formatShanghaiMonthDayTime(
+                    delivery.sentAt ?? delivery.createdAt,
+                  )}
+                </time>
                 <span>
                   {delivery.status === "failed" && canOperate && (
                     <button

@@ -2,6 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import PortfolioTrends from "./portfolio-trends";
+import {
+  formatShanghaiDateTime,
+  SHANGHAI_TIME_ZONE_LABEL,
+} from "@/lib/date-time";
 
 type HealthStatus = "green" | "yellow" | "red";
 type Identity = {
@@ -703,10 +707,13 @@ export default function PortfolioAnalytics({
                     原始基线的计划漂移
                   </p>
                 </div>
-                <span className="analytics-asof">
+                <span
+                  className="analytics-asof"
+                  title={data?.generatedAt ? SHANGHAI_TIME_ZONE_LABEL : undefined}
+                >
                   数据生成于{" "}
                   {data?.generatedAt
-                    ? data.generatedAt.replace("T", " ").slice(0, 16)
+                    ? formatShanghaiDateTime(data.generatedAt)
                     : "—"}
                 </span>
               </div>

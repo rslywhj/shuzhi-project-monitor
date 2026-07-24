@@ -2,6 +2,7 @@ import { desc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { snapshots } from "@/db/schema";
 import { apiError } from "@/lib/api-utils";
+import { shanghaiDateIso } from "@/lib/date-time";
 import {
   buildPortfolioTrends,
   portfolioTrendCsv,
@@ -54,7 +55,7 @@ export async function GET(request: Request) {
       filters: trendFilters(url),
     });
     if (url.searchParams.get("format") === "csv") {
-      const timestamp = new Date().toISOString().slice(0, 10);
+      const timestamp = shanghaiDateIso();
       return new Response(`\uFEFF${portfolioTrendCsv(trends.projectHistory)}`, {
         headers: {
           "cache-control": "no-store",

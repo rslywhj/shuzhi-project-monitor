@@ -11,6 +11,7 @@ import {
   requiredString,
   safeNumber,
 } from "@/lib/api-utils";
+import { shanghaiDateIso } from "@/lib/date-time";
 import {
   canManagePortfolio,
   forbidden,
@@ -64,7 +65,7 @@ export async function PATCH(
       throw new ApiRequestError("资源类型无效。");
     }
     if (payload.active === false && existing.active) {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = shanghaiDateIso();
       const [activeAllocation] = await db
         .select({ id: resourceAllocations.id })
         .from(resourceAllocations)

@@ -34,8 +34,17 @@
       "id": "98fae6916ed74918bae51e82dc8618b1"
     }
   ],
+  "send_email": [
+    {
+      "name": "EMAIL",
+      "allowed_sender_addresses": [
+        "notifications@dougge.top"
+      ]
+    }
+  ],
   "vars": {
     "APP_ADMIN_EMAILS": "849916182@qq.com",
+    "APP_EMAIL_FROM": "notifications@dougge.top",
     "SEED_DEMO_DATA": "false"
   },
   "triggers": {

@@ -7,6 +7,8 @@ interface Env {
   ASSETS: Fetcher;
   DB: D1Database;
   FILES: KVNamespace;
+  EMAIL?: SendEmail;
+  APP_EMAIL_FROM?: string;
   IMAGES?: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {

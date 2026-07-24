@@ -17,6 +17,12 @@ import {
   type NotificationProvider,
 } from "@/lib/notification-webhook";
 import {
+  EmailRecipientValidationError,
+  maskEmailRecipients,
+  parseStoredEmailRecipients,
+  validateEmailRecipients,
+} from "@/lib/notification-email-content";
+import {
   canAdministerUsers,
   canManagePortfolio,
   forbidden,
@@ -30,6 +36,7 @@ const providers = new Set<NotificationProvider>([
   "wecom",
   "dingtalk",
   "generic",
+  "email",
 ]);
 const supportedEvents = new Set(["report_reminder", "red_escalation"]);
 const MAX_ACTIVE_CHANNELS = 10;
@@ -42,6 +49,17 @@ function safeWebhookUrl(
     return validateWebhookUrl(provider, value);
   } catch (error) {
     if (error instanceof WebhookValidationError) {
+      throw new ApiRequestError(error.message);
+    }
+    throw error;
+  }
+}
+
+function safeEmailRecipients(value: unknown) {
+  try {
+    return validateEmailRecipients(value);
+  } catch (error) {
+    if (error instanceof EmailRecipientValidationError) {
       throw new ApiRequestError(error.message);
     }
     throw error;
@@ -110,10 +128,29 @@ export async function GET(request: Request) {
     );
     return Response.json({
       channels: channelRows.map((channel) => ({
+        ...(() => {
+          const recipients = parseStoredEmailRecipients(
+            channel.emailRecipientsJson,
+          );
+          return {
+            endpointMasked:
+              channel.provider === "email"
+                ? maskEmailRecipients(recipients)
+                : maskWebhookUrl(channel.webhookUrl),
+            webhookUrlMasked:
+              channel.provider === "email"
+                ? ""
+                : maskWebhookUrl(channel.webhookUrl),
+            emailRecipientsMasked:
+              channel.provider === "email"
+                ? maskEmailRecipients(recipients)
+                : "",
+            recipientCount: recipients.length,
+          };
+        })(),
         id: channel.id,
         name: channel.name,
         provider: channel.provider,
-        webhookUrlMasked: maskWebhookUrl(channel.webhookUrl),
         eventTypes: parseEventTypes(channel.eventTypesJson),
         active: channel.active,
         createdBy: channel.createdBy,
@@ -153,6 +190,7 @@ export async function POST(request: Request) {
       name?: unknown;
       provider?: unknown;
       webhookUrl?: unknown;
+      emailRecipients?: unknown;
       eventTypes?: unknown;
       active?: unknown;
     };
@@ -166,7 +204,14 @@ export async function POST(request: Request) {
         ? (payload.provider as NotificationProvider)
         : null;
     if (!provider) throw new ApiRequestError("请选择有效的渠道类型。");
-    const webhookUrl = safeWebhookUrl(provider, payload.webhookUrl);
+    const recipients =
+      provider === "email"
+        ? safeEmailRecipients(payload.emailRecipients)
+        : [];
+    const webhookUrl =
+      provider === "email"
+        ? ""
+        : safeWebhookUrl(provider, payload.webhookUrl);
     const events = eventTypes(payload.eventTypes);
     const db = getDb();
     const active = payload.active !== false;
@@ -188,6 +233,7 @@ export async function POST(request: Request) {
         name,
         provider,
         webhookUrl,
+        emailRecipientsJson: JSON.stringify(recipients),
         eventTypesJson: JSON.stringify(events),
         active,
         createdBy: identity.email,
@@ -201,6 +247,7 @@ export async function POST(request: Request) {
       detailJson: JSON.stringify({
         name,
         provider,
+        recipientCount: recipients.length,
         eventTypes: events,
         active: channel.active,
       }),
@@ -211,7 +258,19 @@ export async function POST(request: Request) {
           id: channel.id,
           name: channel.name,
           provider: channel.provider,
-          webhookUrlMasked: maskWebhookUrl(channel.webhookUrl),
+          endpointMasked:
+            channel.provider === "email"
+              ? maskEmailRecipients(recipients)
+              : maskWebhookUrl(channel.webhookUrl),
+          webhookUrlMasked:
+            channel.provider === "email"
+              ? ""
+              : maskWebhookUrl(channel.webhookUrl),
+          emailRecipientsMasked:
+            channel.provider === "email"
+              ? maskEmailRecipients(recipients)
+              : "",
+          recipientCount: recipients.length,
           eventTypes: events,
           active: channel.active,
           createdBy: channel.createdBy,

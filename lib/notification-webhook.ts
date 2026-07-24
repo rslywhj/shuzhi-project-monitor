@@ -1,4 +1,8 @@
-export type NotificationProvider = "wecom" | "dingtalk" | "generic";
+export type NotificationProvider =
+  | "wecom"
+  | "dingtalk"
+  | "generic"
+  | "email";
 export type NotificationEventType =
   | "report_reminder"
   | "red_escalation"
@@ -46,6 +50,9 @@ export function validateWebhookUrl(
   provider: NotificationProvider,
   value: unknown,
 ) {
+  if (provider === "email") {
+    throw new WebhookValidationError("电子邮件渠道不使用Webhook地址。");
+  }
   const raw = String(value ?? "").trim();
   let url: URL;
   try {
@@ -105,6 +112,9 @@ export function buildWebhookPayload(
   delivery: WebhookDelivery,
   occurredAt = new Date().toISOString(),
 ) {
+  if (provider === "email") {
+    throw new WebhookValidationError("电子邮件渠道不使用Webhook载荷。");
+  }
   const symbol =
     delivery.severity === "critical"
       ? "🔴"
@@ -138,6 +148,7 @@ export function providerResponseSucceeded(
   responseBody: string,
 ) {
   if (!response.ok) return false;
+  if (provider === "email") return false;
   if (provider === "generic") return true;
   try {
     const parsed = JSON.parse(responseBody) as { errcode?: number | string };

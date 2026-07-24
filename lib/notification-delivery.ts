@@ -17,6 +17,8 @@ import {
   sendWebhook,
   type NotificationEventType,
 } from "@/lib/notification-webhook";
+import { sendEmailNotification } from "@/lib/notification-email";
+import { parseStoredEmailRecipients } from "@/lib/notification-email-content";
 
 export type ExternalNotificationEvent = {
   projectId: string;
@@ -186,11 +188,19 @@ export async function processExternalDelivery(deliveryId: number) {
   }
 
   try {
-    const result = await sendWebhook({
-      provider: channel.provider,
-      webhookUrl: channel.webhookUrl,
-      delivery: claimed,
-    });
+    const result =
+      channel.provider === "email"
+        ? await sendEmailNotification({
+            recipients: parseStoredEmailRecipients(
+              channel.emailRecipientsJson,
+            ),
+            delivery: claimed,
+          })
+        : await sendWebhook({
+            provider: channel.provider,
+            webhookUrl: channel.webhookUrl,
+            delivery: claimed,
+          });
     if (result.ok) {
       const finishedAt = new Date().toISOString();
       const [sent] = await db
@@ -227,7 +237,9 @@ export async function processExternalDelivery(deliveryId: number) {
           ? null
           : new Date(Date.now() + retryDelay).toISOString(),
         errorMessage:
-          error instanceof Error && error.message.startsWith("渠道返回失败状态")
+          error instanceof Error &&
+          (error.message.startsWith("渠道返回失败状态") ||
+            error.message.startsWith("电子邮件"))
             ? error.message
             : "网络请求失败或超时，系统将按退避策略重试。",
         updatedAt: new Date().toISOString(),
@@ -290,7 +302,7 @@ export async function queueChannelTest(
       dedupKey: `${channelId}:test:${referenceKey}`,
       title: "进度监控平台渠道测试",
       message:
-        "这是一条由系统管理员发起的测试消息。收到此消息表示Webhook配置和网络投递均正常。",
+        "这是一条由系统管理员发起的测试消息。收到此消息表示渠道配置和网络投递均正常。",
       severity: "info",
       createdBy: actorEmail,
     })

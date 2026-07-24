@@ -2,13 +2,16 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-type Provider = "wecom" | "dingtalk" | "generic";
+type Provider = "wecom" | "dingtalk" | "generic" | "email";
 type EventType = "report_reminder" | "red_escalation";
 type Channel = {
   id: number;
   name: string;
   provider: Provider;
   webhookUrlMasked: string;
+  endpointMasked: string;
+  emailRecipientsMasked: string;
+  recipientCount: number;
   eventTypes: EventType[];
   active: boolean;
   createdBy: string;
@@ -37,6 +40,7 @@ type Draft = {
   name: string;
   provider: Provider;
   webhookUrl: string;
+  emailRecipients: string;
   eventTypes: EventType[];
   active: boolean;
 };
@@ -45,6 +49,7 @@ const providerNames: Record<Provider, string> = {
   wecom: "企业微信机器人",
   dingtalk: "钉钉机器人",
   generic: "通用 Webhook",
+  email: "电子邮件",
 };
 const eventNames: Record<EventType | "test", string> = {
   report_reminder: "周报催报",
@@ -61,6 +66,7 @@ const emptyDraft: Draft = {
   name: "",
   provider: "wecom",
   webhookUrl: "",
+  emailRecipients: "",
   eventTypes: ["report_reminder", "red_escalation"],
   active: true,
 };
@@ -122,6 +128,7 @@ export default function NotificationChannelPanel({
       name: channel.name,
       provider: channel.provider,
       webhookUrl: "",
+      emailRecipients: "",
       eventTypes: channel.eventTypes,
       active: channel.active,
     });
@@ -158,6 +165,10 @@ export default function NotificationChannelPanel({
             name: draft.name,
             provider: draft.provider,
             webhookUrl: draft.webhookUrl || undefined,
+            emailRecipients:
+              draft.provider === "email" && draft.emailRecipients.trim()
+                ? draft.emailRecipients.split(/[\s,;]+/).filter(Boolean)
+                : undefined,
             eventTypes: draft.eventTypes,
             active: draft.active,
           }),
@@ -279,7 +290,7 @@ export default function NotificationChannelPanel({
           <span className="analytics-kicker">OUTBOUND NOTIFICATION GOVERNANCE</span>
           <h2>外部消息渠道</h2>
           <p>
-            站内通知始终保留为可靠兜底；Webhook按项目与周期去重，并记录每次投递和重试结果。
+            站内通知始终保留为可靠兜底；Webhook与电子邮件按项目、事件和周期去重，并记录每次投递和重试结果。
           </p>
         </div>
         {canEdit && (
@@ -306,7 +317,7 @@ export default function NotificationChannelPanel({
         <div>
           <strong>凭据保护</strong>
           <p>
-            页面和接口只返回脱敏地址，审计日志不记录Webhook密钥；企业微信和钉钉仅接受官方HTTPS域名。
+            页面和接口只返回脱敏地址，审计日志不记录Webhook密钥或完整收件人；邮件通过Cloudflare Email Routing投递。
           </p>
         </div>
       </div>
@@ -333,7 +344,9 @@ export default function NotificationChannelPanel({
                       ? "企"
                       : channel.provider === "dingtalk"
                         ? "钉"
-                        : "↗"}
+                        : channel.provider === "email"
+                          ? "邮"
+                          : "↗"}
                   </div>
                   <div className="channel-main">
                     <div>
@@ -342,7 +355,7 @@ export default function NotificationChannelPanel({
                         {channel.active ? "● 启用" : "— 停用"}
                       </span>
                     </div>
-                    <p>{providerNames[channel.provider]} · {channel.webhookUrlMasked}</p>
+                    <p>{providerNames[channel.provider]} · {channel.endpointMasked}</p>
                     <div>
                       {channel.eventTypes.map((eventType) => (
                         <span key={eventType}>{eventNames[eventType]}</span>
@@ -460,9 +473,9 @@ export default function NotificationChannelPanel({
             >
               ×
             </button>
-            <span className="modal-kicker">WEBHOOK CHANNEL</span>
+            <span className="modal-kicker">NOTIFICATION CHANNEL</span>
             <h2>{draft.id ? "编辑外部通知渠道" : "新增外部通知渠道"}</h2>
-            <p>渠道密钥只用于服务端投递，保存后不会再次向页面返回完整地址。</p>
+            <p>{draft.provider === "email" ? "邮件收件人仅用于服务端投递，保存后页面只显示脱敏摘要。" : "渠道密钥只用于服务端投递，保存后不会再次向页面返回完整地址。"}</p>
             <form onSubmit={saveChannel}>
               <div className="modal-form-grid">
                 <label>
@@ -490,6 +503,8 @@ export default function NotificationChannelPanel({
                           ? {
                               ...current,
                               provider: event.target.value as Provider,
+                              webhookUrl: "",
+                              emailRecipients: "",
                             }
                           : current,
                       )
@@ -498,30 +513,56 @@ export default function NotificationChannelPanel({
                     <option value="wecom">企业微信机器人</option>
                     <option value="dingtalk">钉钉机器人</option>
                     <option value="generic">通用 Webhook</option>
+                    <option value="email">电子邮件</option>
                   </select>
                 </label>
               </div>
-              <label className="channel-url-field">
-                Webhook HTTPS地址
-                <input
-                  value={draft.webhookUrl}
-                  type="url"
-                  onChange={(event) =>
-                    setDraft((current) =>
-                      current
-                        ? { ...current, webhookUrl: event.target.value }
-                        : current,
-                    )
-                  }
-                  placeholder={
-                    draft.id
-                      ? "留空表示保留当前密钥"
-                      : "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..."
-                  }
-                  required={!draft.id}
-                  autoComplete="off"
-                />
-              </label>
+              {draft.provider === "email" ? (
+                <label className="channel-url-field">
+                  收件人邮箱
+                  <textarea
+                    value={draft.emailRecipients}
+                    onChange={(event) =>
+                      setDraft((current) =>
+                        current
+                          ? { ...current, emailRecipients: event.target.value }
+                          : current,
+                      )
+                    }
+                    placeholder={
+                      draft.id
+                        ? "留空表示保留当前收件人"
+                        : "name@example.com，多个地址可用逗号或换行分隔"
+                    }
+                    required={!draft.id}
+                    rows={3}
+                    autoComplete="off"
+                  />
+                  <small>最多20个收件人；Cloudflare Email Routing要求目标邮箱已验证。</small>
+                </label>
+              ) : (
+                <label className="channel-url-field">
+                  Webhook HTTPS地址
+                  <input
+                    value={draft.webhookUrl}
+                    type="url"
+                    onChange={(event) =>
+                      setDraft((current) =>
+                        current
+                          ? { ...current, webhookUrl: event.target.value }
+                          : current,
+                      )
+                    }
+                    placeholder={
+                      draft.id
+                        ? "留空表示保留当前密钥"
+                        : "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..."
+                    }
+                    required={!draft.id}
+                    autoComplete="off"
+                  />
+                </label>
+              )}
               <fieldset className="channel-event-field">
                 <legend>订阅事件</legend>
                 <label>
@@ -557,7 +598,7 @@ export default function NotificationChannelPanel({
               </label>
               <div className="channel-payload-note">
                 <strong>投递与重试</strong>
-                <span>单次请求超时8秒；失败后按5分钟、30分钟、2小时退避重试，人工重试同样保留记录。</span>
+                <span>{draft.provider === "email" ? "使用 notifications@dougge.top 发件；失败后按5分钟、30分钟、2小时退避重试。" : "单次请求超时8秒；失败后按5分钟、30分钟、2小时退避重试，人工重试同样保留记录。"}</span>
               </div>
               <div className="modal-actions">
                 <button

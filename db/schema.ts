@@ -165,9 +165,12 @@ export const notificationChannels = sqliteTable(
     id: integer("id").primaryKey({ autoIncrement: true }),
     name: text("name").notNull(),
     provider: text("provider", {
-      enum: ["wecom", "dingtalk", "generic"],
+      enum: ["wecom", "dingtalk", "generic", "email"],
     }).notNull(),
     webhookUrl: text("webhook_url").notNull(),
+    emailRecipientsJson: text("email_recipients_json")
+      .notNull()
+      .default("[]"),
     eventTypesJson: text("event_types_json")
       .notNull()
       .default('["report_reminder","red_escalation"]'),

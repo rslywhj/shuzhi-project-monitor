@@ -9,6 +9,12 @@ import {
   type NotificationProvider,
 } from "@/lib/notification-webhook";
 import {
+  EmailRecipientValidationError,
+  maskEmailRecipients,
+  parseStoredEmailRecipients,
+  validateEmailRecipients,
+} from "@/lib/notification-email-content";
+import {
   canAdministerUsers,
   forbidden,
   getRequestIdentity,
@@ -21,6 +27,7 @@ const providers = new Set<NotificationProvider>([
   "wecom",
   "dingtalk",
   "generic",
+  "email",
 ]);
 const supportedEvents = new Set(["report_reminder", "red_escalation"]);
 const MAX_ACTIVE_CHANNELS = 10;
@@ -33,6 +40,17 @@ function safeWebhookUrl(
     return validateWebhookUrl(provider, value);
   } catch (error) {
     if (error instanceof WebhookValidationError) {
+      throw new ApiRequestError(error.message);
+    }
+    throw error;
+  }
+}
+
+function safeEmailRecipients(value: unknown) {
+  try {
+    return validateEmailRecipients(value);
+  } catch (error) {
+    if (error instanceof EmailRecipientValidationError) {
       throw new ApiRequestError(error.message);
     }
     throw error;
@@ -69,6 +87,7 @@ export async function PATCH(
       name?: unknown;
       provider?: unknown;
       webhookUrl?: unknown;
+      emailRecipients?: unknown;
       eventTypes?: unknown;
       active?: unknown;
     };
@@ -106,14 +125,44 @@ export async function PATCH(
     const hasNewWebhook =
       typeof payload.webhookUrl === "string" &&
       payload.webhookUrl.trim().length > 0;
-    if (provider !== existing.provider && !hasNewWebhook) {
+    const hasNewEmailRecipients =
+      (Array.isArray(payload.emailRecipients) &&
+        payload.emailRecipients.length > 0) ||
+      (typeof payload.emailRecipients === "string" &&
+        payload.emailRecipients.trim().length > 0);
+    if (
+      provider !== existing.provider &&
+      provider !== "email" &&
+      !hasNewWebhook
+    ) {
       throw new ApiRequestError(
         "变更渠道类型时必须同时填写该类型的新Webhook地址。",
       );
     }
-    const webhookUrl = hasNewWebhook
-      ? safeWebhookUrl(provider, payload.webhookUrl)
-      : existing.webhookUrl;
+    if (
+      provider !== existing.provider &&
+      provider === "email" &&
+      !hasNewEmailRecipients
+    ) {
+      throw new ApiRequestError(
+        "变更为电子邮件渠道时必须同时填写收件人邮箱。",
+      );
+    }
+    const recipients =
+      provider === "email"
+        ? hasNewEmailRecipients
+          ? safeEmailRecipients(payload.emailRecipients)
+          : parseStoredEmailRecipients(existing.emailRecipientsJson)
+        : [];
+    if (provider === "email" && !recipients.length) {
+      throw new ApiRequestError("请至少填写一个收件人邮箱。");
+    }
+    const webhookUrl =
+      provider === "email"
+        ? ""
+        : hasNewWebhook
+          ? safeWebhookUrl(provider, payload.webhookUrl)
+          : existing.webhookUrl;
     const active =
       typeof payload.active === "boolean" ? payload.active : existing.active;
     if (active && !existing.active) {
@@ -134,6 +183,7 @@ export async function PATCH(
         name,
         provider,
         webhookUrl,
+        emailRecipientsJson: JSON.stringify(recipients),
         eventTypesJson: JSON.stringify(events),
         active,
         updatedAt: new Date().toISOString(),
@@ -152,6 +202,8 @@ export async function PATCH(
         active: channel.active,
         webhookChanged:
           hasNewWebhook,
+        emailRecipientsChanged: hasNewEmailRecipients,
+        recipientCount: recipients.length,
       }),
     });
     return Response.json({
@@ -159,7 +211,19 @@ export async function PATCH(
         id: channel.id,
         name: channel.name,
         provider: channel.provider,
-        webhookUrlMasked: maskWebhookUrl(channel.webhookUrl),
+        endpointMasked:
+          channel.provider === "email"
+            ? maskEmailRecipients(recipients)
+            : maskWebhookUrl(channel.webhookUrl),
+        webhookUrlMasked:
+          channel.provider === "email"
+            ? ""
+            : maskWebhookUrl(channel.webhookUrl),
+        emailRecipientsMasked:
+          channel.provider === "email"
+            ? maskEmailRecipients(recipients)
+            : "",
+        recipientCount: recipients.length,
         eventTypes: events,
         active: channel.active,
         createdBy: channel.createdBy,

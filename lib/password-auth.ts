@@ -6,8 +6,9 @@ const SESSION_COOKIE = "shuzhi_session";
 const SESSION_LIFETIME_SECONDS = 8 * 60 * 60;
 
 type SessionPayload = {
-  v: 1;
+  v: 2;
   email: string;
+  credentialVersion: string;
   exp: number;
 };
 
@@ -116,10 +117,14 @@ async function signingKey() {
   );
 }
 
-export async function createSessionToken(email: string) {
+export async function createSessionToken(
+  email: string,
+  credentialVersion: string,
+) {
   const payload: SessionPayload = {
-    v: 1,
+    v: 2,
     email: email.trim().toLowerCase(),
+    credentialVersion,
     exp: Math.floor(Date.now() / 1000) + SESSION_LIFETIME_SECONDS,
   };
   const encodedPayload = bytesToBase64Url(
@@ -148,8 +153,9 @@ export async function verifySessionToken(token: string) {
       new TextDecoder().decode(base64UrlToBytes(encodedPayload)),
     ) as SessionPayload;
     if (
-      payload.v !== 1 ||
+      payload.v !== 2 ||
       typeof payload.email !== "string" ||
+      typeof payload.credentialVersion !== "string" ||
       payload.exp <= Math.floor(Date.now() / 1000)
     ) {
       return null;
@@ -169,13 +175,13 @@ function cookieValue(request: Request, name: string) {
   return "";
 }
 
-export async function sessionEmail(request: Request) {
+export async function sessionIdentity(request: Request) {
   const token = cookieValue(request, SESSION_COOKIE);
-  if (!token) return "";
+  if (!token) return null;
   try {
-    return (await verifySessionToken(token))?.email ?? "";
+    return await verifySessionToken(token);
   } catch {
-    return "";
+    return null;
   }
 }
 

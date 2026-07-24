@@ -63,7 +63,10 @@ export async function POST(request: Request) {
     );
   }
 
-  const token = await createSessionToken(user.email);
+  const token = await createSessionToken(
+    user.email,
+    user.passwordChangedAt ?? "",
+  );
   return Response.json(
     {
       identity: {

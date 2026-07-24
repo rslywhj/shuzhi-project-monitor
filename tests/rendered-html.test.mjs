@@ -484,12 +484,15 @@ test("supports all required management heatmap filter dimensions", async () => {
   assert.match(page, /COCKPIT_PAGE_SIZE = 7/);
 });
 
-test("shows a real authentication boundary instead of unauthenticated demo data", async () => {
-  const [page, passwordAuth, loginRoute, logoutRoute, serverAuth, readme] = await Promise.all([
+test("shows a real authentication boundary with self-service and administrator password recovery", async () => {
+  const [page, css, passwordAuth, loginRoute, logoutRoute, changePasswordRoute, userRoute, serverAuth, readme] = await Promise.all([
     readFile(new URL("app/page.tsx", templateRoot), "utf8"),
+    readFile(new URL("app/globals.css", templateRoot), "utf8"),
     readFile(new URL("lib/password-auth.ts", templateRoot), "utf8"),
     readFile(new URL("app/api/auth/login/route.ts", templateRoot), "utf8"),
     readFile(new URL("app/api/auth/logout/route.ts", templateRoot), "utf8"),
+    readFile(new URL("app/api/auth/change-password/route.ts", templateRoot), "utf8"),
+    readFile(new URL("app/api/users/[email]/route.ts", templateRoot), "utf8"),
     readFile(new URL("lib/server-auth.ts", templateRoot), "utf8"),
     readFile(new URL("README.md", templateRoot), "utf8"),
   ]);
@@ -505,12 +508,26 @@ test("shows a real authentication boundary instead of unauthenticated demo data"
   assert.match(passwordAuth, /HttpOnly/);
   assert.match(passwordAuth, /Secure/);
   assert.match(passwordAuth, /SameSite=Lax/);
+  assert.match(passwordAuth, /credentialVersion/);
+  assert.match(passwordAuth, /v: 2/);
   assert.match(loginRoute, /createSessionToken/);
+  assert.match(loginRoute, /passwordChangedAt/);
   assert.match(loginRoute, /sessionCookie/);
   assert.match(logoutRoute, /clearSessionCookie/);
-  assert.match(serverAuth, /sessionEmail/);
+  assert.match(changePasswordRoute, /user\.password_change/);
+  assert.match(changePasswordRoute, /reauthenticationRequired/);
+  assert.match(changePasswordRoute, /clearSessionCookie/);
+  assert.match(userRoute, /user\.password_reset/);
+  assert.match(serverAuth, /sessionIdentity/);
+  assert.match(serverAuth, /passwordChangedAt/);
   assert.doesNotMatch(serverAuth, /oai-authenticated-user-email/);
   assert.doesNotMatch(serverAuth, /cf-access-authenticated-user-email/);
+  assert.match(page, /修改登录密码/);
+  assert.match(page, /resetUserPassword/);
+  assert.match(page, /重置用户密码/);
+  assert.match(page, /原有登录会话已失效/);
+  assert.match(css, /password-modal/);
+  assert.match(css, /reset-password-button/);
   assert.match(readme, /独立账号密码登录/);
 });
 

@@ -3,6 +3,7 @@ import { getDb } from "@/db";
 import { auditLogs, users } from "@/db/schema";
 import { apiError } from "@/lib/api-utils";
 import {
+  clearSessionCookie,
   hashPassword,
   validatePassword,
   verifyPassword,
@@ -67,7 +68,15 @@ export async function POST(request: Request) {
         detailJson: "{}",
       }),
     ]);
-    return Response.json({ changed: true });
+    return Response.json(
+      { changed: true, reauthenticationRequired: true },
+      {
+        headers: {
+          "cache-control": "no-store",
+          "set-cookie": clearSessionCookie(),
+        },
+      },
+    );
   } catch (error) {
     return apiError(error);
   }

@@ -902,6 +902,10 @@ function Sidebar({ view, onNavigate, identity }: { view: View; onNavigate: Navig
 function WorkspaceHeader({ title, subtitle, onNavigate, identity }: { title: string; subtitle: string; onNavigate: Navigate; identity: Identity | null }) {
   const [menu, setMenu] = useState(false);
   const [noticeOpen, setNoticeOpen] = useState(false);
+  const [passwordOpen, setPasswordOpen] = useState(false);
+  const [passwordSaving, setPasswordSaving] = useState(false);
+  const [passwordError, setPasswordError] = useState("");
+  const [passwordMessage, setPasswordMessage] = useState("");
   const [notificationRows, setNotificationRows] = useState<NotificationData[]>([]);
   const [notificationError, setNotificationError] = useState("");
   const roleNames: Record<Role, string> = {
@@ -976,12 +980,150 @@ function WorkspaceHeader({ title, subtitle, onNavigate, identity }: { title: str
     await fetch("/api/auth/logout", { method: "POST" }).catch(() => null);
     window.location.assign("/");
   }
-  return <header className="workspace-header">
-    <div><h1>{title}</h1><p>{subtitle}</p></div>
-    <div className="header-actions"><button className="icon-button" aria-label="搜索项目" onClick={() => onNavigate("portfolio")}>⌕</button><button className="icon-button notice" aria-label={`通知${unreadCount ? `，${unreadCount}条未读` : ""}`} aria-expanded={noticeOpen} onClick={() => { setNoticeOpen((value) => !value); setMenu(false); if (!noticeOpen) void loadNotifications(); }}>♢{unreadCount > 0 && <b>{unreadCount > 9 ? "9+" : unreadCount}</b>}</button><button className="user-button" onClick={() => { setMenu(!menu); setNoticeOpen(false); }}><span className="avatar">{displayName[0]}</span><span><strong>{displayName}</strong><small>{roleName}</small></span><em>⌄</em></button></div>
-    {noticeOpen && <section className="notification-center"><div className="notification-head"><div><strong>通知中心</strong><span>{unreadCount} 条未读</span></div>{unreadCount > 0 && <button onClick={markAllNotificationsRead}>全部已读</button>}</div>{notificationError ? <div className="notification-error">! {notificationError}</div> : notificationRows.filter((row) => row.status !== "dismissed").length ? <div className="notification-list">{notificationRows.filter((row) => row.status !== "dismissed").slice(0, 20).map((notification) => <button className={`${notification.severity} ${notification.status}`} key={notification.id} onClick={() => openNotification(notification)}><span className="notification-symbol">{notification.severity === "critical" ? "■" : notification.severity === "warning" ? "▲" : "●"}</span><div><strong>{notification.title}</strong><p>{notification.message}</p><small>{notification.createdAt.replace("T"," ").slice(0,16)} · {notification.createdBy}</small></div>{notification.status === "unread" && <i />}</button>)}</div> : <div className="notification-empty">暂无通知</div>}<div className="notification-foot">{canGovern ? <button onClick={() => onNavigate("pmo")}>进入 PMO 待办</button> : <span>通知由 PMO 与系统工作流生成</span>}</div></section>}
-    {menu && <div className="user-menu">{canGovern && <button onClick={() => onNavigate("admin")}>用户与权限</button>}<button onClick={() => onNavigate("portfolio")}>项目工作台</button><button onClick={() => onNavigate("cockpit")}>打开管理大屏</button><button onClick={logout}>退出登录</button></div>}
-  </header>;
+  async function changePassword(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPasswordSaving(true);
+    setPasswordError("");
+    setPasswordMessage("");
+    const form = new FormData(event.currentTarget);
+    const currentPassword = String(form.get("currentPassword") ?? "");
+    const newPassword = String(form.get("newPassword") ?? "");
+    const confirmPassword = String(form.get("confirmPassword") ?? "");
+    if (newPassword !== confirmPassword) {
+      setPasswordError("两次输入的新密码不一致。");
+      setPasswordSaving(false);
+      return;
+    }
+    try {
+      const response = await fetch("/api/auth/change-password", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+      const result = (await response.json()) as {
+        changed?: boolean;
+        error?: string;
+      };
+      if (!response.ok || !result.changed) {
+        throw new Error(result.error || "密码修改失败");
+      }
+      setPasswordMessage("密码已修改，正在退出并返回登录页…");
+      window.setTimeout(() => window.location.assign("/"), 900);
+    } catch (changeError) {
+      setPasswordError(
+        changeError instanceof Error ? changeError.message : "密码修改失败",
+      );
+      setPasswordSaving(false);
+    }
+  }
+  return (
+    <header className="workspace-header">
+      <div><h1>{title}</h1><p>{subtitle}</p></div>
+      <div className="header-actions"><button className="icon-button" aria-label="搜索项目" onClick={() => onNavigate("portfolio")}>⌕</button><button className="icon-button notice" aria-label={`通知${unreadCount ? `，${unreadCount}条未读` : ""}`} aria-expanded={noticeOpen} onClick={() => { setNoticeOpen((value) => !value); setMenu(false); if (!noticeOpen) void loadNotifications(); }}>♢{unreadCount > 0 && <b>{unreadCount > 9 ? "9+" : unreadCount}</b>}</button><button className="user-button" onClick={() => { setMenu(!menu); setNoticeOpen(false); }}><span className="avatar">{displayName[0]}</span><span><strong>{displayName}</strong><small>{roleName}</small></span><em>⌄</em></button></div>
+      {noticeOpen && <section className="notification-center"><div className="notification-head"><div><strong>通知中心</strong><span>{unreadCount} 条未读</span></div>{unreadCount > 0 && <button onClick={markAllNotificationsRead}>全部已读</button>}</div>{notificationError ? <div className="notification-error">! {notificationError}</div> : notificationRows.filter((row) => row.status !== "dismissed").length ? <div className="notification-list">{notificationRows.filter((row) => row.status !== "dismissed").slice(0, 20).map((notification) => <button className={`${notification.severity} ${notification.status}`} key={notification.id} onClick={() => openNotification(notification)}><span className="notification-symbol">{notification.severity === "critical" ? "■" : notification.severity === "warning" ? "▲" : "●"}</span><div><strong>{notification.title}</strong><p>{notification.message}</p><small>{notification.createdAt.replace("T"," ").slice(0,16)} · {notification.createdBy}</small></div>{notification.status === "unread" && <i />}</button>)}</div> : <div className="notification-empty">暂无通知</div>}<div className="notification-foot">{canGovern ? <button onClick={() => onNavigate("pmo")}>进入 PMO 待办</button> : <span>通知由 PMO 与系统工作流生成</span>}</div></section>}
+      {menu && (
+        <div className="user-menu">
+          {canGovern && <button onClick={() => onNavigate("admin")}>用户与权限</button>}
+          <button
+            onClick={() => {
+              setPasswordError("");
+              setPasswordMessage("");
+              setPasswordOpen(true);
+              setMenu(false);
+            }}
+          >
+            修改密码
+          </button>
+          <button onClick={() => onNavigate("portfolio")}>项目工作台</button>
+          <button onClick={() => onNavigate("cockpit")}>打开管理大屏</button>
+          <button onClick={logout}>退出登录</button>
+        </div>
+      )}
+      {passwordOpen && (
+        <div
+          className="modal-backdrop"
+          onClick={
+            passwordSaving || passwordMessage
+              ? undefined
+              : () => setPasswordOpen(false)
+          }
+        >
+          <section
+            className="create-modal password-modal"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              className="modal-close"
+              type="button"
+              disabled={passwordSaving || Boolean(passwordMessage)}
+              onClick={() => setPasswordOpen(false)}
+              aria-label="关闭修改密码"
+            >
+              ×
+            </button>
+            <span className="modal-kicker">ACCOUNT SECURITY</span>
+            <h2>修改登录密码</h2>
+            <p>修改后当前会话将退出，请使用新密码重新登录。</p>
+            <form onSubmit={changePassword}>
+              <label>
+                当前密码
+                <input
+                  name="currentPassword"
+                  type="password"
+                  autoComplete="current-password"
+                  required
+                />
+              </label>
+              <label>
+                新密码
+                <input
+                  name="newPassword"
+                  type="password"
+                  minLength={12}
+                  maxLength={128}
+                  autoComplete="new-password"
+                  placeholder="至少12位，包含字母和数字"
+                  required
+                />
+              </label>
+              <label>
+                确认新密码
+                <input
+                  name="confirmPassword"
+                  type="password"
+                  minLength={12}
+                  maxLength={128}
+                  autoComplete="new-password"
+                  required
+                />
+              </label>
+              <div className="password-security-note">
+                密码仅保存 PBKDF2 加盐散列；修改后旧会话将失效。
+              </div>
+              {passwordError && <div className="form-error" role="alert">! {passwordError}</div>}
+              {passwordMessage && <div className="success-message" role="status">{passwordMessage}</div>}
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="outline-button"
+                  disabled={passwordSaving || Boolean(passwordMessage)}
+                  onClick={() => setPasswordOpen(false)}
+                >
+                  取消
+                </button>
+                <button
+                  className="primary-button"
+                  disabled={passwordSaving || Boolean(passwordMessage)}
+                >
+                  {passwordSaving ? "正在修改…" : "确认修改"}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
+    </header>
+  );
 }
 
 type ProjectImportRow = {
@@ -3391,7 +3533,7 @@ function RuleConfigPanel() {
 }
 
 function AdminPage({ onNavigate, identity }: { onNavigate: Navigate; identity: Identity | null }) {
-  type UserRow = { email: string; displayName: string; role: "executive" | "pmo" | "manager" | "admin"; active: boolean; createdAt: string; assignedProjectCount: number };
+  type UserRow = { email: string; displayName: string; role: "executive" | "pmo" | "manager" | "admin"; active: boolean; createdAt: string; assignedProjectCount: number; passwordConfigured: boolean };
   type AuditRow = { id: number; actorEmail: string; action: string; entityType: string; entityId: string; createdAt: string };
   const [usersData, setUsersData] = useState<UserRow[]>([]);
   const [auditData, setAuditData] = useState<AuditRow[]>([]);
@@ -3401,6 +3543,10 @@ function AdminPage({ onNavigate, identity }: { onNavigate: Navigate; identity: I
   const [showCreateUser, setShowCreateUser] = useState(false);
   const [creatingUser, setCreatingUser] = useState(false);
   const [createUserError, setCreateUserError] = useState("");
+  const [resetUser, setResetUser] = useState<UserRow | null>(null);
+  const [resettingPassword, setResettingPassword] = useState(false);
+  const [resetPasswordError, setResetPasswordError] = useState("");
+  const [resetPasswordMessage, setResetPasswordMessage] = useState("");
   const actionNames: Record<string, string> = {
     "weekly_report.submit": "提交周报",
     "baseline_change.approve": "批准基线",
@@ -3410,6 +3556,8 @@ function AdminPage({ onNavigate, identity }: { onNavigate: Navigate; identity: I
     "project.owner_transfer": "移交项目负责人",
     "user.create": "预置用户",
     "user.update": "更新用户",
+    "user.password_change": "用户修改密码",
+    "user.password_reset": "管理员重置密码",
     "rule_config.publish": "发布规则",
     "risk.create": "登记风险",
     "risk.update": "更新风险",
@@ -3524,6 +3672,46 @@ function AdminPage({ onNavigate, identity }: { onNavigate: Navigate; identity: I
     }
   }
 
+  async function resetUserPassword(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!resetUser) return;
+    setResettingPassword(true);
+    setResetPasswordError("");
+    setResetPasswordMessage("");
+    const form = new FormData(event.currentTarget);
+    const password = String(form.get("password") ?? "");
+    const confirmPassword = String(form.get("confirmPassword") ?? "");
+    if (password !== confirmPassword) {
+      setResetPasswordError("两次输入的新密码不一致。");
+      setResettingPassword(false);
+      return;
+    }
+    try {
+      const response = await fetch(
+        `/api/users/${encodeURIComponent(resetUser.email)}`,
+        {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ password }),
+        },
+      );
+      const result = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        throw new Error(result.error || "密码重置失败");
+      }
+      setResetPasswordMessage(
+        `已重置 ${resetUser.displayName} 的密码，原有登录会话已失效。`,
+      );
+      await loadAdminData();
+    } catch (resetError) {
+      setResetPasswordError(
+        resetError instanceof Error ? resetError.message : "密码重置失败",
+      );
+    } finally {
+      setResettingPassword(false);
+    }
+  }
+
   const canEditUsers = identity?.role === "admin";
   return (
     <div className="workspace-page">
@@ -3568,7 +3756,7 @@ function AdminPage({ onNavigate, identity }: { onNavigate: Navigate; identity: I
             ) : (
               <div className="user-table">
                 <div className="table-head">
-                  <span>用户</span><span>角色</span><span>账号状态</span><span>加入时间</span>
+                   <span>用户</span><span>角色</span><span>账号状态</span><span>加入时间</span><span>操作</span>
                 </div>
                 {usersData.map((user) => (
                   <div
@@ -3623,8 +3811,33 @@ function AdminPage({ onNavigate, identity }: { onNavigate: Navigate; identity: I
                           ? "● 已启用"
                           : "— 已停用"}
                     </button>
-                    <span>{user.createdAt.slice(0, 10)}</span>
-                  </div>
+                     <span>{user.createdAt.slice(0, 10)}</span>
+                     <button
+                       type="button"
+                       className="reset-password-button"
+                       disabled={
+                         !canEditUsers ||
+                         updatingUser === user.email ||
+                         user.email === identity?.email
+                       }
+                       title={
+                         user.email === identity?.email
+                           ? "请从右上角用户菜单修改自己的密码"
+                           : `重置 ${user.displayName} 的密码`
+                       }
+                       onClick={() => {
+                         setResetPasswordError("");
+                         setResetPasswordMessage("");
+                         setResetUser(user);
+                       }}
+                     >
+                       {user.email === identity?.email
+                         ? "个人修改"
+                         : user.passwordConfigured
+                           ? "重置密码"
+                           : "设置密码"}
+                     </button>
+                   </div>
                 ))}
               </div>
             )}
@@ -3750,6 +3963,83 @@ function AdminPage({ onNavigate, identity }: { onNavigate: Navigate; identity: I
                 <button className="primary-button" disabled={creatingUser}>
                   {creatingUser ? "正在预置…" : "确认预置"}
                 </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
+      {resetUser && canEditUsers && (
+        <div
+          className="modal-backdrop"
+          onClick={
+            resettingPassword
+              ? undefined
+              : () => setResetUser(null)
+          }
+        >
+          <section
+            className="create-modal password-modal reset-password-modal"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              className="modal-close"
+              type="button"
+              disabled={resettingPassword}
+              onClick={() => setResetUser(null)}
+              aria-label="关闭密码重置"
+            >
+              ×
+            </button>
+            <span className="modal-kicker">ADMIN PASSWORD RESET</span>
+            <h2>重置用户密码</h2>
+            <p>
+              正在为 <strong>{resetUser.displayName}</strong>（{resetUser.email}）设置新密码。
+            </p>
+            <form onSubmit={resetUserPassword}>
+              <label>
+                新密码
+                <input
+                  name="password"
+                  type="password"
+                  minLength={12}
+                  maxLength={128}
+                  autoComplete="new-password"
+                  placeholder="至少12位，包含字母和数字"
+                  disabled={Boolean(resetPasswordMessage)}
+                  required
+                />
+              </label>
+              <label>
+                确认新密码
+                <input
+                  name="confirmPassword"
+                  type="password"
+                  minLength={12}
+                  maxLength={128}
+                  autoComplete="new-password"
+                  disabled={Boolean(resetPasswordMessage)}
+                  required
+                />
+              </label>
+              <div className="password-security-note warning">
+                重置成功后，该用户已有登录会话将立即失效；请通过安全渠道告知新密码。
+              </div>
+              {resetPasswordError && <div className="form-error" role="alert">! {resetPasswordError}</div>}
+              {resetPasswordMessage && <div className="success-message" role="status">{resetPasswordMessage}</div>}
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="outline-button"
+                  disabled={resettingPassword}
+                  onClick={() => setResetUser(null)}
+                >
+                  {resetPasswordMessage ? "完成" : "取消"}
+                </button>
+                {!resetPasswordMessage && (
+                  <button className="primary-button" disabled={resettingPassword}>
+                    {resettingPassword ? "正在重置…" : "确认重置"}
+                  </button>
+                )}
               </div>
             </form>
           </section>

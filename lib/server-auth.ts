@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { users } from "@/db/schema";
-import { sessionEmail } from "@/lib/password-auth";
+import { sessionIdentity } from "@/lib/password-auth";
 
 export type AppRole = "executive" | "pmo" | "manager" | "admin";
 
@@ -14,7 +14,8 @@ export type RequestIdentity = {
 
 export async function getRequestIdentity(request: Request): Promise<RequestIdentity | null> {
   const url = new URL(request.url);
-  const cookieEmail = await sessionEmail(request);
+  const session = await sessionIdentity(request);
+  const cookieEmail = session?.email ?? "";
   const isLocal = url.hostname === "localhost" || url.hostname === "127.0.0.1";
   const isLocalDemo = isLocal && !cookieEmail;
   const email = cookieEmail || (isLocalDemo ? "demo@local" : "");
@@ -30,6 +31,12 @@ export async function getRequestIdentity(request: Request): Promise<RequestIdent
   const [existing] = await db.select().from(users).where(eq(users.email, email)).limit(1);
   if (existing && !existing.active) return null;
   if (existing) {
+    if (
+      !isLocalDemo &&
+      session?.credentialVersion !== (existing.passwordChangedAt ?? "")
+    ) {
+      return null;
+    }
     const role =
       configuredAdmins.includes(email) && existing.role !== "admin"
         ? "admin"

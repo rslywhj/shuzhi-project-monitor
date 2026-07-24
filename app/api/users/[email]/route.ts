@@ -71,7 +71,8 @@ export async function PATCH(
     const resultingActive =
       typeof payload.active === "boolean" ? payload.active : existing.active;
     const invalidatesProjectOwnership =
-      !resultingActive || resultingRole !== "manager";
+      payload.active === false ||
+      (Boolean(payload.role) && resultingRole !== "manager");
     if (invalidatesProjectOwnership) {
       const assignedProjects = await db
         .select({ id: projects.id, name: projects.name })
@@ -129,7 +130,7 @@ export async function PATCH(
       }
       await db.insert(auditLogs).values({
         actorEmail: identity.email,
-        action: "user.update",
+        action: password ? "user.password_reset" : "user.update",
         entityType: "user",
         entityId: email,
         detailJson: JSON.stringify({
@@ -143,7 +144,7 @@ export async function PATCH(
         db.update(users).set(updateValues).where(eq(users.email, email)),
         db.insert(auditLogs).values({
           actorEmail: identity.email,
-          action: "user.update",
+          action: password ? "user.password_reset" : "user.update",
           entityType: "user",
           entityId: email,
           detailJson: JSON.stringify({

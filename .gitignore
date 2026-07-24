@@ -31,6 +31,7 @@ yarn-error.log*
 /dev-*.log
 /.dev-server*.log
 /.dev-lifecycle-*.log
+/.dev-scoring-*.log
 
 # env files (can opt-in for committing if needed)
 .env*

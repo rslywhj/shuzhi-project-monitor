@@ -101,6 +101,7 @@ type ProjectData = (typeof projects)[number] & {
   lifecycleReason?: string;
   completedAt?: string | null;
   archivedAt?: string | null;
+  healthExplanation?: HealthExplanation | null;
   milestones?: MilestoneData[];
 };
 type ProjectLifecycleStatus = NonNullable<ProjectData["lifecycleStatus"]>;
@@ -115,6 +116,38 @@ type ProjectClosureState = {
   openActionCount: number;
   pendingBaselineCount: number;
   clear: boolean;
+};
+type HealthExplanation = {
+  ruleVersion: number;
+  calculatedAt: string;
+  asOfDate: string;
+  progressGap: number;
+  progressGapPenalty: number;
+  milestonePenalty: number;
+  milestoneCounts: {
+    normalYellow: number;
+    normalRed: number;
+    criticalYellow: number;
+    criticalRed: number;
+  };
+  openMediumRiskCount: number;
+  openHighRiskCount: number;
+  overdueActionCount: number;
+  latestReportWeek: string | null;
+  evaluationWeekKey: string;
+  consecutiveMissing: boolean;
+  deductions: {
+    schedule: number;
+    risk: number;
+    action: number;
+    reporting: number;
+    total: number;
+  };
+  vetoes: {
+    criticalRed: boolean;
+    highRiskOverdue: boolean;
+    consecutiveMissing: boolean;
+  };
 };
 type DashboardSnapshot = {
   id: number;
@@ -2266,6 +2299,14 @@ function ProjectDetail({
   );
   const currentLifecycle = projectLifecycle(currentProject);
   const lifecycleLocked = currentLifecycle !== "active";
+  const healthExplanation = currentProject.healthExplanation;
+  const activeVetoes = healthExplanation
+    ? [
+        healthExplanation.vetoes.criticalRed ? "关键节点红色" : "",
+        healthExplanation.vetoes.highRiskOverdue ? "高风险措施逾期" : "",
+        healthExplanation.vetoes.consecutiveMissing ? "连续两个周期缺报" : "",
+      ].filter(Boolean)
+    : [];
   const canUpdate =
     !lifecycleLocked &&
     (identity?.role === "admin" ||
@@ -2543,8 +2584,9 @@ function ProjectDetail({
       </section>
       {lifecycleLocked && <div className="lifecycle-readonly-banner"><span>▣</span><div><strong>项目{lifecycleLabel[currentLifecycle]}，当前为只读状态</strong><p>已停止周报、催报、健康度重算和快照统计；如需继续处理未闭环事项，请由 PMO 或管理员先恢复为在建。</p></div>{currentProject.lifecycleReason && <small>最近变更原因：{currentProject.lifecycleReason}</small>}</div>}
       <section className="score-explain">
-        <div className="score-ring"><strong>{currentProject.score}</strong><span>综合健康度</span></div><div className="score-copy"><h3>项目{statusLabel[currentProject.status]}：评分与一票否决规则共同判定</h3><p>基础分 100，当前累计扣分 {100 - currentProject.score} 分。所有扣分均可追溯至节点、风险或数据更新记录。</p><div className="deductions"><span>进度偏差 <b>{variance}pp</b></span><span>节点预警 <b>{currentProject.cells.filter((cell) => cell === "yellow").length}项</b></span><span>严重节点 <b>{currentProject.cells.filter((cell) => cell === "red").length}项</b></span></div></div><span className="count-badge">规则可解释</span>
+        <div className="score-ring"><strong>{currentProject.score}</strong><span>综合健康度</span></div><div className="score-copy"><h3>项目{statusLabel[currentProject.status]}：评分与一票否决规则共同判定</h3><p>基础分 100，当前累计扣分 {healthExplanation?.deductions.total ?? 100 - currentProject.score} 分。{healthExplanation ? `采用规则 V${healthExplanation.ruleVersion}，度量日 ${healthExplanation.asOfDate}。` : "健康度明细将在下一次自动重算后生成。"}</p>{healthExplanation ? <div className="deductions"><span>进度与节点 <b>-{healthExplanation.deductions.schedule}</b></span><span>开放风险 <b>-{healthExplanation.deductions.risk}</b></span><span>逾期措施 <b>-{healthExplanation.deductions.action}</b></span><span>周报时效 <b>-{healthExplanation.deductions.reporting}</b></span></div> : <div className="deductions"><span>进度偏差 <b>{variance}pp</b></span><span>节点预警 <b>{currentProject.cells.filter((cell) => cell === "yellow").length}项</b></span><span>严重节点 <b>{currentProject.cells.filter((cell) => cell === "red").length}项</b></span></div>}{activeVetoes.length > 0 && <div className="health-veto">■ 一票否决：{activeVetoes.join("、")}</div>}</div><span className="count-badge">{healthExplanation ? `规则 V${healthExplanation.ruleVersion}` : "等待明细"}</span>
       </section>
+      {healthExplanation && <section className="health-breakdown"><div><span>进度落后</span><strong>{healthExplanation.progressGap > 0 ? `${healthExplanation.progressGap}pp` : "无"}</strong><small>进度差扣 {healthExplanation.progressGapPenalty} 分</small></div><div><span>节点扣分</span><strong>{healthExplanation.milestonePenalty}</strong><small>普黄 {healthExplanation.milestoneCounts.normalYellow} / 普红 {healthExplanation.milestoneCounts.normalRed} / 关黄 {healthExplanation.milestoneCounts.criticalYellow} / 关红 {healthExplanation.milestoneCounts.criticalRed}</small></div><div><span>开放风险</span><strong>{healthExplanation.openMediumRiskCount + healthExplanation.openHighRiskCount}</strong><small>中风险 {healthExplanation.openMediumRiskCount} / 高风险 {healthExplanation.openHighRiskCount}</small></div><div><span>逾期措施</span><strong>{healthExplanation.overdueActionCount}</strong><small>按恢复目标日自动识别</small></div><div><span>最近周报</span><strong>{healthExplanation.latestReportWeek ?? "未提交"}</strong><small>评估周期 {healthExplanation.evaluationWeekKey}</small></div></section>}
       <div className="tabs">{["节点计划","周报记录","风险与措施","基线版本","操作审计"].map(t => <button className={tab === t ? "active" : ""} onClick={() => setTab(t)} key={t}>{t}{t === "风险与措施" && <b>{(currentProject.openRiskCount ?? 0) + (currentProject.openActionCount ?? 0)}</b>}</button>)}</div>
       {tab === "节点计划" && <section className="content-card milestone-card">
         <div className="card-title"><div><h2>项目节点计划</h2><p>当前基线 V{currentProject.baselineVersion ?? 1} · 原始基线永久保留　<span>正式调整须经 PMO 审批</span></p></div>{canUpdate && <div className="card-actions"><button className="outline-button" onClick={openMilestoneGovernance}>节点治理</button><button className="outline-button" disabled={!adjustableMilestones.length} onClick={() => setShowBaselineForm(true)}>申请基线变更</button></div>}</div>
@@ -3123,6 +3165,25 @@ function RuleConfigPanel() {
     criticalRedDays: 4,
     greenScore: 85,
     yellowScore: 70,
+    progressYellowGap: 5,
+    progressRedGap: 10,
+    progressYellowPenalty: 10,
+    progressRedPenalty: 20,
+    normalYellowPenalty: 3,
+    normalRedPenalty: 8,
+    criticalYellowPenalty: 8,
+    criticalRedPenalty: 20,
+    schedulePenaltyCap: 60,
+    mediumRiskPenalty: 5,
+    highRiskPenalty: 15,
+    riskPenaltyCap: 25,
+    overdueActionPenalty: 5,
+    actionPenaltyCap: 15,
+    missingReportPenalty: 10,
+    consecutiveMissingPenalty: 15,
+    vetoCriticalRed: true,
+    vetoHighRiskOverdue: true,
+    vetoConsecutiveMissing: true,
   });
   const [version, setVersion] = useState(1);
   const [saving, setSaving] = useState(false);
@@ -3157,6 +3218,25 @@ function RuleConfigPanel() {
         criticalRedDays: rule.criticalRedDays,
         greenScore: rule.greenScore,
         yellowScore: rule.yellowScore,
+        progressYellowGap: rule.progressYellowGap,
+        progressRedGap: rule.progressRedGap,
+        progressYellowPenalty: rule.progressYellowPenalty,
+        progressRedPenalty: rule.progressRedPenalty,
+        normalYellowPenalty: rule.normalYellowPenalty,
+        normalRedPenalty: rule.normalRedPenalty,
+        criticalYellowPenalty: rule.criticalYellowPenalty,
+        criticalRedPenalty: rule.criticalRedPenalty,
+        schedulePenaltyCap: rule.schedulePenaltyCap,
+        mediumRiskPenalty: rule.mediumRiskPenalty,
+        highRiskPenalty: rule.highRiskPenalty,
+        riskPenaltyCap: rule.riskPenaltyCap,
+        overdueActionPenalty: rule.overdueActionPenalty,
+        actionPenaltyCap: rule.actionPenaltyCap,
+        missingReportPenalty: rule.missingReportPenalty,
+        consecutiveMissingPenalty: rule.consecutiveMissingPenalty,
+        vetoCriticalRed: rule.vetoCriticalRed,
+        vetoHighRiskOverdue: rule.vetoHighRiskOverdue,
+        vetoConsecutiveMissing: rule.vetoConsecutiveMissing,
       });
       setVersion(rule.version);
     }
@@ -3193,10 +3273,18 @@ function RuleConfigPanel() {
     }
   }
 
-  const field = (key: keyof typeof values, label: string, suffix: string) =>
+  type NumericRuleKey = {
+    [Key in keyof typeof values]: (typeof values)[Key] extends number ? Key : never;
+  }[keyof typeof values];
+  const field = (key: NumericRuleKey, label: string, suffix: string) =>
     <label>{label}<div className="rule-input"><input type="number" min="0" max="365" value={values[key]} onChange={(event) => setValues((current) => ({ ...current, [key]: Number(event.target.value) }))} /><span>{suffix}</span></div></label>;
+  const vetoField = (
+    key: "vetoCriticalRed" | "vetoHighRiskOverdue" | "vetoConsecutiveMissing",
+    label: string,
+  ) => <label className="rule-veto"><input type="checkbox" checked={values[key]} onChange={(event) => setValues((current) => ({ ...current, [key]: event.target.checked }))} /><span>{label}</span></label>;
 
-  return <section className="content-card rule-panel"><div className="card-title"><div><h2>预警规则配置</h2><p>当前生效版本 V{version} · 发布后保留历史版本并记录操作人</p></div><span className="count-badge">V{version} 生效中</span></div><div className="rule-sections"><div><h3>普通节点时间阈值</h3><p>根据预测或实际完成日期相对批准基线的偏差天数判定。</p><div className="rule-fields">{field("normalYellowDays","黄色起始阈值","天")}{field("normalRedDays","红色起始阈值","天")}</div></div><div><h3>关键节点时间阈值</h3><p>关键节点采用更严格的预警口径，并可触发项目红色一票否决。</p><div className="rule-fields">{field("criticalYellowDays","黄色起始阈值","天")}{field("criticalRedDays","红色起始阈值","天")}</div></div><div><h3>项目健康度阈值</h3><p>综合得分达到绿色阈值为正常，低于黄色阈值为严重。</p><div className="rule-fields">{field("greenScore","绿色最低分","分")}{field("yellowScore","黄色最低分","分")}</div></div></div>{showHistory && <div className="rule-history"><div className="table-head"><span>版本</span><span>普通节点</span><span>关键节点</span><span>健康度</span><span>发布人</span><span>发布时间</span></div>{history.map((rule) => <div className="table-row" key={rule.id}><span><strong>V{rule.version}</strong>{rule.active && <small>当前</small>}</span><span>黄 {rule.normalYellowDays}天 / 红 {rule.normalRedDays}天</span><span>黄 {rule.criticalYellowDays}天 / 红 {rule.criticalRedDays}天</span><span>绿 ≥{rule.greenScore} / 黄 ≥{rule.yellowScore}</span><span>{rule.createdBy}</span><span>{rule.createdAt.replace("T"," ").slice(0,16)}</span></div>)}</div>}{message && <div className={message.includes("已发布") ? "success-message" : "form-error"}>{message}</div>}<div className="rule-actions"><button className="outline-button" onClick={() => setShowHistory((value) => !value)}>{showHistory ? "收起历史版本" : `查看历史版本（${history.length}）`}</button><button className="primary-button" disabled={saving} onClick={publishRule}>{saving ? "正在发布…" : "发布新版本"}</button></div></section>;
+  // 预警规则配置与综合评分规则在同一版本中原子发布。
+  return <section className="content-card rule-panel"><div className="card-title"><div><h2>预警与综合评分规则</h2><p>当前生效版本 V{version} · 阈值、扣分、封顶和一票否决统一版本化</p></div><span className="count-badge">V{version} 生效中</span></div><div className="rule-sections scoring-rules"><div><h3>节点时间阈值</h3><p>按预测或实际完成日相对批准基线判灯。</p><div className="rule-fields">{field("normalYellowDays","普通黄","天")}{field("normalRedDays","普通红","天")}{field("criticalYellowDays","关键黄","天")}{field("criticalRedDays","关键红","天")}</div></div><div><h3>项目状态阈值</h3><p>综合得分达到绿色阈值为正常，低于黄色阈值为严重。</p><div className="rule-fields">{field("greenScore","绿色最低分","分")}{field("yellowScore","黄色最低分","分")}{field("progressYellowGap","进度落后起扣","pp")}{field("progressRedGap","进度严重落后","pp")}</div></div><div><h3>进度与节点扣分</h3><p>进度类扣分包含总体偏差和节点灯色，并应用统一封顶。</p><div className="rule-fields">{field("progressYellowPenalty","落后扣分","分")}{field("progressRedPenalty","严重落后","分")}{field("normalYellowPenalty","普通黄","分")}{field("normalRedPenalty","普通红","分")}{field("criticalYellowPenalty","关键黄","分")}{field("criticalRedPenalty","关键红","分")}{field("schedulePenaltyCap","进度封顶","分")}</div></div><div><h3>风险、措施与周报</h3><p>按开放风险、逾期措施和数据新鲜度累计扣分。</p><div className="rule-fields">{field("mediumRiskPenalty","中风险","分")}{field("highRiskPenalty","高风险","分")}{field("riskPenaltyCap","风险封顶","分")}{field("overdueActionPenalty","逾期措施","分")}{field("actionPenaltyCap","措施封顶","分")}{field("missingReportPenalty","本周缺报","分")}{field("consecutiveMissingPenalty","连续缺报","分")}</div></div><div><h3>一票否决</h3><p>启用后，对应条件直接将项目判为红色，仍保留评分明细。</p><div className="rule-veto-list">{vetoField("vetoCriticalRed","关键节点红色")}{vetoField("vetoHighRiskOverdue","高风险关联措施逾期")}{vetoField("vetoConsecutiveMissing","连续两个周期未填报")}</div></div></div>{showHistory && <div className="rule-history"><div className="table-head"><span>版本</span><span>节点阈值</span><span>进度扣分</span><span>风险/措施/周报</span><span>发布人</span><span>发布时间</span></div>{history.map((rule) => <div className="table-row" key={rule.id}><span><strong>V{rule.version}</strong>{rule.active && <small>当前</small>}</span><span>普黄 {rule.normalYellowDays} / 普红 {rule.normalRedDays} / 关红 {rule.criticalRedDays}</span><span>落后 {rule.progressYellowPenalty} / 严重 {rule.progressRedPenalty} / 封顶 {rule.schedulePenaltyCap}</span><span>高风险 {rule.highRiskPenalty} / 措施 {rule.overdueActionPenalty} / 缺报 {rule.missingReportPenalty}</span><span>{rule.createdBy}</span><span>{rule.createdAt.replace("T"," ").slice(0,16)}</span></div>)}</div>}{message && <div className={message.includes("已发布") ? "success-message" : "form-error"}>{message}</div>}<div className="rule-actions"><button className="outline-button" onClick={() => setShowHistory((value) => !value)}>{showHistory ? "收起历史版本" : `查看历史版本（${history.length}）`}</button><button className="primary-button" disabled={saving} onClick={publishRule}>{saving ? "正在发布并重算…" : "发布新版本并重算在建项目"}</button></div></section>;
 }
 
 function AdminPage({ onNavigate, identity }: { onNavigate: Navigate; identity: Identity | null }) {

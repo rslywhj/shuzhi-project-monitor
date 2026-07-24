@@ -41,7 +41,10 @@ test("runs one recoverable Shanghai-day health refresh before portfolio automati
   assert.match(migration, /CREATE UNIQUE INDEX `portfolio_health_runs_key_idx`/);
   assert.match(migration, /ALTER TABLE `projects` ADD `health_calculated_at`/);
 
-  assert.match(refreshService, /runKey = `daily:\$\{options\.asOfDate\}`/);
+  assert.match(
+    refreshService,
+    /runKey = `daily:\$\{options\.asOfDate\}:rule-v\$\{activeRule\?\.version \?\? 1\}`/,
+  );
   assert.match(refreshService, /\.onConflictDoNothing\(\)/);
   assert.match(refreshService, /STALE_RUN_MS = 15 \* 60_000/);
   assert.match(refreshService, /eq\(portfolioHealthRuns\.status, "failed"\)/);

@@ -85,6 +85,13 @@
       "when": 1784868598289,
       "tag": "0011_fine_human_torch",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1784873645651,
+      "tag": "0012_colossal_rhino",
+      "breakpoints": true
     }
   ]
 }

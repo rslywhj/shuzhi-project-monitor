@@ -1,0 +1,20 @@
+ALTER TABLE `projects` ADD `health_explanation_json` text DEFAULT '{}' NOT NULL;--> statement-breakpoint
+ALTER TABLE `rule_configs` ADD `progress_yellow_gap` integer DEFAULT 5 NOT NULL;--> statement-breakpoint
+ALTER TABLE `rule_configs` ADD `progress_red_gap` integer DEFAULT 10 NOT NULL;--> statement-breakpoint
+ALTER TABLE `rule_configs` ADD `progress_yellow_penalty` integer DEFAULT 10 NOT NULL;--> statement-breakpoint
+ALTER TABLE `rule_configs` ADD `progress_red_penalty` integer DEFAULT 20 NOT NULL;--> statement-breakpoint
+ALTER TABLE `rule_configs` ADD `normal_yellow_penalty` integer DEFAULT 3 NOT NULL;--> statement-breakpoint
+ALTER TABLE `rule_configs` ADD `normal_red_penalty` integer DEFAULT 8 NOT NULL;--> statement-breakpoint
+ALTER TABLE `rule_configs` ADD `critical_yellow_penalty` integer DEFAULT 8 NOT NULL;--> statement-breakpoint
+ALTER TABLE `rule_configs` ADD `critical_red_penalty` integer DEFAULT 20 NOT NULL;--> statement-breakpoint
+ALTER TABLE `rule_configs` ADD `schedule_penalty_cap` integer DEFAULT 60 NOT NULL;--> statement-breakpoint
+ALTER TABLE `rule_configs` ADD `medium_risk_penalty` integer DEFAULT 5 NOT NULL;--> statement-breakpoint
+ALTER TABLE `rule_configs` ADD `high_risk_penalty` integer DEFAULT 15 NOT NULL;--> statement-breakpoint
+ALTER TABLE `rule_configs` ADD `risk_penalty_cap` integer DEFAULT 25 NOT NULL;--> statement-breakpoint
+ALTER TABLE `rule_configs` ADD `overdue_action_penalty` integer DEFAULT 5 NOT NULL;--> statement-breakpoint
+ALTER TABLE `rule_configs` ADD `action_penalty_cap` integer DEFAULT 15 NOT NULL;--> statement-breakpoint
+ALTER TABLE `rule_configs` ADD `missing_report_penalty` integer DEFAULT 10 NOT NULL;--> statement-breakpoint
+ALTER TABLE `rule_configs` ADD `consecutive_missing_penalty` integer DEFAULT 15 NOT NULL;--> statement-breakpoint
+ALTER TABLE `rule_configs` ADD `veto_critical_red` integer DEFAULT true NOT NULL;--> statement-breakpoint
+ALTER TABLE `rule_configs` ADD `veto_high_risk_overdue` integer DEFAULT true NOT NULL;--> statement-breakpoint
+ALTER TABLE `rule_configs` ADD `veto_consecutive_missing` integer DEFAULT true NOT NULL;

@@ -32,6 +32,15 @@ type DashboardAlerts = {
   overdueActions: DashboardAlertItem[];
 };
 
+function parseHealthExplanation(value: string) {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function GET(request: Request) {
   try {
     const identity = await getRequestIdentity(request);
@@ -163,6 +172,9 @@ export async function GET(request: Request) {
         lifecycleReason: project.lifecycleReason,
         completedAt: project.completedAt,
         archivedAt: project.archivedAt,
+        healthExplanation: parseHealthExplanation(
+          project.healthExplanationJson,
+        ),
         cells: matrixCells(snapshotMilestones.get(project.id) ?? []),
         milestones: snapshotMilestones.get(project.id) ?? [],
         updatedAt: project.updatedAt,
@@ -194,6 +206,9 @@ export async function GET(request: Request) {
         lifecycleReason: project.lifecycleReason,
         completedAt: project.completedAt,
         archivedAt: project.archivedAt,
+        healthExplanation: parseHealthExplanation(
+          project.healthExplanationJson,
+        ),
         cells: matrixCells(projectMilestones.get(project.id) ?? []),
         milestones: projectMilestones.get(project.id) ?? [],
         updatedAt: project.updatedAt,

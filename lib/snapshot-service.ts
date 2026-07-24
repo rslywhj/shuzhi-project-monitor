@@ -6,6 +6,7 @@ import {
   milestones,
   projects,
   risks,
+  ruleConfigs,
   snapshots,
   weeklyReports,
 } from "@/db/schema";
@@ -67,6 +68,7 @@ export async function lockPortfolioSnapshot(options: {
     milestoneRows,
     riskRows,
     actionRows,
+    activeRuleRows,
   ] = await Promise.all([
     db
       .select()
@@ -84,6 +86,12 @@ export async function lockPortfolioSnapshot(options: {
     db.select().from(milestones),
     db.select().from(risks),
     db.select().from(correctiveActions),
+    db
+      .select()
+      .from(ruleConfigs)
+      .where(eq(ruleConfigs.active, true))
+      .orderBy(desc(ruleConfigs.version))
+      .limit(1),
   ]);
   const activeProjectIds = new Set(projectRows.map((project) => project.id));
   const activeMilestones = milestoneRows.filter((row) =>
@@ -140,6 +148,7 @@ export async function lockPortfolioSnapshot(options: {
     projects: projectRows,
     milestones: activeMilestones,
     dashboardAlerts,
+    ruleConfig: activeRuleRows[0] ?? null,
     capturedAt: capturedAtIso,
   });
 

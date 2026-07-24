@@ -1,9 +1,10 @@
-import { and, eq, lte, or } from "drizzle-orm";
+import { and, desc, eq, lte, or } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   auditLogs,
   portfolioHealthRuns,
   projects,
+  ruleConfigs,
 } from "@/db/schema";
 import { recalculateProjectHealth } from "@/lib/health";
 
@@ -34,7 +35,13 @@ export async function refreshPortfolioHealth(options: {
   const db = getDb();
   const now = options.now ?? new Date();
   const nowIso = now.toISOString();
-  const runKey = `daily:${options.asOfDate}`;
+  const [activeRule] = await db
+    .select({ version: ruleConfigs.version })
+    .from(ruleConfigs)
+    .where(eq(ruleConfigs.active, true))
+    .orderBy(desc(ruleConfigs.version))
+    .limit(1);
+  const runKey = `daily:${options.asOfDate}:rule-v${activeRule?.version ?? 1}`;
   const [created] = await db
     .insert(portfolioHealthRuns)
     .values({

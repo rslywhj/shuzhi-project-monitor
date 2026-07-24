@@ -49,6 +49,7 @@ export const projects = sqliteTable(
     originalBaselineVersion: integer("original_baseline_version").notNull().default(1),
     currentBaselineVersion: integer("current_baseline_version").notNull().default(1),
     healthCalculatedAt: text("health_calculated_at"),
+    healthExplanationJson: text("health_explanation_json").notNull().default("{}"),
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => [
@@ -462,6 +463,37 @@ export const ruleConfigs = sqliteTable("rule_configs", {
   criticalRedDays: integer("critical_red_days").notNull().default(4),
   greenScore: integer("green_score").notNull().default(85),
   yellowScore: integer("yellow_score").notNull().default(70),
+  progressYellowGap: integer("progress_yellow_gap").notNull().default(5),
+  progressRedGap: integer("progress_red_gap").notNull().default(10),
+  progressYellowPenalty: integer("progress_yellow_penalty").notNull().default(10),
+  progressRedPenalty: integer("progress_red_penalty").notNull().default(20),
+  normalYellowPenalty: integer("normal_yellow_penalty").notNull().default(3),
+  normalRedPenalty: integer("normal_red_penalty").notNull().default(8),
+  criticalYellowPenalty: integer("critical_yellow_penalty").notNull().default(8),
+  criticalRedPenalty: integer("critical_red_penalty").notNull().default(20),
+  schedulePenaltyCap: integer("schedule_penalty_cap").notNull().default(60),
+  mediumRiskPenalty: integer("medium_risk_penalty").notNull().default(5),
+  highRiskPenalty: integer("high_risk_penalty").notNull().default(15),
+  riskPenaltyCap: integer("risk_penalty_cap").notNull().default(25),
+  overdueActionPenalty: integer("overdue_action_penalty").notNull().default(5),
+  actionPenaltyCap: integer("action_penalty_cap").notNull().default(15),
+  missingReportPenalty: integer("missing_report_penalty").notNull().default(10),
+  consecutiveMissingPenalty: integer("consecutive_missing_penalty")
+    .notNull()
+    .default(15),
+  vetoCriticalRed: integer("veto_critical_red", { mode: "boolean" })
+    .notNull()
+    .default(true),
+  vetoHighRiskOverdue: integer("veto_high_risk_overdue", {
+    mode: "boolean",
+  })
+    .notNull()
+    .default(true),
+  vetoConsecutiveMissing: integer("veto_consecutive_missing", {
+    mode: "boolean",
+  })
+    .notNull()
+    .default(true),
   active: integer("active", { mode: "boolean" }).notNull().default(true),
   createdBy: text("created_by").notNull(),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),

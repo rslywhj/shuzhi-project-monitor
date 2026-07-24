@@ -145,6 +145,28 @@ export async function recalculateProjectHealth(
   const project = projectRows[0];
   if (!project) return null;
   const rule = activeRuleRows[0];
+  const scoringRule = {
+    version: rule?.version ?? 1,
+    progressYellowGap: rule?.progressYellowGap ?? 5,
+    progressRedGap: rule?.progressRedGap ?? 10,
+    progressYellowPenalty: rule?.progressYellowPenalty ?? 10,
+    progressRedPenalty: rule?.progressRedPenalty ?? 20,
+    normalYellowPenalty: rule?.normalYellowPenalty ?? 3,
+    normalRedPenalty: rule?.normalRedPenalty ?? 8,
+    criticalYellowPenalty: rule?.criticalYellowPenalty ?? 8,
+    criticalRedPenalty: rule?.criticalRedPenalty ?? 20,
+    schedulePenaltyCap: rule?.schedulePenaltyCap ?? 60,
+    mediumRiskPenalty: rule?.mediumRiskPenalty ?? 5,
+    highRiskPenalty: rule?.highRiskPenalty ?? 15,
+    riskPenaltyCap: rule?.riskPenaltyCap ?? 25,
+    overdueActionPenalty: rule?.overdueActionPenalty ?? 5,
+    actionPenaltyCap: rule?.actionPenaltyCap ?? 15,
+    missingReportPenalty: rule?.missingReportPenalty ?? 10,
+    consecutiveMissingPenalty: rule?.consecutiveMissingPenalty ?? 15,
+    vetoCriticalRed: rule?.vetoCriticalRed ?? true,
+    vetoHighRiskOverdue: rule?.vetoHighRiskOverdue ?? true,
+    vetoConsecutiveMissing: rule?.vetoConsecutiveMissing ?? true,
+  };
   const asOf = evaluationDate(evaluationWeekKey, options.asOfDate);
   const evaluatedMilestones = milestoneRows.map((milestone) => {
     if (!milestone.applicable) return { ...milestone, status: "na" as const };
@@ -198,28 +220,47 @@ export async function recalculateProjectHealth(
   const progress = weightedProgress(evaluatedMilestones, asOf);
   const progressGap = progress.plan - progress.actual;
   const progressGapPenalty =
-    progressGap > 10 ? 20 : progressGap >= 5 ? 10 : 0;
+    progressGap > scoringRule.progressRedGap
+      ? scoringRule.progressRedPenalty
+      : progressGap >= scoringRule.progressYellowGap
+        ? scoringRule.progressYellowPenalty
+        : 0;
   const milestonePenalty = evaluatedMilestones.reduce((sum, milestone) => {
     if (!milestone.applicable) return sum;
     if (milestone.status === "yellow") {
-      return sum + (milestone.critical ? 8 : 3);
+      return (
+        sum +
+        (milestone.critical
+          ? scoringRule.criticalYellowPenalty
+          : scoringRule.normalYellowPenalty)
+      );
     }
     if (milestone.status === "red") {
-      return sum + (milestone.critical ? 20 : 8);
+      return (
+        sum +
+        (milestone.critical
+          ? scoringRule.criticalRedPenalty
+          : scoringRule.normalRedPenalty)
+      );
     }
     return sum;
   }, 0);
   const schedulePenalty = Math.min(
-    60,
+    scoringRule.schedulePenaltyCap,
     progressGapPenalty + milestonePenalty,
   );
 
   const openRisks = riskRows.filter((risk) => risk.status !== "closed");
   const riskPenalty = Math.min(
-    25,
+    scoringRule.riskPenaltyCap,
     openRisks.reduce(
       (sum, risk) =>
-        sum + (risk.level === "high" ? 15 : risk.level === "medium" ? 5 : 0),
+        sum +
+        (risk.level === "high"
+          ? scoringRule.highRiskPenalty
+          : risk.level === "medium"
+            ? scoringRule.mediumRiskPenalty
+            : 0),
       0,
     ),
   );
@@ -229,14 +270,17 @@ export async function recalculateProjectHealth(
       action.status !== "completed" &&
       (action.status === "overdue" || action.recoveryDate < today),
   );
-  const actionPenalty = Math.min(15, overdueActions.length * 5);
+  const actionPenalty = Math.min(
+    scoringRule.actionPenaltyCap,
+    overdueActions.length * scoringRule.overdueActionPenalty,
+  );
 
   const latestWeek = evaluationWeekKey ?? isoWeekKey(asOf);
   const latestProjectWeek = projectReportRows[0]?.weekKey;
   let reportingPenalty = 0;
   let consecutiveMissing = false;
   if (latestProjectWeek !== latestWeek) {
-    reportingPenalty = 10;
+    reportingPenalty = scoringRule.missingReportPenalty;
     const firstPlannedStart = evaluatedMilestones
       .filter((milestone) => milestone.applicable)
       .map((milestone) => milestone.plannedStart)
@@ -249,7 +293,7 @@ export async function recalculateProjectHealth(
         weeksBetween(latestWeek, latestProjectWeek) >= 2) ||
       (!latestProjectWeek && projectHasBeenActiveForTwoWeeks)
     ) {
-      reportingPenalty = 15;
+      reportingPenalty = scoringRule.consecutiveMissingPenalty;
       consecutiveMissing = true;
     }
   }
@@ -261,14 +305,21 @@ export async function recalculateProjectHealth(
   const highRiskIds = new Set(
     openRisks.filter((risk) => risk.level === "high").map((risk) => risk.id),
   );
-  const forcedRed =
-    evaluatedMilestones.some(
-      (milestone) => milestone.critical && milestone.status === "red",
-    ) ||
-    overdueActions.some(
-      (action) => action.riskId !== null && highRiskIds.has(action.riskId),
-    ) ||
-    consecutiveMissing;
+  const vetoes = {
+    criticalRed:
+      scoringRule.vetoCriticalRed &&
+      evaluatedMilestones.some(
+        (milestone) => milestone.critical && milestone.status === "red",
+      ),
+    highRiskOverdue:
+      scoringRule.vetoHighRiskOverdue &&
+      overdueActions.some(
+        (action) => action.riskId !== null && highRiskIds.has(action.riskId),
+      ),
+    consecutiveMissing:
+      scoringRule.vetoConsecutiveMissing && consecutiveMissing,
+  };
+  const forcedRed = Object.values(vetoes).some(Boolean);
   const greenScore = rule?.greenScore ?? 85;
   const yellowScore = rule?.yellowScore ?? 70;
   const status = forcedRed
@@ -285,6 +336,59 @@ export async function recalculateProjectHealth(
       : "low";
 
   const calculatedAt = new Date().toISOString();
+  const milestoneCounts = {
+    normalYellow: evaluatedMilestones.filter(
+      (milestone) =>
+        milestone.applicable &&
+        !milestone.critical &&
+        milestone.status === "yellow",
+    ).length,
+    normalRed: evaluatedMilestones.filter(
+      (milestone) =>
+        milestone.applicable &&
+        !milestone.critical &&
+        milestone.status === "red",
+    ).length,
+    criticalYellow: evaluatedMilestones.filter(
+      (milestone) =>
+        milestone.applicable &&
+        milestone.critical &&
+        milestone.status === "yellow",
+    ).length,
+    criticalRed: evaluatedMilestones.filter(
+      (milestone) =>
+        milestone.applicable &&
+        milestone.critical &&
+        milestone.status === "red",
+    ).length,
+  };
+  const deductions = {
+    schedule: schedulePenalty,
+    risk: riskPenalty,
+    action: actionPenalty,
+    reporting: reportingPenalty,
+  };
+  const healthExplanation = {
+    ruleVersion: scoringRule.version,
+    calculatedAt,
+    asOfDate: asOf,
+    progressGap: Number(progressGap.toFixed(1)),
+    progressGapPenalty,
+    milestonePenalty,
+    milestoneCounts,
+    openMediumRiskCount: openRisks.filter((risk) => risk.level === "medium")
+      .length,
+    openHighRiskCount: openRisks.filter((risk) => risk.level === "high").length,
+    overdueActionCount: overdueActions.length,
+    latestReportWeek: latestProjectWeek ?? null,
+    evaluationWeekKey: latestWeek,
+    consecutiveMissing,
+    deductions: {
+      ...deductions,
+      total: Object.values(deductions).reduce((sum, value) => sum + value, 0),
+    },
+    vetoes,
+  };
   await db
     .update(projects)
     .set({
@@ -294,6 +398,7 @@ export async function recalculateProjectHealth(
       planProgress: progress.plan,
       actualProgress: progress.actual,
       healthCalculatedAt: calculatedAt,
+      healthExplanationJson: JSON.stringify(healthExplanation),
       ...(options.touchProject === false ? {} : { updatedAt: calculatedAt }),
     })
     .where(eq(projects.id, projectId));
@@ -302,12 +407,8 @@ export async function recalculateProjectHealth(
     status,
     riskLevel,
     progress,
-    deductions: {
-      schedule: schedulePenalty,
-      risk: riskPenalty,
-      action: actionPenalty,
-      reporting: reportingPenalty,
-    },
+    deductions,
+    explanation: healthExplanation,
     forcedRed,
   };
 }

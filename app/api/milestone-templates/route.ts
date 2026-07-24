@@ -115,7 +115,7 @@ export async function PUT(request: Request) {
         { status: 409 },
       );
     }
-    await db.batch([
+    const updateStatements = [
       ...parsed.map((row) =>
         db
           .update(milestoneTemplates)
@@ -152,7 +152,8 @@ export async function PUT(request: Request) {
           totalWeight,
         }),
       }),
-    ]);
+    ] as unknown as Parameters<typeof db.batch>[0];
+    await db.batch(updateStatements);
     const rows = await db
       .select()
       .from(milestoneTemplates)

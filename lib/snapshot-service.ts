@@ -5,6 +5,8 @@ import {
   correctiveActions,
   milestones,
   projects,
+  resourceAllocations,
+  resources,
   risks,
   ruleConfigs,
   snapshots,
@@ -12,6 +14,7 @@ import {
 } from "@/db/schema";
 import { buildPortfolioDelayForecast } from "@/lib/delay-forecast";
 import { recalculateProjectHealth } from "@/lib/health";
+import { buildResourceCapacity } from "@/lib/resource-capacity";
 import { ensureSeeded } from "@/lib/seed";
 
 export type SnapshotLockSource = "manual" | "automation";
@@ -70,6 +73,8 @@ export async function lockPortfolioSnapshot(options: {
     riskRows,
     actionRows,
     activeRuleRows,
+    resourceRows,
+    allocationRows,
   ] = await Promise.all([
     db.select().from(projects),
     db
@@ -85,6 +90,8 @@ export async function lockPortfolioSnapshot(options: {
       .where(eq(ruleConfigs.active, true))
       .orderBy(desc(ruleConfigs.version))
       .limit(1),
+    db.select().from(resources),
+    db.select().from(resourceAllocations),
   ]);
   const projectRows = allProjectRows.filter(
     (project) => project.lifecycleStatus === "active",
@@ -126,6 +133,14 @@ export async function lockPortfolioSnapshot(options: {
     asOfDate: capturedDate,
     scopeProjectIds: activeProjectIds,
   });
+  const resourceCapacity = buildResourceCapacity({
+    resources: resourceRows,
+    allocations: allocationRows,
+    projects: allProjectRows,
+    milestones: milestoneRows,
+    asOfDate: capturedDate,
+    weeks: 12,
+  });
   const dashboardAlerts = {
     highRisks: activeRisks
       .filter((risk) => risk.status !== "closed" && risk.level === "high")
@@ -166,12 +181,30 @@ export async function lockPortfolioSnapshot(options: {
         confidence: project.confidence,
         earlyWarning: project.earlyWarning,
       })),
+    resourceConflicts: resourceCapacity.conflicts.slice(0, 10).map(
+      (conflict) => ({
+        resourceId: conflict.resourceId,
+        resourceName: conflict.resourceName,
+        resourceOrg: conflict.resourceOrg,
+        weekKey: conflict.weekKey,
+        utilization: conflict.utilization,
+        overallocatedHours: conflict.overallocatedHours,
+        projectNames: [
+          ...new Set(
+            conflict.allocations.map(
+              (allocation) => allocation.projectName,
+            ),
+          ),
+        ],
+      }),
+    ),
   };
   const snapshotPayload = JSON.stringify({
     projects: projectRows,
     milestones: activeMilestones,
     dashboardAlerts,
     delayForecast,
+    resourceCapacity,
     ruleConfig: activeRuleRows[0] ?? null,
     capturedAt: capturedAtIso,
   });
@@ -208,6 +241,8 @@ export async function lockPortfolioSnapshot(options: {
               delayForecast.summary.highRiskProjectCount,
             earlyWarningCount:
               delayForecast.summary.earlyWarningProjectCount,
+            resourceConflictCount:
+              resourceCapacity.summary.conflictWeekCount,
           })}`.as("detail_json"),
           createdAt: sql<string>`${capturedAtIso}`.as("created_at"),
         })

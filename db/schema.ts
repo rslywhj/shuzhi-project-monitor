@@ -60,6 +60,29 @@ export const projects = sqliteTable(
   ],
 );
 
+export const resources = sqliteTable(
+  "resources",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    name: text("name").notNull(),
+    resourceType: text("resource_type", {
+      enum: ["person", "team", "vendor", "environment"],
+    }).notNull(),
+    org: text("org").notNull(),
+    capacityHoursPerWeek: real("capacity_hours_per_week")
+      .notNull()
+      .default(40),
+    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    createdBy: text("created_by").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("resources_org_name_idx").on(table.org, table.name),
+    index("resources_active_type_idx").on(table.active, table.resourceType),
+  ],
+);
+
 export const notifications = sqliteTable(
   "notifications",
   {
@@ -266,6 +289,48 @@ export const milestones = sqliteTable(
   (table) => [
     uniqueIndex("milestones_project_sequence_idx").on(table.projectId, table.sequence),
     index("milestones_status_idx").on(table.status),
+  ],
+);
+
+export const resourceAllocations = sqliteTable(
+  "resource_allocations",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    resourceId: integer("resource_id")
+      .notNull()
+      .references(() => resources.id, { onDelete: "restrict" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    milestoneId: integer("milestone_id").references(() => milestones.id, {
+      onDelete: "set null",
+    }),
+    role: text("role").notNull(),
+    startDate: text("start_date").notNull(),
+    endDate: text("end_date").notNull(),
+    hoursPerWeek: real("hours_per_week").notNull(),
+    status: text("status", {
+      enum: ["planned", "confirmed", "cancelled"],
+    })
+      .notNull()
+      .default("planned"),
+    note: text("note").notNull().default(""),
+    overrideReason: text("override_reason").notNull().default(""),
+    createdBy: text("created_by").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("resource_allocations_resource_dates_idx").on(
+      table.resourceId,
+      table.startDate,
+      table.endDate,
+    ),
+    index("resource_allocations_project_status_idx").on(
+      table.projectId,
+      table.status,
+    ),
+    index("resource_allocations_milestone_idx").on(table.milestoneId),
   ],
 );
 

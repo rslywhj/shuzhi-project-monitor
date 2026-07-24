@@ -7,6 +7,8 @@ import {
   milestoneTemplates,
   milestones,
   projects,
+  resourceAllocations,
+  resources,
   ruleConfigs,
   users,
 } from "@/db/schema";
@@ -147,6 +149,102 @@ async function ensureDemoProjectManagers(db: ReturnType<typeof getDb>) {
   }
 }
 
+async function ensureDemoResourcePlanning(db: ReturnType<typeof getDb>) {
+  if (!demoSeedEnabled()) return;
+  const resourceSeeds = [
+    ["共享架构师", "person", "技术平台组", 40],
+    ["数据治理专家组", "team", "数据治理组", 80],
+    ["集成测试团队", "team", "质量保障组", 80],
+    ["核心供应商A", "vendor", "供应商协同组", 60],
+    ["UAT共享环境", "environment", "基础设施组", 40],
+    ["生产切换窗口", "environment", "运维保障组", 24],
+  ] as const;
+  for (const [name, resourceType, org, capacityHoursPerWeek] of resourceSeeds) {
+    await db
+      .insert(resources)
+      .values({
+        name,
+        resourceType,
+        org,
+        capacityHoursPerWeek,
+        active: true,
+        createdBy: "system",
+      })
+      .onConflictDoNothing();
+  }
+  const [{ value: allocationCount }] = await db
+    .select({ value: count() })
+    .from(resourceAllocations);
+  if (allocationCount > 0) return;
+  const [resourceRows, projectRows, milestoneRows] = await Promise.all([
+    db.select().from(resources),
+    db.select().from(projects),
+    db.select().from(milestones),
+  ]);
+  const resourceByName = new Map(
+    resourceRows.map((resource) => [resource.name, resource]),
+  );
+  const projectIds = new Set(projectRows.map((project) => project.id));
+  const firstMilestoneByProject = new Map<string, number>();
+  for (const milestone of milestoneRows
+    .filter((milestone) => milestone.applicable)
+    .sort((left, right) => left.sequence - right.sequence)) {
+    if (!firstMilestoneByProject.has(milestone.projectId)) {
+      firstMilestoneByProject.set(milestone.projectId, milestone.id);
+    }
+  }
+  const dateAt = (days: number) => {
+    const value = new Date();
+    value.setUTCHours(0, 0, 0, 0);
+    value.setUTCDate(value.getUTCDate() + days);
+    return value.toISOString().slice(0, 10);
+  };
+  const allocationSeeds = [
+    ["共享架构师", "P02", "总体架构与接口治理", -7, 55, 28, "confirmed"],
+    ["共享架构师", "P06", "数据架构评审", 0, 48, 20, "planned"],
+    ["数据治理专家组", "P06", "主数据规则梳理", -14, 70, 52, "confirmed"],
+    ["数据治理专家组", "P09", "标准与质量核验", 7, 63, 36, "planned"],
+    ["集成测试团队", "P05", "集成测试执行", -7, 42, 50, "confirmed"],
+    ["集成测试团队", "P10", "回归与性能测试", 7, 56, 40, "planned"],
+    ["核心供应商A", "P02", "核心模块交付", -14, 49, 42, "confirmed"],
+    ["UAT共享环境", "P02", "采购业务验收", 14, 42, 30, "confirmed"],
+    ["UAT共享环境", "P08", "审计场景验收", 14, 42, 20, "planned"],
+    ["生产切换窗口", "P05", "生产切换保障", 49, 63, 16, "planned"],
+    ["生产切换窗口", "P10", "门户升级切换", 49, 63, 12, "planned"],
+  ] as const;
+  const rows = allocationSeeds.flatMap(
+    ([
+      resourceName,
+      projectId,
+      role,
+      startOffset,
+      endOffset,
+      hoursPerWeek,
+      status,
+    ]) => {
+      const resource = resourceByName.get(resourceName);
+      if (!resource || !projectIds.has(projectId)) return [];
+      return [
+        {
+          resourceId: resource.id,
+          projectId,
+          milestoneId: firstMilestoneByProject.get(projectId) ?? null,
+          role,
+          startDate: dateAt(startOffset),
+          endDate: dateAt(endOffset),
+          hoursPerWeek,
+          status,
+          note: "演示资源计划，可在资源工作台中调整。",
+          createdBy: "system",
+        },
+      ];
+    },
+  );
+  for (const rowsChunk of chunks(rows, 10)) {
+    await db.insert(resourceAllocations).values(rowsChunk);
+  }
+}
+
 export async function ensureSeeded() {
   const db = getDb();
   await db
@@ -194,6 +292,7 @@ export async function ensureSeeded() {
   if (value > 0) {
     await ensureDemoProjectManagers(db);
     await ensureBaselineVersionRows(db);
+    await ensureDemoResourcePlanning(db);
     return;
   }
   if (!demoSeedEnabled()) return;
@@ -258,6 +357,7 @@ export async function ensureSeeded() {
     await db.insert(milestones).values(rows).onConflictDoNothing();
   }
 
+  await ensureDemoResourcePlanning(db);
   await db.insert(baselineChanges).values({
     projectId: "P02",
     versionFrom: 2,

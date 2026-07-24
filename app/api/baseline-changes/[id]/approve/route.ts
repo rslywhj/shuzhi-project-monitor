@@ -152,7 +152,7 @@ export async function POST(
           ),
         ),
     );
-    const batchResults = await db.batch([
+    const batchStatements = [
       ...milestoneStatements,
       baselineVersionInsert,
       db
@@ -188,7 +188,8 @@ export async function POST(
           ),
         )
         .returning(),
-    ]);
+    ] as unknown as Parameters<typeof db.batch>[0];
+    const batchResults = await db.batch(batchStatements);
     const approvedRows = batchResults.at(-1) as
       | (typeof baselineChanges.$inferSelect)[]
       | undefined;

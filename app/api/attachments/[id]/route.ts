@@ -83,7 +83,10 @@ export async function DELETE(
       return Response.json({ error: "未找到指定附件。" }, { status: 404 });
     }
     const [project] = await db
-      .select({ ownerEmail: projects.ownerEmail })
+      .select({
+        ownerEmail: projects.ownerEmail,
+        lifecycleStatus: projects.lifecycleStatus,
+      })
       .from(projects)
       .where(eq(projects.id, attachment.projectId))
       .limit(1);

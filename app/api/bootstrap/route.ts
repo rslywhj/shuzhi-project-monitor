@@ -39,6 +39,15 @@ type DashboardAlerts = {
     confidence: "low" | "medium" | "high";
     earlyWarning: boolean;
   }>;
+  resourceConflicts: Array<{
+    resourceId: number;
+    resourceName: string;
+    resourceOrg: string;
+    weekKey: string;
+    utilization: number;
+    overallocatedHours: number;
+    projectNames: string[];
+  }>;
 };
 
 function parseHealthExplanation(value: string) {
@@ -145,6 +154,7 @@ export async function GET(request: Request) {
       highRisks: [],
       overdueActions: [],
       predictedDelays: [],
+      resourceConflicts: [],
     };
     if (lockedSnapshot) {
       const payload = JSON.parse(lockedSnapshot.payloadJson) as {
@@ -157,6 +167,8 @@ export async function GET(request: Request) {
         overdueActions: payload.dashboardAlerts?.overdueActions ?? [],
         predictedDelays:
           payload.dashboardAlerts?.predictedDelays ?? [],
+        resourceConflicts:
+          payload.dashboardAlerts?.resourceConflicts ?? [],
       };
       const snapshotMilestones = new Map<string, typeof milestoneRows>();
       for (const milestone of payload.milestones ?? []) {

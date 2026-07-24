@@ -228,7 +228,7 @@ export async function POST(
         recoveryDate: requiredIsoDate(payload.action.recoveryDate, "预计恢复日期"),
         detail: requiredString(payload.action.detail, "具体行动"),
         createdBy: identity.email,
-        updatedAt: sql`CURRENT_TIMESTAMP`,
+        updatedAt: new Date().toISOString(),
       };
     }
     if (milestoneUpdate) {

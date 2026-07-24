@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PortfolioAnalytics from "./portfolio-analytics";
 import NotificationChannelPanel from "./notification-channel-panel";
+import ResourcePlanning from "./resource-planning";
 import {
   addIsoDays,
   buildWeightedProjectSchedule,
@@ -16,6 +17,7 @@ type View =
   | "cockpit"
   | "portfolio"
   | "analytics"
+  | "resources"
   | "project"
   | "report"
   | "pmo"
@@ -26,6 +28,7 @@ type ProjectManagerAccount = { email: string; displayName: string };
 type Navigate = (view: View, projectId?: string) => void;
 type MilestoneData = {
   id: number;
+  templateId?: number | null;
   name: string;
   sequence: number;
   weight: number;
@@ -175,6 +178,15 @@ type DashboardAlerts = {
     milestoneName: string;
     confidence: "low" | "medium" | "high";
     earlyWarning: boolean;
+  }>;
+  resourceConflicts: Array<{
+    resourceId: number;
+    resourceName: string;
+    resourceOrg: string;
+    weekKey: string;
+    utilization: number;
+    overallocatedHours: number;
+    projectNames: string[];
   }>;
 };
 type TrendPoint = {
@@ -775,6 +787,10 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
             <h3><span>⌛</span> 逾期措施 <b>{alerts.overdueActions.length}</b></h3>
             {alerts.overdueActions.length ? alerts.overdueActions.slice(0, 2).map((action) => <button key={`action-${action.id}`} onClick={() => onNavigate("project", action.projectId)}><strong>{projectData.find((project) => project.id === action.projectId)?.name ?? action.projectId}</strong><small>{action.title} · {action.owner}</small><em>{action.targetDate || "未设置日期"}</em></button>) : <p>当前快照无逾期措施</p>}
           </section>
+          <section className="resource-conflict-alert">
+            <h3><span>⚡</span> 共享资源冲突 <b>{alerts.resourceConflicts.length}</b></h3>
+            {alerts.resourceConflicts.length ? alerts.resourceConflicts.slice(0, 1).map((conflict) => <button key={`resource-${conflict.resourceId}-${conflict.weekKey}`} onClick={() => onNavigate("resources")}><strong>{conflict.resourceName} · {conflict.utilization}%</strong><small>{conflict.projectNames.join("、") || conflict.resourceOrg}</small><em>{conflict.weekKey} · 超配 {conflict.overallocatedHours}h</em></button>) : <p>当前快照无共享资源超配</p>}
+          </section>
         </div>
       </aside>
     </section>
@@ -813,6 +829,7 @@ function Sidebar({ view, onNavigate, identity }: { view: View; onNavigate: Navig
   const items: Array<{ id: View; icon: string; label: string; roles?: Role[] }> = [
     { id: "portfolio", icon: "⌘", label: "项目总览" },
     { id: "analytics", icon: "▥", label: "组合分析" },
+    { id: "resources", icon: "▦", label: "资源计划" },
     { id: "project", icon: "▣", label: "项目台账" },
     { id: "report", icon: "✎", label: "周度填报", roles: ["manager", "pmo", "admin"] },
     { id: "pmo", icon: "◇", label: "PMO 管理", roles: ["pmo", "admin"] },
@@ -3815,14 +3832,14 @@ function PmoPage({ onNavigate, onDataChanged, identity, projectData = projects }
     fetch("/api/bootstrap")
       .then(async (response) => {
         if (!response.ok) throw new Error("无法读取PMO数据");
-        return response.json();
+        return (await response.json()) as {
+          snapshots?: SnapshotRow[];
+          baselineChanges?: BaselineRow[];
+          milestoneTemplates?: TemplateRow[];
+          weeklyReports?: WeeklyReportRow[];
+        };
       })
-      .then((data: {
-         snapshots?: SnapshotRow[];
-         baselineChanges?: BaselineRow[];
-         milestoneTemplates?: TemplateRow[];
-         weeklyReports?: WeeklyReportRow[];
-       }) => {
+      .then((data) => {
          const rows = data.snapshots ?? [];
          setSnapshotRows(rows);
          const current = rows
@@ -4323,6 +4340,7 @@ export default function Home() {
     highRisks: [],
     overdueActions: [],
     predictedDelays: [],
+    resourceConflicts: [],
   });
   const [trendData, setTrendData] = useState<TrendPoint[]>([]);
   const [templateData, setTemplateData] =
@@ -4372,6 +4390,7 @@ export default function Home() {
           highRisks: [],
           overdueActions: [],
           predictedDelays: [],
+          resourceConflicts: [],
         },
       );
       if (data.milestoneTemplates?.length) {
@@ -4408,5 +4427,5 @@ export default function Home() {
 
   if (dataState === "unauthenticated") return <LoginScreen />;
   if (view === "cockpit") return <><Cockpit onNavigate={navigate} projectData={dashboardData} snapshot={dashboardSnapshot} templateData={templateData} trends={trendData} alerts={dashboardAlerts} />{dataState === "fallback" && <div className="data-banner">当前数据服务不可用，管理大屏不展示未核实的演示数据。</div>}</>;
-  return <div className="app-shell"><Sidebar view={view} onNavigate={navigate} identity={identity} /><div className="workspace">{view === "portfolio" && <Portfolio onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} identity={identity} templateData={templateData} projectManagers={projectManagers} weeklyReports={weeklyReportData} />}{view === "analytics" && <PortfolioAnalytics onNavigate={(next, projectId) => navigate(next, projectId)} identity={identity} header={<WorkspaceHeader title="项目组合分析" subtitle="从组织、类型、负责人和标准节点维度识别共性瓶颈与基线漂移" onNavigate={navigate} identity={identity} />} />}{view === "project" && (projectData.length ? <ProjectDetail onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} projectId={selectedProjectId} identity={identity} projectManagers={projectManagers} /> : <EmptyProjectWorkspace onNavigate={navigate} identity={identity} />)}{view === "report" && (projectData.length ? <WeeklyReport onNavigate={navigate} onDataChanged={refreshData} projectId={selectedProjectId} projectData={projectData} identity={identity} snapshot={dashboardSnapshot} /> : <EmptyProjectWorkspace onNavigate={navigate} identity={identity} />)}{view === "pmo" && <PmoPage onNavigate={navigate} onDataChanged={refreshData} identity={identity} projectData={projectData} />}{view === "admin" && <AdminPage onNavigate={navigate} identity={identity} />}</div></div>;
+  return <div className="app-shell"><Sidebar view={view} onNavigate={navigate} identity={identity} /><div className="workspace">{view === "portfolio" && <Portfolio onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} identity={identity} templateData={templateData} projectManagers={projectManagers} weeklyReports={weeklyReportData} />}{view === "analytics" && <PortfolioAnalytics onNavigate={(next, projectId) => navigate(next, projectId)} identity={identity} header={<WorkspaceHeader title="项目组合分析" subtitle="从组织、类型、负责人和标准节点维度识别共性瓶颈与基线漂移" onNavigate={navigate} identity={identity} />} />}{view === "resources" && <ResourcePlanning identity={identity} onOpenProject={(projectId) => navigate("project", projectId)} header={<WorkspaceHeader title="跨项目资源计划" subtitle="统一资源池、周容量、项目分配与超配治理" onNavigate={navigate} identity={identity} />} />}{view === "project" && (projectData.length ? <ProjectDetail onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} projectId={selectedProjectId} identity={identity} projectManagers={projectManagers} /> : <EmptyProjectWorkspace onNavigate={navigate} identity={identity} />)}{view === "report" && (projectData.length ? <WeeklyReport onNavigate={navigate} onDataChanged={refreshData} projectId={selectedProjectId} projectData={projectData} identity={identity} snapshot={dashboardSnapshot} /> : <EmptyProjectWorkspace onNavigate={navigate} identity={identity} />)}{view === "pmo" && <PmoPage onNavigate={navigate} onDataChanged={refreshData} identity={identity} projectData={projectData} />}{view === "admin" && <AdminPage onNavigate={navigate} identity={identity} />}</div></div>;
 }

@@ -11,6 +11,10 @@ import {
   type ProjectScheduleMilestone,
   validateProjectSchedule,
 } from "@/lib/project-schedule";
+import {
+  formatShanghaiDateTime,
+  SHANGHAI_TIME_ZONE_LABEL,
+} from "@/lib/date-time";
 
 type Status = "green" | "yellow" | "red" | "na";
 type View =
@@ -2539,7 +2543,7 @@ function ProjectActivityPanel({
   };
   return <section className="content-card activity-card">
     <div className="card-title"><div><h2>操作审计</h2><p>项目、节点、风险、措施与基线关键操作统一追踪</p></div><button className="text-button" onClick={loadActivity}>刷新</button></div>
-    {data.auditLogs.length ? <div className="project-audit-timeline">{data.auditLogs.map((row) => <article key={row.id}><span className="audit-dot" /><div><strong>{actionNames[row.action] ?? row.action}</strong><p>{row.actorEmail} · {row.entityType} / {row.entityId}</p></div><time>{row.createdAt.replace("T", " ").slice(0, 16)}</time></article>)}</div> : <div className="empty-state">暂无项目操作记录</div>}
+    {data.auditLogs.length ? <div className="project-audit-timeline">{data.auditLogs.map((row) => <article key={row.id}><span className="audit-dot" /><div><strong>{actionNames[row.action] ?? row.action}</strong><p>{row.actorEmail} · {row.entityType} / {row.entityId}</p></div><time dateTime={row.createdAt} title={SHANGHAI_TIME_ZONE_LABEL}>{formatShanghaiDateTime(row.createdAt)}</time></article>)}</div> : <div className="empty-state">暂无项目操作记录</div>}
   </section>;
 }
 
@@ -3949,7 +3953,9 @@ function AdminPage({ onNavigate, identity }: { onNavigate: Navigate; identity: I
                         <strong>{actionNames[row.action] ?? row.action}</strong>
                         <p>{row.actorEmail} · {row.entityType} / {row.entityId}</p>
                       </div>
-                      <time>{row.createdAt.replace("T", " ").slice(0, 16)}</time>
+                      <time dateTime={row.createdAt} title={SHANGHAI_TIME_ZONE_LABEL}>
+                        {formatShanghaiDateTime(row.createdAt)}
+                      </time>
                     </div>
                   ))
                 ) : (

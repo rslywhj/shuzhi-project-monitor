@@ -8,7 +8,11 @@ import {
   getRequestIdentity,
   unauthorized,
 } from "@/lib/server-auth";
-import { hashPassword, validatePassword } from "@/lib/password-auth";
+import { hashPassword } from "@/lib/password-auth";
+import {
+  getPasswordPolicy,
+  validatePassword,
+} from "@/lib/password-policy";
 
 export const dynamic = "force-dynamic";
 
@@ -46,8 +50,9 @@ export async function PATCH(
     }
     const password =
       typeof payload.password === "string" ? payload.password : "";
+    const passwordPolicy = password ? await getPasswordPolicy() : null;
     if (password) {
-      const passwordError = validatePassword(password);
+      const passwordError = validatePassword(password, passwordPolicy!);
       if (passwordError) {
         return Response.json({ error: passwordError }, { status: 400 });
       }
@@ -91,7 +96,10 @@ export async function PATCH(
         );
       }
     }
-    const credentials = password ? await hashPassword(password) : {};
+    const credentials =
+      password && passwordPolicy
+        ? await hashPassword(password, passwordPolicy)
+        : {};
     const updateValues = {
       ...(payload.role ? { role: payload.role } : {}),
       ...(typeof payload.active === "boolean"

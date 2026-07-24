@@ -1,4 +1,9 @@
 import { env } from "cloudflare:workers";
+import {
+  DEFAULT_PASSWORD_POLICY,
+  type PasswordPolicy,
+  validatePassword,
+} from "@/lib/password-policy";
 
 // Cloudflare Workers Web Crypto currently caps PBKDF2 at 100,000 iterations.
 const PASSWORD_ITERATIONS = 100_000;
@@ -64,18 +69,11 @@ async function derivePassword(
   return new Uint8Array(bits);
 }
 
-export function validatePassword(password: string) {
-  if (password.length < 12 || password.length > 128) {
-    return "密码长度必须为12–128个字符。";
-  }
-  if (!/[A-Za-z]/.test(password) || !/\d/.test(password)) {
-    return "密码必须同时包含字母和数字。";
-  }
-  return null;
-}
-
-export async function hashPassword(password: string) {
-  const validationError = validatePassword(password);
+export async function hashPassword(
+  password: string,
+  policy: PasswordPolicy = DEFAULT_PASSWORD_POLICY,
+) {
+  const validationError = validatePassword(password, policy);
   if (validationError) throw new Error(validationError);
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const hash = await derivePassword(password, salt, PASSWORD_ITERATIONS);

@@ -22,6 +22,28 @@ export const users = sqliteTable("users", {
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
+export const securityConfigs = sqliteTable("security_configs", {
+  id: integer("id").primaryKey(),
+  minPasswordLength: integer("min_password_length").notNull().default(12),
+  requireLetter: integer("require_letter", { mode: "boolean" })
+    .notNull()
+    .default(true),
+  requireUppercase: integer("require_uppercase", { mode: "boolean" })
+    .notNull()
+    .default(false),
+  requireLowercase: integer("require_lowercase", { mode: "boolean" })
+    .notNull()
+    .default(false),
+  requireNumber: integer("require_number", { mode: "boolean" })
+    .notNull()
+    .default(true),
+  requireSymbol: integer("require_symbol", { mode: "boolean" })
+    .notNull()
+    .default(false),
+  updatedBy: text("updated_by").notNull(),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
 export const projects = sqliteTable(
   "projects",
   {

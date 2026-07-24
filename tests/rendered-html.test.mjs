@@ -531,6 +531,50 @@ test("shows a real authentication boundary with self-service and administrator p
   assert.match(readme, /独立账号密码登录/);
 });
 
+test("applies one administrator-configurable password policy to every credential workflow", async () => {
+  const [
+    schema,
+    migration,
+    policy,
+    policyRoute,
+    createUserRoute,
+    updateUserRoute,
+    changePasswordRoute,
+    page,
+    css,
+  ] = await Promise.all([
+    readFile(new URL("db/schema.ts", templateRoot), "utf8"),
+    readFile(new URL("drizzle/0015_security_config.sql", templateRoot), "utf8"),
+    readFile(new URL("lib/password-policy.ts", templateRoot), "utf8"),
+    readFile(new URL("app/api/security-config/route.ts", templateRoot), "utf8"),
+    readFile(new URL("app/api/users/route.ts", templateRoot), "utf8"),
+    readFile(new URL("app/api/users/[email]/route.ts", templateRoot), "utf8"),
+    readFile(new URL("app/api/auth/change-password/route.ts", templateRoot), "utf8"),
+    readFile(new URL("app/page.tsx", templateRoot), "utf8"),
+    readFile(new URL("app/globals.css", templateRoot), "utf8"),
+  ]);
+
+  assert.match(schema, /export const securityConfigs/);
+  assert.match(migration, /CREATE TABLE `security_configs`/);
+  assert.match(migration, /INSERT INTO `security_configs`/);
+  assert.match(policy, /minPasswordLength/);
+  assert.match(policy, /requireUppercase/);
+  assert.match(policy, /requireLowercase/);
+  assert.match(policy, /requireNumber/);
+  assert.match(policy, /requireSymbol/);
+  assert.match(policyRoute, /export async function GET/);
+  assert.match(policyRoute, /export async function PUT/);
+  assert.match(policyRoute, /canAdministerUsers/);
+  assert.match(policyRoute, /security_config\.update/);
+  assert.match(createUserRoute, /getPasswordPolicy/);
+  assert.match(updateUserRoute, /getPasswordPolicy/);
+  assert.match(changePasswordRoute, /getPasswordPolicy/);
+  assert.match(page, /密码复杂度策略/);
+  assert.match(page, /保存并立即生效/);
+  assert.match(page, /describePasswordPolicy/);
+  assert.match(css, /security-policy-card/);
+});
+
 test("keeps demo projects out of production and handles a real empty portfolio", async () => {
   const [page, seed, envExample, readme] = await Promise.all([
     readFile(new URL("app/page.tsx", templateRoot), "utf8"),

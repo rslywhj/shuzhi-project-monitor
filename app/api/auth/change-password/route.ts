@@ -5,9 +5,12 @@ import { apiError } from "@/lib/api-utils";
 import {
   clearSessionCookie,
   hashPassword,
-  validatePassword,
   verifyPassword,
 } from "@/lib/password-auth";
+import {
+  getPasswordPolicy,
+  validatePassword,
+} from "@/lib/password-policy";
 import { getRequestIdentity, unauthorized } from "@/lib/server-auth";
 
 export const dynamic = "force-dynamic";
@@ -26,7 +29,8 @@ export async function POST(request: Request) {
         : "";
     const newPassword =
       typeof payload.newPassword === "string" ? payload.newPassword : "";
-    const validationError = validatePassword(newPassword);
+    const passwordPolicy = await getPasswordPolicy();
+    const validationError = validatePassword(newPassword, passwordPolicy);
     if (validationError) {
       return Response.json({ error: validationError }, { status: 400 });
     }
@@ -54,7 +58,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const credentials = await hashPassword(newPassword);
+    const credentials = await hashPassword(newPassword, passwordPolicy);
     await db.batch([
       db
         .update(users)

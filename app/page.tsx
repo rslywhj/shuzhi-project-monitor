@@ -24,6 +24,31 @@ type View =
   | "admin";
 type Role = "executive" | "pmo" | "manager" | "admin";
 type Identity = { email: string; displayName: string; role: Role };
+type PasswordPolicy = {
+  minPasswordLength: number;
+  requireLetter: boolean;
+  requireUppercase: boolean;
+  requireLowercase: boolean;
+  requireNumber: boolean;
+  requireSymbol: boolean;
+};
+const defaultPasswordPolicy: PasswordPolicy = {
+  minPasswordLength: 12,
+  requireLetter: true,
+  requireUppercase: false,
+  requireLowercase: false,
+  requireNumber: true,
+  requireSymbol: false,
+};
+function describePasswordPolicy(policy: PasswordPolicy) {
+  const requirements = [`至少${policy.minPasswordLength}位`];
+  if (policy.requireLetter) requirements.push("字母");
+  if (policy.requireUppercase) requirements.push("大写字母");
+  if (policy.requireLowercase) requirements.push("小写字母");
+  if (policy.requireNumber) requirements.push("数字");
+  if (policy.requireSymbol) requirements.push("特殊字符");
+  return requirements.join("、");
+}
 type ProjectManagerAccount = { email: string; displayName: string };
 type Navigate = (view: View, projectId?: string) => void;
 type MilestoneData = {
@@ -592,7 +617,6 @@ function LoginScreen() {
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               autoComplete="current-password"
-              minLength={12}
               maxLength={128}
               required
             />
@@ -906,6 +930,7 @@ function WorkspaceHeader({ title, subtitle, onNavigate, identity }: { title: str
   const [passwordSaving, setPasswordSaving] = useState(false);
   const [passwordError, setPasswordError] = useState("");
   const [passwordMessage, setPasswordMessage] = useState("");
+  const [passwordPolicy, setPasswordPolicy] = useState(defaultPasswordPolicy);
   const [notificationRows, setNotificationRows] = useState<NotificationData[]>([]);
   const [notificationError, setNotificationError] = useState("");
   const roleNames: Record<Role, string> = {
@@ -980,6 +1005,31 @@ function WorkspaceHeader({ title, subtitle, onNavigate, identity }: { title: str
     await fetch("/api/auth/logout", { method: "POST" }).catch(() => null);
     window.location.assign("/");
   }
+  async function openPasswordModal() {
+    setPasswordError("");
+    setPasswordMessage("");
+    setPasswordOpen(true);
+    setMenu(false);
+    try {
+      const response = await fetch("/api/security-config", {
+        cache: "no-store",
+      });
+      const result = (await response.json()) as {
+        passwordPolicy?: PasswordPolicy;
+        error?: string;
+      };
+      if (!response.ok || !result.passwordPolicy) {
+        throw new Error(result.error || "密码策略读取失败");
+      }
+      setPasswordPolicy(result.passwordPolicy);
+    } catch (policyError) {
+      setPasswordError(
+        policyError instanceof Error
+          ? policyError.message
+          : "密码策略读取失败",
+      );
+    }
+  }
   async function changePassword(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setPasswordSaving(true);
@@ -1025,12 +1075,7 @@ function WorkspaceHeader({ title, subtitle, onNavigate, identity }: { title: str
         <div className="user-menu">
           {canGovern && <button onClick={() => onNavigate("admin")}>用户与权限</button>}
           <button
-            onClick={() => {
-              setPasswordError("");
-              setPasswordMessage("");
-              setPasswordOpen(true);
-              setMenu(false);
-            }}
+            onClick={() => void openPasswordModal()}
           >
             修改密码
           </button>
@@ -1079,10 +1124,10 @@ function WorkspaceHeader({ title, subtitle, onNavigate, identity }: { title: str
                 <input
                   name="newPassword"
                   type="password"
-                  minLength={12}
+                  minLength={passwordPolicy.minPasswordLength}
                   maxLength={128}
                   autoComplete="new-password"
-                  placeholder="至少12位，包含字母和数字"
+                  placeholder={describePasswordPolicy(passwordPolicy)}
                   required
                 />
               </label>
@@ -1091,14 +1136,14 @@ function WorkspaceHeader({ title, subtitle, onNavigate, identity }: { title: str
                 <input
                   name="confirmPassword"
                   type="password"
-                  minLength={12}
+                  minLength={passwordPolicy.minPasswordLength}
                   maxLength={128}
                   autoComplete="new-password"
                   required
                 />
               </label>
               <div className="password-security-note">
-                密码仅保存 PBKDF2 加盐散列；修改后旧会话将失效。
+                当前策略：{describePasswordPolicy(passwordPolicy)}。密码仅保存 PBKDF2 加盐散列；修改后旧会话将失效。
               </div>
               {passwordError && <div className="form-error" role="alert">! {passwordError}</div>}
               {passwordMessage && <div className="success-message" role="status">{passwordMessage}</div>}
@@ -3547,6 +3592,9 @@ function AdminPage({ onNavigate, identity }: { onNavigate: Navigate; identity: I
   const [resettingPassword, setResettingPassword] = useState(false);
   const [resetPasswordError, setResetPasswordError] = useState("");
   const [resetPasswordMessage, setResetPasswordMessage] = useState("");
+  const [passwordPolicy, setPasswordPolicy] = useState(defaultPasswordPolicy);
+  const [savingPasswordPolicy, setSavingPasswordPolicy] = useState(false);
+  const [passwordPolicyMessage, setPasswordPolicyMessage] = useState("");
   const actionNames: Record<string, string> = {
     "weekly_report.submit": "提交周报",
     "baseline_change.approve": "批准基线",
@@ -3558,6 +3606,7 @@ function AdminPage({ onNavigate, identity }: { onNavigate: Navigate; identity: I
     "user.update": "更新用户",
     "user.password_change": "用户修改密码",
     "user.password_reset": "管理员重置密码",
+    "security_config.update": "更新密码复杂度策略",
     "rule_config.publish": "发布规则",
     "risk.create": "登记风险",
     "risk.update": "更新风险",
@@ -3581,16 +3630,25 @@ function AdminPage({ onNavigate, identity }: { onNavigate: Navigate; identity: I
     setLoading(true);
     setError("");
     try {
-      const [usersResponse, auditResponse] = await Promise.all([
+      const [usersResponse, auditResponse, securityResponse] = await Promise.all([
         fetch("/api/users"),
         fetch("/api/audit-logs?limit=50"),
+        fetch("/api/security-config", { cache: "no-store" }),
       ]);
       const usersResult = (await usersResponse.json()) as { users?: UserRow[]; error?: string };
       const auditResult = (await auditResponse.json()) as { auditLogs?: AuditRow[]; error?: string };
+      const securityResult = (await securityResponse.json()) as {
+        passwordPolicy?: PasswordPolicy;
+        error?: string;
+      };
       if (!usersResponse.ok) throw new Error(usersResult.error || "用户数据读取失败");
       if (!auditResponse.ok) throw new Error(auditResult.error || "审计数据读取失败");
+      if (!securityResponse.ok || !securityResult.passwordPolicy) {
+        throw new Error(securityResult.error || "密码策略读取失败");
+      }
       setUsersData(usersResult.users ?? []);
       setAuditData(auditResult.auditLogs ?? []);
+      setPasswordPolicy(securityResult.passwordPolicy);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "系统管理数据读取失败");
     } finally {
@@ -3709,6 +3767,38 @@ function AdminPage({ onNavigate, identity }: { onNavigate: Navigate; identity: I
       );
     } finally {
       setResettingPassword(false);
+    }
+  }
+
+  async function savePasswordPolicy(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSavingPasswordPolicy(true);
+    setPasswordPolicyMessage("");
+    setError("");
+    try {
+      const response = await fetch("/api/security-config", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(passwordPolicy),
+      });
+      const result = (await response.json()) as {
+        passwordPolicy?: PasswordPolicy;
+        error?: string;
+      };
+      if (!response.ok || !result.passwordPolicy) {
+        throw new Error(result.error || "密码策略保存失败");
+      }
+      setPasswordPolicy(result.passwordPolicy);
+      setPasswordPolicyMessage(
+        `✓ 密码策略已生效：${describePasswordPolicy(result.passwordPolicy)}`,
+      );
+      await loadAdminData();
+    } catch (policyError) {
+      setError(
+        policyError instanceof Error ? policyError.message : "密码策略保存失败",
+      );
+    } finally {
+      setSavingPasswordPolicy(false);
     }
   }
 
@@ -3869,6 +3959,79 @@ function AdminPage({ onNavigate, identity }: { onNavigate: Navigate; identity: I
             )}
           </section>
         </div>
+        <section className="content-card security-policy-card">
+          <div className="card-title">
+            <div>
+              <h2>密码复杂度策略</h2>
+              <p>统一约束账号创建、个人修改密码和管理员重置密码</p>
+            </div>
+            <span className="count-badge">最长固定 128 位</span>
+          </div>
+          <form onSubmit={savePasswordPolicy}>
+            <label className="security-length-field">
+              最小密码长度
+              <div>
+                <input
+                  type="number"
+                  min={8}
+                  max={64}
+                  value={passwordPolicy.minPasswordLength}
+                  disabled={!canEditUsers || savingPasswordPolicy}
+                  onChange={(event) =>
+                    setPasswordPolicy((current) => ({
+                      ...current,
+                      minPasswordLength: Number(event.target.value),
+                    }))
+                  }
+                />
+                <span>位（可配置范围 8–64）</span>
+              </div>
+            </label>
+            <fieldset disabled={!canEditUsers || savingPasswordPolicy}>
+              <legend>必须包含的字符类别</legend>
+              {([
+                ["requireLetter", "字母", "至少一个英文字母"],
+                ["requireUppercase", "大写字母", "至少一个 A–Z"],
+                ["requireLowercase", "小写字母", "至少一个 a–z"],
+                ["requireNumber", "数字", "至少一个 0–9"],
+                ["requireSymbol", "特殊字符", "至少一个标点或符号"],
+              ] as const).map(([key, label, hint]) => (
+                <label key={key}>
+                  <input
+                    type="checkbox"
+                    checked={passwordPolicy[key]}
+                    onChange={(event) =>
+                      setPasswordPolicy((current) => ({
+                        ...current,
+                        [key]: event.target.checked,
+                      }))
+                    }
+                  />
+                  <span><strong>{label}</strong><small>{hint}</small></span>
+                </label>
+              ))}
+            </fieldset>
+            <div className="security-policy-preview">
+              <strong>当前规则</strong>
+              <span>{describePasswordPolicy(passwordPolicy)}</span>
+              <small>策略更新仅约束此后设置的密码，不强制迁移现有密码。</small>
+            </div>
+            {passwordPolicyMessage && (
+              <div className="success-message" role="status">
+                {passwordPolicyMessage}
+              </div>
+            )}
+            <div className="security-policy-actions">
+              {canEditUsers ? (
+                <button className="primary-button" disabled={savingPasswordPolicy}>
+                  {savingPasswordPolicy ? "正在保存…" : "保存并立即生效"}
+                </button>
+              ) : (
+                <span>仅系统管理员可修改密码策略</span>
+              )}
+            </div>
+          </form>
+        </section>
         {(identity?.role === "pmo" || identity?.role === "admin") && (
           <NotificationChannelPanel role={identity.role} />
         )}
@@ -3933,10 +4096,10 @@ function AdminPage({ onNavigate, identity }: { onNavigate: Navigate; identity: I
                   <input
                     name="password"
                     type="password"
-                    minLength={12}
+                    minLength={passwordPolicy.minPasswordLength}
                     maxLength={128}
                     autoComplete="new-password"
-                    placeholder="至少12位，包含字母和数字"
+                    placeholder={describePasswordPolicy(passwordPolicy)}
                     required
                   />
                 </label>
@@ -3945,7 +4108,7 @@ function AdminPage({ onNavigate, identity }: { onNavigate: Navigate; identity: I
                 <span>i</span>
                 <div>
                   <strong>Cloudflare 原生安全会话</strong>
-                  <p>密码仅保存 PBKDF2 加盐散列；浏览器会话使用 HttpOnly、Secure Cookie。</p>
+                  <p>当前策略：{describePasswordPolicy(passwordPolicy)}。密码仅保存 PBKDF2 加盐散列；浏览器会话使用 HttpOnly、Secure Cookie。</p>
                 </div>
               </div>
               {createUserError && (
@@ -4001,10 +4164,10 @@ function AdminPage({ onNavigate, identity }: { onNavigate: Navigate; identity: I
                 <input
                   name="password"
                   type="password"
-                  minLength={12}
+                  minLength={passwordPolicy.minPasswordLength}
                   maxLength={128}
                   autoComplete="new-password"
-                  placeholder="至少12位，包含字母和数字"
+                  placeholder={describePasswordPolicy(passwordPolicy)}
                   disabled={Boolean(resetPasswordMessage)}
                   required
                 />
@@ -4014,7 +4177,7 @@ function AdminPage({ onNavigate, identity }: { onNavigate: Navigate; identity: I
                 <input
                   name="confirmPassword"
                   type="password"
-                  minLength={12}
+                  minLength={passwordPolicy.minPasswordLength}
                   maxLength={128}
                   autoComplete="new-password"
                   disabled={Boolean(resetPasswordMessage)}
@@ -4022,7 +4185,7 @@ function AdminPage({ onNavigate, identity }: { onNavigate: Navigate; identity: I
                 />
               </label>
               <div className="password-security-note warning">
-                重置成功后，该用户已有登录会话将立即失效；请通过安全渠道告知新密码。
+                当前策略：{describePasswordPolicy(passwordPolicy)}。重置成功后，该用户已有登录会话将立即失效；请通过安全渠道告知新密码。
               </div>
               {resetPasswordError && <div className="form-error" role="alert">! {resetPasswordError}</div>}
               {resetPasswordMessage && <div className="success-message" role="status">{resetPasswordMessage}</div>}

@@ -9,7 +9,11 @@ import {
   getRequestIdentity,
   unauthorized,
 } from "@/lib/server-auth";
-import { hashPassword, validatePassword } from "@/lib/password-auth";
+import { hashPassword } from "@/lib/password-auth";
+import {
+  getPasswordPolicy,
+  validatePassword,
+} from "@/lib/password-policy";
 
 export const dynamic = "force-dynamic";
 
@@ -96,7 +100,8 @@ export async function POST(request: Request) {
     if (!role) {
       return Response.json({ error: "请选择有效的用户角色。" }, { status: 400 });
     }
-    const passwordError = validatePassword(password);
+    const passwordPolicy = await getPasswordPolicy();
+    const passwordError = validatePassword(password, passwordPolicy);
     if (passwordError) {
       return Response.json({ error: passwordError }, { status: 400 });
     }
@@ -111,7 +116,7 @@ export async function POST(request: Request) {
       return Response.json({ error: "该邮箱已存在，无需重复预置。" }, { status: 409 });
     }
 
-    const credentials = await hashPassword(password);
+    const credentials = await hashPassword(password, passwordPolicy);
     await db.batch([
       db
         .insert(users)

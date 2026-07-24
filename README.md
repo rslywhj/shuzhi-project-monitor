@@ -6,7 +6,9 @@
 
 ## 在线体验
 
-[打开已部署的在线演示站点](https://shuzhi-project-monitor.rslywhj.chatgpt.site)
+[打开 Cloudflare 自定义域名站点](https://itpm.dougge.top)
+
+备用访问地址：[OpenAI Sites 生产站点](https://shuzhi-project-monitor.rslywhj.chatgpt.site)
 
 > 管理大屏可用于态势查看；工作台的数据维护能力会按登录账号角色授权。
 
@@ -132,6 +134,14 @@ drizzle/            数据库迁移
 tests/              自动化测试
 worker/             Cloudflare Worker 入口
 public/             品牌与分享资源
+```
+
+## Cloudflare 自定义域名
+
+`worker/cloudflare-proxy.js` 将 `itpm.dougge.top` 反向代理到已发布的 OpenAI Sites 生产站点，`wrangler.cloudflare.jsonc` 通过 Cloudflare Workers Custom Domain 管理域名和证书。
+
+```bash
+npx wrangler@4.114.0 deploy --config wrangler.cloudflare.jsonc
 ```
 
 ## 当前阶段

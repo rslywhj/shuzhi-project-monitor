@@ -1,0 +1,15 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "shuzhi-project-monitor-proxy",
+  "main": "worker/cloudflare-proxy.js",
+  "compatibility_date": "2026-07-24",
+  "routes": [
+    {
+      "pattern": "itpm.dougge.top",
+      "custom_domain": true
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}

@@ -1,18 +1,18 @@
 {
-  "name": "shuzhi-project-monitor-local",
+  "name": "shuzhi-project-monitor",
   "compatibility_date": "2026-07-23",
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "site-creator-d1",
-      "database_id": "00000000-0000-4000-8000-000000000000",
+      "database_name": "shuzhi-project-monitor",
+      "database_id": "1f5f6bde-24e0-4c3b-8fd1-812690e613fc",
       "migrations_dir": "drizzle"
     }
   ],
-  "r2_buckets": [
+  "kv_namespaces": [
     {
       "binding": "FILES",
-      "bucket_name": "site-creator-r2"
+      "id": "98fae6916ed74918bae51e82dc8618b1"
     }
   ]
 }

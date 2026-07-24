@@ -8,10 +8,22 @@ import {
   getRequestIdentity,
   unauthorized,
 } from "@/lib/server-auth";
+import { hashPassword, validatePassword } from "@/lib/password-auth";
 
 export const dynamic = "force-dynamic";
 
 const roles = new Set(["executive", "pmo", "manager", "admin"]);
+
+function publicUser(user: typeof users.$inferSelect) {
+  return {
+    email: user.email,
+    displayName: user.displayName,
+    role: user.role,
+    active: user.active,
+    createdAt: user.createdAt,
+    passwordConfigured: Boolean(user.passwordHash),
+  };
+}
 
 export async function PATCH(
   request: Request,
@@ -27,9 +39,18 @@ export async function PATCH(
     const payload = (await request.json()) as {
       role?: "executive" | "pmo" | "manager" | "admin";
       active?: boolean;
+      password?: unknown;
     };
     if (payload.role && !roles.has(payload.role)) {
       return Response.json({ error: "无效的用户角色。" }, { status: 400 });
+    }
+    const password =
+      typeof payload.password === "string" ? payload.password : "";
+    if (password) {
+      const passwordError = validatePassword(password);
+      if (passwordError) {
+        return Response.json({ error: passwordError }, { status: 400 });
+      }
     }
     if (
       identity.email === email &&
@@ -69,11 +90,20 @@ export async function PATCH(
         );
       }
     }
+    const credentials = password ? await hashPassword(password) : {};
     const updateValues = {
       ...(payload.role ? { role: payload.role } : {}),
       ...(typeof payload.active === "boolean"
         ? { active: payload.active }
         : {}),
+      ...credentials,
+    };
+    const auditPayload = {
+      ...(payload.role ? { role: payload.role } : {}),
+      ...(typeof payload.active === "boolean"
+        ? { active: payload.active }
+        : {}),
+      passwordReset: Boolean(password),
     };
     if (invalidatesProjectOwnership) {
       const [updated] = await db
@@ -103,7 +133,7 @@ export async function PATCH(
         entityType: "user",
         entityId: email,
         detailJson: JSON.stringify({
-          ...payload,
+          ...auditPayload,
           previousRole: existing.role,
           previousActive: existing.active,
         }),
@@ -117,7 +147,7 @@ export async function PATCH(
           entityType: "user",
           entityId: email,
           detailJson: JSON.stringify({
-            ...payload,
+            ...auditPayload,
             previousRole: existing.role,
             previousActive: existing.active,
           }),
@@ -129,7 +159,7 @@ export async function PATCH(
       .from(users)
       .where(eq(users.email, email))
       .limit(1);
-    return Response.json({ user });
+    return Response.json({ user: user ? publicUser(user) : null });
   } catch (error) {
     return apiError(error);
   }

@@ -9,10 +9,22 @@ import {
   getRequestIdentity,
   unauthorized,
 } from "@/lib/server-auth";
+import { hashPassword, validatePassword } from "@/lib/password-auth";
 
 export const dynamic = "force-dynamic";
 
 const roles = new Set(["executive", "pmo", "manager", "admin"]);
+
+function publicUser(user: typeof users.$inferSelect) {
+  return {
+    email: user.email,
+    displayName: user.displayName,
+    role: user.role,
+    active: user.active,
+    createdAt: user.createdAt,
+    passwordConfigured: Boolean(user.passwordHash),
+  };
+}
 
 export async function GET(request: Request) {
   try {
@@ -33,7 +45,7 @@ export async function GET(request: Request) {
     }
     return Response.json({
       users: rows.map((user) => ({
-        ...user,
+        ...publicUser(user),
         assignedProjectCount: assignedCounts.get(user.email) ?? 0,
       })),
     });
@@ -52,6 +64,7 @@ export async function POST(request: Request) {
       email?: unknown;
       displayName?: unknown;
       role?: unknown;
+      password?: unknown;
     };
     const email =
       typeof payload.email === "string"
@@ -65,6 +78,8 @@ export async function POST(request: Request) {
       typeof payload.role === "string" && roles.has(payload.role)
         ? (payload.role as "executive" | "pmo" | "manager" | "admin")
         : null;
+    const password =
+      typeof payload.password === "string" ? payload.password : "";
     if (
       !email ||
       email.length > 254 ||
@@ -81,6 +96,10 @@ export async function POST(request: Request) {
     if (!role) {
       return Response.json({ error: "请选择有效的用户角色。" }, { status: 400 });
     }
+    const passwordError = validatePassword(password);
+    if (passwordError) {
+      return Response.json({ error: passwordError }, { status: 400 });
+    }
 
     const db = getDb();
     const [existing] = await db
@@ -92,8 +111,11 @@ export async function POST(request: Request) {
       return Response.json({ error: "该邮箱已存在，无需重复预置。" }, { status: 409 });
     }
 
+    const credentials = await hashPassword(password);
     await db.batch([
-      db.insert(users).values({ email, displayName, role, active: true }),
+      db
+        .insert(users)
+        .values({ email, displayName, role, active: true, ...credentials }),
       db.insert(auditLogs).values({
         actorEmail: identity.email,
         action: "user.create",
@@ -107,7 +129,10 @@ export async function POST(request: Request) {
       .from(users)
       .where(eq(users.email, email))
       .limit(1);
-    return Response.json({ user }, { status: 201 });
+    return Response.json(
+      { user: user ? publicUser(user) : null },
+      { status: 201 },
+    );
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
     if (message.includes("UNIQUE constraint failed")) {

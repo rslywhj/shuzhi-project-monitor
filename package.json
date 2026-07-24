@@ -7,13 +7,15 @@
   },
   "scripts": {
     "dev": "vinext dev",
-    "build": "vinext build",
+    "build": "npx --yes node@22 node_modules/vinext/dist/cli.js build",
     "start": "vinext start",
     "test": "npm run build && node --test tests/*.test.mjs",
     "test:scale": "node tests/runtime-scale-smoke.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
+    "deploy:cloudflare": "npm run build && wrangler deploy --config wrangler.production.jsonc",
     "db:generate": "drizzle-kit generate",
-    "db:local:apply": "wrangler d1 migrations apply DB --local --persist-to .wrangler/state --config wrangler.local.jsonc"
+    "db:local:apply": "wrangler d1 migrations apply DB --local --persist-to .wrangler/state --config wrangler.local.jsonc",
+    "db:remote:apply": "wrangler d1 migrations apply DB --remote --config wrangler.production.jsonc"
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",

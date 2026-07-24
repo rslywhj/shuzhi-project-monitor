@@ -1,0 +1,55 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "shuzhi-project-monitor",
+  "main": "dist/server/index.js",
+  "compatibility_date": "2026-07-24",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "no_bundle": true,
+  "rules": [
+    {
+      "type": "ESModule",
+      "globs": [
+        "**/*.js",
+        "**/*.mjs"
+      ]
+    }
+  ],
+  "assets": {
+    "directory": "dist/client",
+    "binding": "ASSETS"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "shuzhi-project-monitor",
+      "database_id": "1f5f6bde-24e0-4c3b-8fd1-812690e613fc",
+      "migrations_dir": "drizzle"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "FILES",
+      "id": "98fae6916ed74918bae51e82dc8618b1"
+    }
+  ],
+  "vars": {
+    "APP_ADMIN_EMAILS": "849916182@qq.com",
+    "SEED_DEMO_DATA": "false"
+  },
+  "triggers": {
+    "crons": [
+      "0 * * * *"
+    ]
+  },
+  "routes": [
+    {
+      "pattern": "itpm.dougge.top",
+      "custom_domain": true
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}

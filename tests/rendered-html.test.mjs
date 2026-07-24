@@ -41,9 +41,9 @@ test("ships the complete prototype flow without starter artifacts", async () => 
 });
 
 test("defines durable, authorized and auditable workflow APIs", async () => {
-  const [hosting, schema, reportRoute, baselineRoute, baselineRequestRoute, baselineRejectRoute, snapshotRoute, snapshotService, snapshotReopenRoute, migration, snapshotLifecycleMigration] =
+  const [wrangler, schema, reportRoute, baselineRoute, baselineRequestRoute, baselineRejectRoute, snapshotRoute, snapshotService, snapshotReopenRoute, migration, snapshotLifecycleMigration] =
     await Promise.all([
-      readFile(new URL(".openai/hosting.json", templateRoot), "utf8"),
+      readFile(new URL("wrangler.production.jsonc", templateRoot), "utf8"),
       readFile(new URL("db/schema.ts", templateRoot), "utf8"),
       readFile(
         new URL("app/api/projects/[id]/weekly-reports/route.ts", templateRoot),
@@ -71,7 +71,8 @@ test("defines durable, authorized and auditable workflow APIs", async () => {
       readFile(new URL("drizzle/0010_dazzling_supernaut.sql", templateRoot), "utf8"),
     ]);
 
-  assert.match(hosting, /"d1":\s*"DB"/);
+  assert.match(wrangler, /"binding":\s*"DB"/);
+  assert.match(wrangler, /"database_name":\s*"shuzhi-project-monitor"/);
   for (const table of [
     "projects",
     "milestones",
@@ -339,9 +340,10 @@ test("creates every project with an independent and reviewable milestone plan", 
 });
 
 test("pre-provisions authenticated users with admin-only roles and audit history", async () => {
-  const [usersRoute, page] = await Promise.all([
+  const [usersRoute, page, passwordAuth] = await Promise.all([
     readFile(new URL("app/api/users/route.ts", templateRoot), "utf8"),
     readFile(new URL("app/page.tsx", templateRoot), "utf8"),
+    readFile(new URL("lib/password-auth.ts", templateRoot), "utf8"),
   ]);
 
   assert.match(usersRoute, /export async function POST/);
@@ -351,15 +353,20 @@ test("pre-provisions authenticated users with admin-only roles and audit history
   assert.match(usersRoute, /用户姓名长度必须为2–60个字符/);
   assert.match(usersRoute, /该邮箱已存在，无需重复预置/);
   assert.match(page, /预置登录账号/);
-  assert.match(page, /首次通过统一登录进入后/);
-  assert.match(page, /身份与权限分离/);
+  assert.match(page, /初始密码/);
+  assert.match(page, /Cloudflare 原生安全会话/);
+  assert.match(page, /PBKDF2/);
   assert.match(page, /"user\.create": "预置用户"/);
+  assert.match(passwordAuth, /PBKDF2/);
+  assert.match(passwordAuth, /SESSION_COOKIE/);
+  assert.match(passwordAuth, /HttpOnly/);
 });
 
-test("persists weekly report attachments in R2 and removes dead prototype controls", async () => {
-  const [hosting, schema, migration, uploadRoute, fileRoute, activityRoute, page] =
+test("persists weekly report attachments in Workers KV and removes dead prototype controls", async () => {
+  const [wrangler, storage, schema, migration, uploadRoute, fileRoute, activityRoute, page] =
     await Promise.all([
-      readFile(new URL(".openai/hosting.json", templateRoot), "utf8"),
+      readFile(new URL("wrangler.production.jsonc", templateRoot), "utf8"),
+      readFile(new URL("lib/storage.ts", templateRoot), "utf8"),
       readFile(new URL("db/schema.ts", templateRoot), "utf8"),
       readFile(
         new URL("drizzle/0006_faithful_black_cat.sql", templateRoot),
@@ -380,7 +387,11 @@ test("persists weekly report attachments in R2 and removes dead prototype contro
       readFile(new URL("app/page.tsx", templateRoot), "utf8"),
     ]);
 
-  assert.match(hosting, /"r2":\s*"FILES"/);
+  assert.match(wrangler, /"kv_namespaces"/);
+  assert.match(wrangler, /"binding":\s*"FILES"/);
+  assert.match(storage, /KVNamespace/);
+  assert.match(storage, /getWithMetadata/);
+  assert.match(storage, /namespace\.put/);
   assert.match(schema, /export const attachments/);
   assert.match(migration, /CREATE TABLE `attachments`/);
   assert.match(uploadRoute, /MAX_FILE_SIZE/);
@@ -474,9 +485,11 @@ test("supports all required management heatmap filter dimensions", async () => {
 });
 
 test("shows a real authentication boundary instead of unauthenticated demo data", async () => {
-  const [page, auth, serverAuth, readme] = await Promise.all([
+  const [page, passwordAuth, loginRoute, logoutRoute, serverAuth, readme] = await Promise.all([
     readFile(new URL("app/page.tsx", templateRoot), "utf8"),
-    readFile(new URL("app/chatgpt-auth.ts", templateRoot), "utf8"),
+    readFile(new URL("lib/password-auth.ts", templateRoot), "utf8"),
+    readFile(new URL("app/api/auth/login/route.ts", templateRoot), "utf8"),
+    readFile(new URL("app/api/auth/logout/route.ts", templateRoot), "utf8"),
     readFile(new URL("lib/server-auth.ts", templateRoot), "utf8"),
     readFile(new URL("README.md", templateRoot), "utf8"),
   ]);
@@ -484,20 +497,21 @@ test("shows a real authentication boundary instead of unauthenticated demo data"
   assert.match(page, /function LoginScreen/);
   assert.match(page, /response\.status === 401/);
   assert.match(page, /setDataState\("unauthenticated"\)/);
-  assert.match(page, /\/signin-with-chatgpt\?return_to=%2F/);
-  assert.match(page, /\/signout-with-chatgpt\?return_to=%2F/);
-  assert.match(page, /身份由登录服务验证/);
-  assert.match(page, /请联系管理员预置账号/);
-  assert.match(auth, /safeRelativeReturnPath/);
-  assert.match(auth, /isReservedAuthPath/);
-  assert.match(serverAuth, /isLocalDemo = isLocal && !forwardedEmail/);
-  assert.match(
-    serverAuth,
-    /if \(!isLocalDemo && !configuredAdmins\.includes\(email\)\) return null/,
-  );
-  assert.match(serverAuth, /role: "admin"/);
-  assert.match(serverAuth, /联系管理员确认账号已经开通/);
-  assert.match(readme, /其他登录账号不会自动注册/);
+  assert.match(page, /\/api\/auth\/login/);
+  assert.match(page, /\/api\/auth\/logout/);
+  assert.match(passwordAuth, /PBKDF2/);
+  assert.match(passwordAuth, /shuzhi_session/);
+  assert.match(passwordAuth, /APP_SESSION_SECRET/);
+  assert.match(passwordAuth, /HttpOnly/);
+  assert.match(passwordAuth, /Secure/);
+  assert.match(passwordAuth, /SameSite=Lax/);
+  assert.match(loginRoute, /createSessionToken/);
+  assert.match(loginRoute, /sessionCookie/);
+  assert.match(logoutRoute, /clearSessionCookie/);
+  assert.match(serverAuth, /sessionEmail/);
+  assert.doesNotMatch(serverAuth, /oai-authenticated-user-email/);
+  assert.doesNotMatch(serverAuth, /cf-access-authenticated-user-email/);
+  assert.match(readme, /独立账号密码登录/);
 });
 
 test("keeps demo projects out of production and handles a real empty portfolio", async () => {

@@ -530,6 +530,31 @@ function AppLogo({ dark = false }: { dark?: boolean }) {
 }
 
 function LoginScreen() {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+
+  async function login(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSubmitting(true);
+    setError("");
+    try {
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const result = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(result.error || "登录失败");
+      window.location.reload();
+    } catch (loginError) {
+      setError(loginError instanceof Error ? loginError.message : "登录失败");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   return <main className="login-screen">
     <section className="login-intro">
       <AppLogo dark />
@@ -548,15 +573,42 @@ function LoginScreen() {
       <div className="login-card">
         <span className="login-kicker">SECURE ACCESS</span>
         <h2>登录工作台</h2>
-        <p>使用组织平台账号验证身份。登录后系统将按管理层、项目经理、PMO 或管理员角色自动授权。</p>
-        <a className="login-button" href="/signin-with-chatgpt?return_to=%2F">使用平台账号登录 <span>→</span></a>
+        <p>使用系统管理员分配的独立账号登录。平台部署于 Cloudflare，并按管理层、项目经理、PMO 或管理员角色授权。</p>
+        <form className="login-form" onSubmit={login}>
+          <label>
+            登录邮箱
+            <input
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              autoComplete="username"
+              required
+            />
+          </label>
+          <label>
+            密码
+            <input
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              autoComplete="current-password"
+              minLength={12}
+              maxLength={128}
+              required
+            />
+          </label>
+          {error && <div className="form-error" role="alert">! {error}</div>}
+          <button className="login-button" disabled={submitting}>
+            {submitting ? "正在验证…" : "登录工作台"} <span>→</span>
+          </button>
+        </form>
         <div className="login-role-grid">
           <span><b>管理层</b><small>只读查看组合态势</small></span>
           <span><b>项目经理</b><small>维护所属项目进度</small></span>
           <span><b>PMO</b><small>治理规则与周度快照</small></span>
           <span><b>管理员</b><small>维护账号权限</small></span>
         </div>
-        <small className="login-note">平台不在浏览器保存密码；身份由登录服务验证。若登录后仍停留在此页，请联系管理员预置账号。</small>
+        <small className="login-note">密码经 PBKDF2 加盐散列保存；会话使用安全、仅 HTTP Cookie。若无法登录，请联系管理员重置账号。</small>
       </div>
     </section>
   </main>;
@@ -920,11 +972,15 @@ function WorkspaceHeader({ title, subtitle, onNavigate, identity }: { title: str
       );
     }
   }
+  async function logout() {
+    await fetch("/api/auth/logout", { method: "POST" }).catch(() => null);
+    window.location.assign("/");
+  }
   return <header className="workspace-header">
     <div><h1>{title}</h1><p>{subtitle}</p></div>
     <div className="header-actions"><button className="icon-button" aria-label="搜索项目" onClick={() => onNavigate("portfolio")}>⌕</button><button className="icon-button notice" aria-label={`通知${unreadCount ? `，${unreadCount}条未读` : ""}`} aria-expanded={noticeOpen} onClick={() => { setNoticeOpen((value) => !value); setMenu(false); if (!noticeOpen) void loadNotifications(); }}>♢{unreadCount > 0 && <b>{unreadCount > 9 ? "9+" : unreadCount}</b>}</button><button className="user-button" onClick={() => { setMenu(!menu); setNoticeOpen(false); }}><span className="avatar">{displayName[0]}</span><span><strong>{displayName}</strong><small>{roleName}</small></span><em>⌄</em></button></div>
     {noticeOpen && <section className="notification-center"><div className="notification-head"><div><strong>通知中心</strong><span>{unreadCount} 条未读</span></div>{unreadCount > 0 && <button onClick={markAllNotificationsRead}>全部已读</button>}</div>{notificationError ? <div className="notification-error">! {notificationError}</div> : notificationRows.filter((row) => row.status !== "dismissed").length ? <div className="notification-list">{notificationRows.filter((row) => row.status !== "dismissed").slice(0, 20).map((notification) => <button className={`${notification.severity} ${notification.status}`} key={notification.id} onClick={() => openNotification(notification)}><span className="notification-symbol">{notification.severity === "critical" ? "■" : notification.severity === "warning" ? "▲" : "●"}</span><div><strong>{notification.title}</strong><p>{notification.message}</p><small>{notification.createdAt.replace("T"," ").slice(0,16)} · {notification.createdBy}</small></div>{notification.status === "unread" && <i />}</button>)}</div> : <div className="notification-empty">暂无通知</div>}<div className="notification-foot">{canGovern ? <button onClick={() => onNavigate("pmo")}>进入 PMO 待办</button> : <span>通知由 PMO 与系统工作流生成</span>}</div></section>}
-    {menu && <div className="user-menu">{canGovern && <button onClick={() => onNavigate("admin")}>用户与权限</button>}<button onClick={() => onNavigate("portfolio")}>项目工作台</button><button onClick={() => onNavigate("cockpit")}>打开管理大屏</button><a href="/signout-with-chatgpt?return_to=%2F">退出登录</a></div>}
+    {menu && <div className="user-menu">{canGovern && <button onClick={() => onNavigate("admin")}>用户与权限</button>}<button onClick={() => onNavigate("portfolio")}>项目工作台</button><button onClick={() => onNavigate("cockpit")}>打开管理大屏</button><button onClick={logout}>退出登录</button></div>}
   </header>;
 }
 
@@ -3450,6 +3506,7 @@ function AdminPage({ onNavigate, identity }: { onNavigate: Navigate; identity: I
           email: form.get("email"),
           displayName: form.get("displayName"),
           role: form.get("role"),
+          password: form.get("password"),
         }),
       });
       const result = (await response.json()) as { error?: string };
@@ -3485,7 +3542,7 @@ function AdminPage({ onNavigate, identity }: { onNavigate: Navigate; identity: I
                 <h2>用户与角色</h2>
                 <p>
                   {canEditUsers
-                    ? "可预置账号、调整角色并启停；实际身份仍由统一登录平台确认"
+                    ? "可创建独立账号、设置初始密码、调整角色并启停"
                     : "PMO 可查看账号，只有系统管理员可调整权限"}
                 </p>
               </div>
@@ -3624,7 +3681,7 @@ function AdminPage({ onNavigate, identity }: { onNavigate: Navigate; identity: I
             <span className="modal-kicker">ACCOUNT PROVISIONING</span>
             <h2>预置登录账号</h2>
             <p>
-              预先绑定邮箱和系统角色。用户首次通过统一登录进入后，将直接沿用该角色与权限。
+              创建登录邮箱、初始密码和系统角色；用户登录后将直接沿用该角色与权限。
             </p>
             <form onSubmit={createUser}>
               <div className="modal-form-grid">
@@ -3658,12 +3715,24 @@ function AdminPage({ onNavigate, identity }: { onNavigate: Navigate; identity: I
                     <option value="admin">系统管理员</option>
                   </select>
                 </label>
+                <label>
+                  初始密码
+                  <input
+                    name="password"
+                    type="password"
+                    minLength={12}
+                    maxLength={128}
+                    autoComplete="new-password"
+                    placeholder="至少12位，包含字母和数字"
+                    required
+                  />
+                </label>
               </div>
               <div className="account-provision-note">
                 <span>i</span>
                 <div>
-                  <strong>身份与权限分离</strong>
-                  <p>系统只保存邮箱、姓名和角色，不创建或保管密码；登录身份由统一登录平台验证。</p>
+                  <strong>Cloudflare 原生安全会话</strong>
+                  <p>密码仅保存 PBKDF2 加盐散列；浏览器会话使用 HttpOnly、Secure Cookie。</p>
                 </div>
               </div>
               {createUserError && (

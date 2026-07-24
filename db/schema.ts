@@ -15,6 +15,10 @@ export const users = sqliteTable("users", {
     .notNull()
     .default("manager"),
   active: integer("active", { mode: "boolean" }).notNull().default(true),
+  passwordHash: text("password_hash"),
+  passwordSalt: text("password_salt"),
+  passwordIterations: integer("password_iterations"),
+  passwordChangedAt: text("password_changed_at"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 

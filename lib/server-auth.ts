@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { users } from "@/db/schema";
+import { sessionEmail } from "@/lib/password-auth";
 
 export type AppRole = "executive" | "pmo" | "manager" | "admin";
 
@@ -11,28 +12,12 @@ export type RequestIdentity = {
   role: AppRole;
 };
 
-const EMAIL_HEADER = "oai-authenticated-user-email";
-const NAME_HEADER = "oai-authenticated-user-full-name";
-const NAME_ENCODING_HEADER = "oai-authenticated-user-full-name-encoding";
-
-function decodeDisplayName(request: Request, email: string) {
-  const value = request.headers.get(NAME_HEADER);
-  if (!value || request.headers.get(NAME_ENCODING_HEADER) !== "percent-encoded-utf-8") {
-    return email;
-  }
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return email;
-  }
-}
-
 export async function getRequestIdentity(request: Request): Promise<RequestIdentity | null> {
   const url = new URL(request.url);
-  const forwardedEmail = request.headers.get(EMAIL_HEADER)?.trim().toLowerCase();
+  const cookieEmail = await sessionEmail(request);
   const isLocal = url.hostname === "localhost" || url.hostname === "127.0.0.1";
-  const isLocalDemo = isLocal && !forwardedEmail;
-  const email = forwardedEmail || (isLocalDemo ? "demo@local" : "");
+  const isLocalDemo = isLocal && !cookieEmail;
+  const email = cookieEmail || (isLocalDemo ? "demo@local" : "");
   if (!email) return null;
 
   const db = getDb();
@@ -59,10 +44,8 @@ export async function getRequestIdentity(request: Request): Promise<RequestIdent
     };
   }
 
-  if (!isLocalDemo && !configuredAdmins.includes(email)) return null;
-  const displayName = isLocalDemo
-    ? "本地演示用户"
-    : decodeDisplayName(request, email);
+  if (!isLocalDemo) return null;
+  const displayName = "本地演示用户";
   await db
     .insert(users)
     .values({ email, displayName, role: "admin" })

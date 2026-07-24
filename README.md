@@ -8,8 +8,6 @@
 
 [打开 Cloudflare 自定义域名站点](https://itpm.dougge.top)
 
-备用访问地址：[OpenAI Sites 生产站点](https://shuzhi-project-monitor.rslywhj.chatgpt.site)
-
 > 管理大屏可用于态势查看；工作台的数据维护能力会按登录账号角色授权。
 
 ## 已实现能力
@@ -37,8 +35,8 @@
 - 红黄节点偏差原因和纠偏措施闭环
 - 基线变更审批及版本追溯
 - PMO 数据质量检查与周度快照锁定
-- D1 数据库与 R2 文件持久化、服务端写入校验和操作审计
-- 组织平台账号登录/退出及管理层、PMO、项目经理权限边界
+- D1 数据库与 Workers KV 文件持久化、服务端写入校验和操作审计
+- 独立账号密码登录/退出及管理层、PMO、项目经理权限边界
 - 已锁定周期防篡改和重复审批保护
 - 项目创建、标准节点自动初始化与项目主数据维护 API
 - 手工新建项目按独立起止日期自动编排节点计划，支持逐节点校准并冻结原始基线
@@ -88,7 +86,7 @@
 - Vinext + Vite
 - TypeScript
 - Tailwind CSS
-- Cloudflare Workers、D1 / OpenAI Sites
+- Cloudflare Workers、D1、Workers KV
 - Node.js Test Runner
 
 ## 本地运行
@@ -103,7 +101,7 @@ npm run dev
 
 默认访问地址由开发服务器输出。
 
-生产环境需设置 `APP_ADMIN_EMAILS`，多个管理员邮箱使用英文逗号分隔，用于首次自举系统管理员。其他登录账号不会自动注册，必须由管理员在“系统管理”中预置并分配角色后才能进入平台。
+生产环境需设置 `APP_ADMIN_EMAILS` 和至少 32 位的 `APP_SESSION_SECRET`。管理员通过“系统管理”创建独立账号、初始密码并分配角色。
 
 生产站点未登录时展示安全登录页，不会回退展示演示项目；本地 `localhost` 开发环境使用管理员演示身份，便于功能验证。
 
@@ -136,14 +134,15 @@ worker/             Cloudflare Worker 入口
 public/             品牌与分享资源
 ```
 
-## Cloudflare 自定义域名
+## Cloudflare 部署
 
-`worker/cloudflare-proxy.js` 将 `itpm.dougge.top` 反向代理到已发布的 OpenAI Sites 生产站点，`wrangler.cloudflare.jsonc` 通过 Cloudflare Workers Custom Domain 管理域名和证书。
+应用完整运行于 Cloudflare Workers，业务数据存储于 D1，附件存储于 Workers KV，`itpm.dougge.top` 通过 Workers Custom Domain 管理域名和证书，不依赖外部站点源。
 
 ```bash
-npx wrangler@4.114.0 deploy --config wrangler.cloudflare.jsonc
+npm run db:remote:apply
+npm run deploy:cloudflare
 ```
 
 ## 当前阶段
 
-当前版本已完成高保真界面、D1/R2 持久化、身份权限、项目和用户管理、项目生命周期、负责人账号目录闭环、Excel批量导入、12节点模板治理、自定义节点候选提升、规则版本、风险措施闭环、周报附件、站内及外部通知、催报升级、组合分析、延期概率预测、跨周期事后度量、跨项目资源容量与冲突治理、报表导出、核心工作流 API 及审计能力。后续将继续扩展预算与质量健康度、资源需求预测和更完整的业务分支回归。
+当前版本已完成高保真界面、Cloudflare D1/KV 持久化、独立账号身份权限、项目和用户管理、项目生命周期、负责人账号目录闭环、Excel批量导入、12节点模板治理、自定义节点候选提升、规则版本、风险措施闭环、周报附件、站内及外部通知、催报升级、组合分析、延期概率预测、跨周期事后度量、跨项目资源容量与冲突治理、报表导出、核心工作流 API 及审计能力。后续将继续扩展预算与质量健康度、资源需求预测和更完整的业务分支回归。

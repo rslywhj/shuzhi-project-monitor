@@ -22,6 +22,7 @@ type View =
   | "admin";
 type Role = "executive" | "pmo" | "manager" | "admin";
 type Identity = { email: string; displayName: string; role: Role };
+type ProjectManagerAccount = { email: string; displayName: string };
 type Navigate = (view: View, projectId?: string) => void;
 type MilestoneData = {
   id: number;
@@ -1013,7 +1014,10 @@ async function parseProjectImportWorkbook(file: File) {
   };
 }
 
-async function downloadProjectImportTemplate(templateData: TemplateData[]) {
+async function downloadProjectImportTemplate(
+  templateData: TemplateData[],
+  projectManagers: ProjectManagerAccount[],
+) {
   const { default: writeExcelFile } = await import("write-excel-file/browser");
   const activeTemplates = templateData
     .filter((template) => template.active)
@@ -1038,7 +1042,10 @@ async function downloadProjectImportTemplate(templateData: TemplateData[]) {
   ];
   const instructionData = [
     ["序号", "填写说明"],
-    ["1", "项目清单：一个项目填写一行，项目编码必须唯一，仅支持新建项目。"],
+    [
+      "1",
+      "项目清单：一个项目填写一行，项目编码必须唯一，仅支持新建项目；负责人必须从“项目经理账号”工作表选择。",
+    ],
     [
       "2",
       `节点计划：每个项目必须覆盖当前${activeTemplates.length}个启用标准节点；复制整组标准节点行并填写项目编码及日期。`,
@@ -1093,6 +1100,18 @@ async function downloadProjectImportTemplate(templateData: TemplateData[]) {
       stickyRowsCount: 1,
     },
     {
+      sheet: "项目经理账号",
+      data: [
+        ["项目经理姓名", "项目经理邮箱"],
+        ...projectManagers.map((manager) => [
+          manager.displayName,
+          manager.email,
+        ]),
+      ],
+      columns: [{ width: 20 }, { width: 34 }],
+      stickyRowsCount: 1,
+    },
+    {
       sheet: "填写说明",
       data: instructionData,
       columns: [{ width: 16 }, { width: 84 }],
@@ -1103,10 +1122,12 @@ async function downloadProjectImportTemplate(templateData: TemplateData[]) {
 
 function ProjectImportModal({
   templateData,
+  projectManagers,
   onClose,
   onImported,
 }: {
   templateData: TemplateData[];
+  projectManagers: ProjectManagerAccount[];
   onClose: () => void;
   onImported: () => Promise<void>;
 }) {
@@ -1196,7 +1217,7 @@ function ProjectImportModal({
     setDownloading(true);
     setOperationError("");
     try {
-      await downloadProjectImportTemplate(templateData);
+      await downloadProjectImportTemplate(templateData, projectManagers);
     } catch (error) {
       setOperationError(
         error instanceof Error ? error.message : "模板下载失败。",
@@ -1382,7 +1403,23 @@ function ProjectImportModal({
   );
 }
 
-function Portfolio({ onNavigate, onDataChanged, projectData = projects, identity, templateData = defaultTemplateData, weeklyReports = [] }: { onNavigate: Navigate; onDataChanged: () => Promise<void>; projectData?: ProjectData[]; identity: Identity | null; templateData?: TemplateData[]; weeklyReports?: WeeklyReportRow[] }) {
+function Portfolio({
+  onNavigate,
+  onDataChanged,
+  projectData = projects,
+  identity,
+  templateData = defaultTemplateData,
+  projectManagers = [],
+  weeklyReports = [],
+}: {
+  onNavigate: Navigate;
+  onDataChanged: () => Promise<void>;
+  projectData?: ProjectData[];
+  identity: Identity | null;
+  templateData?: TemplateData[];
+  projectManagers?: ProjectManagerAccount[];
+  weeklyReports?: WeeklyReportRow[];
+}) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("全部");
   const [displayMode, setDisplayMode] = useState<"table" | "heatmap">("table");
@@ -1499,6 +1536,13 @@ function Portfolio({ onNavigate, onDataChanged, projectData = projects, identity
     setCreateError("");
     const form = new FormData(event.currentTarget);
     try {
+      const ownerEmail = String(form.get("ownerEmail") ?? "");
+      const ownerAccount = projectManagers.find(
+        (manager) => manager.email === ownerEmail,
+      );
+      if (!ownerAccount) {
+        throw new Error("请选择账号目录中的已启用项目经理。");
+      }
       validateProjectSchedule(projectPlanRows);
       if (projectPlanRows.length !== matrixTemplates.length) {
         throw new Error("节点计划与当前启用模板不一致，请重新生成。");
@@ -1509,8 +1553,8 @@ function Portfolio({ onNavigate, onDataChanged, projectData = projects, identity
         body: JSON.stringify({
           code: form.get("code"),
           name: form.get("name"),
-          ownerName: form.get("ownerName"),
-          ownerEmail: form.get("ownerEmail"),
+          ownerName: ownerAccount.displayName,
+          ownerEmail: ownerAccount.email,
           org: form.get("org"),
           type: form.get("type"),
           riskLevel: form.get("riskLevel"),
@@ -1539,7 +1583,7 @@ function Portfolio({ onNavigate, onDataChanged, projectData = projects, identity
     setTemplateDownloading(true);
     setPortfolioError("");
     try {
-      await downloadProjectImportTemplate(templateData);
+      await downloadProjectImportTemplate(templateData, projectManagers);
     } catch (error) {
       setPortfolioError(
         error instanceof Error ? error.message : "导入模板生成失败。",
@@ -1611,17 +1655,19 @@ function Portfolio({ onNavigate, onDataChanged, projectData = projects, identity
                 <input name="name" placeholder="请输入项目名称" required />
               </label>
               <label>
-                项目经理
-                <input name="ownerName" placeholder="姓名" required />
-              </label>
-              <label>
-                项目经理邮箱
-                <input
-                  name="ownerEmail"
-                  type="email"
-                  placeholder="name@example.com"
-                  required
-                />
+                项目经理账号
+                <select name="ownerEmail" defaultValue="" required>
+                  <option value="" disabled>
+                    {projectManagers.length
+                      ? "请选择已启用项目经理"
+                      : "暂无可用项目经理账号"}
+                  </option>
+                  {projectManagers.map((manager) => (
+                    <option key={manager.email} value={manager.email}>
+                      {manager.displayName} · {manager.email}
+                    </option>
+                  ))}
+                </select>
               </label>
               <label>
                 所属组织
@@ -1645,6 +1691,11 @@ function Portfolio({ onNavigate, onDataChanged, projectData = projects, identity
                 </select>
               </label>
             </div>
+            {!projectManagers.length && (
+              <div className="form-error" role="alert">
+                ! 尚未预置已启用的项目经理账号，请先前往系统管理完成账号配置。
+              </div>
+            )}
             <div className="project-plan-builder">
               <div className="project-plan-heading">
                 <div>
@@ -1760,7 +1811,8 @@ function Portfolio({ onNavigate, onDataChanged, projectData = projects, identity
                 disabled={
                   creating ||
                   Boolean(projectPlanError) ||
-                  !projectPlanRows.length
+                  !projectPlanRows.length ||
+                  !projectManagers.length
                 }
               >
                 {creating ? "正在创建…" : "创建项目并冻结原始基线"}
@@ -1770,7 +1822,14 @@ function Portfolio({ onNavigate, onDataChanged, projectData = projects, identity
         </section>
       </div>
     )}
-    {showImport && canManagePortfolio && <ProjectImportModal templateData={templateData} onClose={() => setShowImport(false)} onImported={onDataChanged} />}
+    {showImport && canManagePortfolio && (
+      <ProjectImportModal
+        templateData={templateData}
+        projectManagers={projectManagers}
+        onClose={() => setShowImport(false)}
+        onImported={onDataChanged}
+      />
+    )}
   </div>;
 }
 
@@ -2105,6 +2164,7 @@ function ProjectActivityPanel({
     "baseline_change.approve": "批准基线变更",
     "baseline_change.reject": "驳回基线变更",
     "project.update": "更新项目信息",
+    "project.owner_transfer": "移交项目负责人",
     "project_milestones.update": "更新项目节点治理",
     "project_milestone.create_custom": "新增项目自定义节点",
     "risk.create": "登记风险",
@@ -2120,7 +2180,21 @@ function ProjectActivityPanel({
   </section>;
 }
 
-function ProjectDetail({ onNavigate, onDataChanged, projectData = projects, projectId, identity }: { onNavigate: Navigate; onDataChanged: () => Promise<void>; projectData?: ProjectData[]; projectId: string; identity: Identity | null }) {
+function ProjectDetail({
+  onNavigate,
+  onDataChanged,
+  projectData = projects,
+  projectId,
+  identity,
+  projectManagers = [],
+}: {
+  onNavigate: Navigate;
+  onDataChanged: () => Promise<void>;
+  projectData?: ProjectData[];
+  projectId: string;
+  identity: Identity | null;
+  projectManagers?: ProjectManagerAccount[];
+}) {
   const [tab, setTab] = useState("节点计划");
   const [expanded, setExpanded] = useState<number | null>(3);
   const [showBaselineForm, setShowBaselineForm] = useState(false);
@@ -2150,6 +2224,9 @@ function ProjectDetail({ onNavigate, onDataChanged, projectData = projects, proj
       identity.email === currentProject.ownerEmail);
   const canChangeOwner =
     identity?.role === "admin" || identity?.role === "pmo";
+  const currentOwnerInDirectory = projectManagers.some(
+    (manager) => manager.email === currentProject.ownerEmail,
+  );
   const adjustableMilestones =
     currentProject.milestones?.filter((milestone) => milestone.applicable) ?? [];
   const displayMilestones = [...(currentProject.milestones ?? [])].sort(
@@ -2168,8 +2245,22 @@ function ProjectDetail({ onNavigate, onDataChanged, projectData = projects, proj
       riskLevel: form.get("riskLevel"),
     };
     if (canChangeOwner) {
-      payload.ownerName = form.get("ownerName");
-      payload.ownerEmail = form.get("ownerEmail");
+      const ownerEmail = String(form.get("ownerEmail") ?? "");
+      const ownerAccount = projectManagers.find(
+        (manager) => manager.email === ownerEmail,
+      );
+      if (!ownerAccount) {
+        setProjectWorking(false);
+        setProjectError("请选择账号目录中的已启用项目经理。");
+        return;
+      }
+      if (
+        ownerAccount.email !== currentProject.ownerEmail ||
+        ownerAccount.displayName !== currentProject.owner
+      ) {
+        payload.ownerName = ownerAccount.displayName;
+        payload.ownerEmail = ownerAccount.email;
+      }
     }
     try {
       const response = await fetch(
@@ -2353,7 +2444,124 @@ function ProjectDetail({ onNavigate, onDataChanged, projectData = projects, proj
     </div>
     {showMilestoneGovernance && <div className="modal-backdrop" onClick={() => setShowMilestoneGovernance(false)}><section className="create-modal milestone-governance-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowMilestoneGovernance(false)}>×</button><span className="modal-kicker">PROJECT MILESTONE GOVERNANCE</span><h2>项目节点治理</h2><p>{currentProject.name} · 可调整节点顺序、权重、关键标识及适用性；计划完成日须通过基线变更调整。</p><div className="project-milestone-grid"><div className="project-milestone-head"><span>序号</span><span>节点名称</span><span>权重</span><span>关键</span><span>适用</span><span>来源</span></div>{milestoneDraft.map((row) => <div className={`project-milestone-row ${row.applicable ? "" : "inactive"}`} key={row.id}><input type="number" min="1" max="99" value={row.sequence} onChange={(event) => updateMilestoneDraft(row.id, "sequence", Number(event.target.value))} /><input value={row.name} onChange={(event) => updateMilestoneDraft(row.id, "name", event.target.value)} /><label className="weight-input"><input type="number" min="0" max="100" step="0.5" value={row.weight} onChange={(event) => updateMilestoneDraft(row.id, "weight", Number(event.target.value))} /><span>%</span></label><label className="template-check"><input type="checkbox" checked={row.critical} onChange={(event) => updateMilestoneDraft(row.id, "critical", event.target.checked)} /><span>关键</span></label><label className="template-check"><input type="checkbox" checked={row.applicable} onChange={(event) => updateMilestoneDraft(row.id, "applicable", event.target.checked)} /><span>适用</span></label><span className={row.custom ? "custom-source" : "standard-source"}>{row.custom ? "自定义" : "标准"}</span></div>)}</div><div className="governance-summary"><span>节点 {milestoneDraft.length} 个</span><span>适用 {milestoneDraft.filter((row) => row.applicable).length} 个</span><strong className={Math.abs(milestoneDraft.reduce((sum, row) => sum + Number(row.weight || 0), 0) - 100) < 0.01 ? "weight-ok" : "weight-error"}>权重合计 {milestoneDraft.reduce((sum, row) => sum + Number(row.weight || 0), 0).toFixed(1)}%</strong></div>{milestoneError && <div className="form-error">! {milestoneError}</div>}<form className="custom-milestone-form" onSubmit={createCustomMilestone}><h3>追加项目自定义节点</h3><div className="modal-form-grid"><label>节点名称<input name="name" required /></label><label>节点序号<input name="sequence" type="number" min="1" max="99" required /></label><label>计划开始日<input name="plannedStart" type="date" required /></label><label>计划完成日<input name="plannedFinish" type="date" required /></label></div><label className="template-check custom-critical"><input name="critical" type="checkbox" /><span>标记为关键节点</span></label><button className="outline-button" disabled={milestoneWorking}>＋ 新增零权重节点</button></form><div className="modal-actions"><button className="outline-button" onClick={() => setShowMilestoneGovernance(false)}>取消</button><button className="primary-button" disabled={milestoneWorking || Math.abs(milestoneDraft.reduce((sum, row) => sum + Number(row.weight || 0), 0) - 100) >= 0.01} onClick={saveMilestoneGovernance}>{milestoneWorking ? "正在保存…" : "保存节点治理"}</button></div></section></div>}
     {showBaselineForm && <div className="modal-backdrop" onClick={() => setShowBaselineForm(false)}><section className="create-modal baseline-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowBaselineForm(false)}>×</button><span className="modal-kicker">BASELINE CHANGE</span><h2>申请基线变更</h2><p>{currentProject.name} · 当前批准基线 V{currentProject.baselineVersion ?? 1}</p><form onSubmit={requestBaselineChange}><div className="modal-form-grid"><label>调整节点<select name="milestoneId" required>{adjustableMilestones.map((milestone) => <option key={milestone.id} value={milestone.id}>{milestone.name}（当前 {milestone.plannedFinish}）</option>)}</select></label><label>新计划完成日<input name="to" type="date" required /></label></div><label className="full-label">变更原因<textarea name="reason" minLength={10} required placeholder="说明触发原因、决策依据和不可通过纠偏消化的原因" /></label><label className="full-label">影响评估<textarea name="impact" minLength={10} required placeholder="说明对总体工期、成本、范围、资源和年度目标的影响" /></label>{baselineError && <div className="form-error" role="alert">! {baselineError}</div>}<div className="modal-actions"><button type="button" className="outline-button" onClick={() => setShowBaselineForm(false)}>取消</button><button className="primary-button" disabled={baselineWorking}>{baselineWorking ? "正在提交…" : "提交 PMO 审批"}</button></div></form></section></div>}
-    {showProjectEdit && <div className="modal-backdrop" onClick={() => setShowProjectEdit(false)}><section className="create-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowProjectEdit(false)}>×</button><span className="modal-kicker">PROJECT PROFILE</span><h2>编辑项目基本信息</h2><p>{currentProject.id} · 计划日期调整不在此处进行，须通过基线变更审批。</p><form onSubmit={saveProject}><div className="modal-form-grid"><label>项目名称<input name="name" defaultValue={currentProject.name} required /></label><label>所属组织<input name="org" defaultValue={currentProject.org} required /></label><label>项目类型<select name="type" defaultValue={currentProject.type}><option>核心系统</option><option>业务平台</option><option>数据平台</option><option>技术底座</option><option>其他</option></select></label><label>风险等级<select name="riskLevel" defaultValue={currentProject.risk === "高" ? "high" : currentProject.risk === "中" ? "medium" : "low"}><option value="low">低风险</option><option value="medium">中风险</option><option value="high">高风险</option></select></label><label>项目经理<input name="ownerName" defaultValue={currentProject.owner} disabled={!canChangeOwner} required /></label><label>项目经理邮箱<input name="ownerEmail" type="email" defaultValue={currentProject.ownerEmail ?? ""} disabled={!canChangeOwner} required={canChangeOwner} /></label></div>{!canChangeOwner && <div className="form-hint">项目经理可维护业务信息；负责人调整仅限 PMO 或系统管理员。</div>}{projectError && <div className="form-error" role="alert">! {projectError}</div>}<div className="modal-actions"><button type="button" className="outline-button" onClick={() => setShowProjectEdit(false)}>取消</button><button className="primary-button" disabled={projectWorking}>{projectWorking ? "正在保存…" : "保存项目信息"}</button></div></form></section></div>}
+    {showProjectEdit && (
+      <div className="modal-backdrop" onClick={() => setShowProjectEdit(false)}>
+        <section
+          className="create-modal"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <button className="modal-close" onClick={() => setShowProjectEdit(false)}>
+            ×
+          </button>
+          <span className="modal-kicker">PROJECT PROFILE</span>
+          <h2>编辑项目基本信息</h2>
+          <p>
+            {currentProject.id} ·
+            计划日期调整不在此处进行，须通过基线变更审批。
+          </p>
+          <form onSubmit={saveProject}>
+            <div className="modal-form-grid">
+              <label>
+                项目名称
+                <input name="name" defaultValue={currentProject.name} required />
+              </label>
+              <label>
+                所属组织
+                <input name="org" defaultValue={currentProject.org} required />
+              </label>
+              <label>
+                项目类型
+                <select name="type" defaultValue={currentProject.type}>
+                  <option>核心系统</option>
+                  <option>业务平台</option>
+                  <option>数据平台</option>
+                  <option>技术底座</option>
+                  <option>其他</option>
+                </select>
+              </label>
+              <label>
+                风险等级
+                <select
+                  name="riskLevel"
+                  defaultValue={
+                    currentProject.risk === "高"
+                      ? "high"
+                      : currentProject.risk === "中"
+                        ? "medium"
+                        : "low"
+                  }
+                >
+                  <option value="low">低风险</option>
+                  <option value="medium">中风险</option>
+                  <option value="high">高风险</option>
+                </select>
+              </label>
+              {canChangeOwner ? (
+                <label>
+                  项目经理账号
+                  <select
+                    name="ownerEmail"
+                    defaultValue={currentProject.ownerEmail ?? ""}
+                    required
+                  >
+                    {!currentOwnerInDirectory && (
+                      <option
+                        value={currentProject.ownerEmail ?? ""}
+                        disabled
+                      >
+                        {currentProject.owner} · 当前账号不可用，请移交
+                      </option>
+                    )}
+                    {projectManagers.map((manager) => (
+                      <option key={manager.email} value={manager.email}>
+                        {manager.displayName} · {manager.email}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : (
+                <label>
+                  项目经理
+                  <input value={currentProject.owner} disabled readOnly />
+                </label>
+              )}
+            </div>
+            {!canChangeOwner && (
+              <div className="form-hint">
+                项目经理可维护业务信息；负责人调整仅限 PMO 或系统管理员。
+              </div>
+            )}
+            {canChangeOwner && !projectManagers.length && (
+              <div className="form-error" role="alert">
+                ! 暂无可用项目经理账号，请先在系统管理中预置并启用账号。
+              </div>
+            )}
+            {projectError && (
+              <div className="form-error" role="alert">
+                ! {projectError}
+              </div>
+            )}
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="outline-button"
+                onClick={() => setShowProjectEdit(false)}
+              >
+                取消
+              </button>
+              <button
+                className="primary-button"
+                disabled={
+                  projectWorking || (canChangeOwner && !projectManagers.length)
+                }
+              >
+                {projectWorking ? "正在保存…" : "保存项目信息"}
+              </button>
+            </div>
+          </form>
+        </section>
+      </div>
+    )}
     {baselineSuccess && <div className="toast"><span>✓</span><div><strong>基线变更申请已提交</strong><p>PMO 审批前当前批准基线保持不变。</p></div></div>}
     {projectSuccess && <div className="toast"><span>✓</span><div><strong>项目信息已更新</strong><p>修改已写入操作审计。</p></div></div>}
   </div>;
@@ -2853,7 +3061,7 @@ function RuleConfigPanel() {
 }
 
 function AdminPage({ onNavigate, identity }: { onNavigate: Navigate; identity: Identity | null }) {
-  type UserRow = { email: string; displayName: string; role: "executive" | "pmo" | "manager" | "admin"; active: boolean; createdAt: string };
+  type UserRow = { email: string; displayName: string; role: "executive" | "pmo" | "manager" | "admin"; active: boolean; createdAt: string; assignedProjectCount: number };
   type AuditRow = { id: number; actorEmail: string; action: string; entityType: string; entityId: string; createdAt: string };
   const [usersData, setUsersData] = useState<UserRow[]>([]);
   const [auditData, setAuditData] = useState<AuditRow[]>([]);
@@ -2869,6 +3077,7 @@ function AdminPage({ onNavigate, identity }: { onNavigate: Navigate; identity: I
     "snapshot.lock": "锁定快照",
     "project.create": "创建项目",
     "project.update": "更新项目",
+    "project.owner_transfer": "移交项目负责人",
     "user.create": "预置用户",
     "user.update": "更新用户",
     "rule_config.publish": "发布规则",
@@ -3037,7 +3246,15 @@ function AdminPage({ onNavigate, identity }: { onNavigate: Navigate; identity: I
                   >
                     <span className="admin-user">
                       <i>{user.displayName[0]}</i>
-                      <b>{user.displayName}<small>{user.email}</small></b>
+                      <b>
+                        {user.displayName}
+                        <small>
+                          {user.email}
+                          {user.assignedProjectCount
+                            ? ` · 负责${user.assignedProjectCount}个项目`
+                            : ""}
+                        </small>
+                      </b>
                     </span>
                     <select
                       value={user.role}
@@ -3045,7 +3262,8 @@ function AdminPage({ onNavigate, identity }: { onNavigate: Navigate; identity: I
                         !canEditUsers ||
                         updatingUser === user.email ||
                         !user.active ||
-                        user.email === identity?.email
+                        user.email === identity?.email ||
+                        user.assignedProjectCount > 0
                       }
                       onChange={(event) =>
                         updateRole(user, event.target.value as UserRow["role"])
@@ -3062,7 +3280,8 @@ function AdminPage({ onNavigate, identity }: { onNavigate: Navigate; identity: I
                       disabled={
                         !canEditUsers ||
                         updatingUser === user.email ||
-                        user.email === identity?.email
+                        user.email === identity?.email ||
+                        (user.active && user.assignedProjectCount > 0)
                       }
                       onClick={() => toggleUser(user)}
                       aria-label={`${user.active ? "停用" : "启用"} ${user.displayName}`}
@@ -3844,6 +4063,9 @@ export default function Home() {
   const [trendData, setTrendData] = useState<TrendPoint[]>([]);
   const [templateData, setTemplateData] =
     useState<TemplateData[]>(defaultTemplateData);
+  const [projectManagers, setProjectManagers] = useState<
+    ProjectManagerAccount[]
+  >([]);
   const [weeklyReportData, setWeeklyReportData] = useState<WeeklyReportRow[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState("P02");
   const [dataState, setDataState] = useState<
@@ -3871,6 +4093,7 @@ export default function Home() {
         dashboardAlerts?: DashboardAlerts;
         dashboardSnapshot?: DashboardSnapshot | null;
         milestoneTemplates?: TemplateData[];
+        projectManagers?: ProjectManagerAccount[];
         weeklyReports?: WeeklyReportRow[];
       };
       if (Array.isArray(data.projects)) setProjectData(data.projects);
@@ -3886,6 +4109,7 @@ export default function Home() {
       if (data.milestoneTemplates?.length) {
         setTemplateData(data.milestoneTemplates);
       }
+      setProjectManagers(data.projectManagers ?? []);
       setWeeklyReportData(data.weeklyReports ?? []);
       if (data.identity) setIdentity(data.identity);
       try {
@@ -3916,5 +4140,5 @@ export default function Home() {
 
   if (dataState === "unauthenticated") return <LoginScreen />;
   if (view === "cockpit") return <><Cockpit onNavigate={navigate} projectData={dashboardData} snapshot={dashboardSnapshot} templateData={templateData} trends={trendData} alerts={dashboardAlerts} />{dataState === "fallback" && <div className="data-banner">当前数据服务不可用，管理大屏不展示未核实的演示数据。</div>}</>;
-  return <div className="app-shell"><Sidebar view={view} onNavigate={navigate} identity={identity} /><div className="workspace">{view === "portfolio" && <Portfolio onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} identity={identity} templateData={templateData} weeklyReports={weeklyReportData} />}{view === "analytics" && <PortfolioAnalytics onNavigate={(next, projectId) => navigate(next, projectId)} identity={identity} header={<WorkspaceHeader title="项目组合分析" subtitle="从组织、类型、负责人和标准节点维度识别共性瓶颈与基线漂移" onNavigate={navigate} identity={identity} />} />}{view === "project" && (projectData.length ? <ProjectDetail onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} projectId={selectedProjectId} identity={identity} /> : <EmptyProjectWorkspace onNavigate={navigate} identity={identity} />)}{view === "report" && (projectData.length ? <WeeklyReport onNavigate={navigate} onDataChanged={refreshData} projectId={selectedProjectId} projectData={projectData} identity={identity} snapshot={dashboardSnapshot} /> : <EmptyProjectWorkspace onNavigate={navigate} identity={identity} />)}{view === "pmo" && <PmoPage onNavigate={navigate} onDataChanged={refreshData} identity={identity} projectData={projectData} />}{view === "admin" && <AdminPage onNavigate={navigate} identity={identity} />}</div></div>;
+  return <div className="app-shell"><Sidebar view={view} onNavigate={navigate} identity={identity} /><div className="workspace">{view === "portfolio" && <Portfolio onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} identity={identity} templateData={templateData} projectManagers={projectManagers} weeklyReports={weeklyReportData} />}{view === "analytics" && <PortfolioAnalytics onNavigate={(next, projectId) => navigate(next, projectId)} identity={identity} header={<WorkspaceHeader title="项目组合分析" subtitle="从组织、类型、负责人和标准节点维度识别共性瓶颈与基线漂移" onNavigate={navigate} identity={identity} />} />}{view === "project" && (projectData.length ? <ProjectDetail onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} projectId={selectedProjectId} identity={identity} projectManagers={projectManagers} /> : <EmptyProjectWorkspace onNavigate={navigate} identity={identity} />)}{view === "report" && (projectData.length ? <WeeklyReport onNavigate={navigate} onDataChanged={refreshData} projectId={selectedProjectId} projectData={projectData} identity={identity} snapshot={dashboardSnapshot} /> : <EmptyProjectWorkspace onNavigate={navigate} identity={identity} />)}{view === "pmo" && <PmoPage onNavigate={navigate} onDataChanged={refreshData} identity={identity} projectData={projectData} />}{view === "admin" && <AdminPage onNavigate={navigate} identity={identity} />}</div></div>;
 }

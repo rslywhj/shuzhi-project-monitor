@@ -1,6 +1,6 @@
 import { asc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { auditLogs, users } from "@/db/schema";
+import { auditLogs, projects, users } from "@/db/schema";
 import { apiError } from "@/lib/api-utils";
 import {
   canAdministerUsers,
@@ -19,8 +19,24 @@ export async function GET(request: Request) {
     const identity = await getRequestIdentity(request);
     if (!identity) return unauthorized();
     if (!canManagePortfolio(identity)) return forbidden();
-    const rows = await getDb().select().from(users).orderBy(asc(users.displayName));
-    return Response.json({ users: rows });
+    const db = getDb();
+    const [rows, projectRows] = await Promise.all([
+      db.select().from(users).orderBy(asc(users.displayName)),
+      db.select({ ownerEmail: projects.ownerEmail }).from(projects),
+    ]);
+    const assignedCounts = new Map<string, number>();
+    for (const project of projectRows) {
+      assignedCounts.set(
+        project.ownerEmail,
+        (assignedCounts.get(project.ownerEmail) ?? 0) + 1,
+      );
+    }
+    return Response.json({
+      users: rows.map((user) => ({
+        ...user,
+        assignedProjectCount: assignedCounts.get(user.email) ?? 0,
+      })),
+    });
   } catch (error) {
     return apiError(error);
   }

@@ -1,6 +1,6 @@
-import { eq } from "drizzle-orm";
+import { and, eq, notExists } from "drizzle-orm";
 import { getDb } from "@/db";
-import { auditLogs, users } from "@/db/schema";
+import { auditLogs, projects, users } from "@/db/schema";
 import { apiError } from "@/lib/api-utils";
 import {
   canAdministerUsers,
@@ -46,21 +46,89 @@ export async function PATCH(
     if (!existing) {
       return Response.json({ error: "未找到指定用户。" }, { status: 404 });
     }
+    const resultingRole = payload.role ?? existing.role;
+    const resultingActive =
+      typeof payload.active === "boolean" ? payload.active : existing.active;
+    const invalidatesProjectOwnership =
+      !resultingActive || resultingRole !== "manager";
+    if (invalidatesProjectOwnership) {
+      const assignedProjects = await db
+        .select({ id: projects.id, name: projects.name })
+        .from(projects)
+        .where(eq(projects.ownerEmail, email));
+      if (assignedProjects.length) {
+        const examples = assignedProjects
+          .slice(0, 3)
+          .map((project) => `${project.id} ${project.name}`)
+          .join("、");
+        return Response.json(
+          {
+            error: `该账号仍负责${assignedProjects.length}个项目（${examples}${assignedProjects.length > 3 ? "等" : ""}），请先完成项目移交。`,
+          },
+          { status: 409 },
+        );
+      }
+    }
+    const updateValues = {
+      ...(payload.role ? { role: payload.role } : {}),
+      ...(typeof payload.active === "boolean"
+        ? { active: payload.active }
+        : {}),
+    };
+    if (invalidatesProjectOwnership) {
+      const [updated] = await db
+        .update(users)
+        .set(updateValues)
+        .where(
+          and(
+            eq(users.email, email),
+            notExists(
+              db
+                .select({ id: projects.id })
+                .from(projects)
+                .where(eq(projects.ownerEmail, email)),
+            ),
+          ),
+        )
+        .returning({ email: users.email });
+      if (!updated) {
+        return Response.json(
+          { error: "该账号刚刚被分配了项目，请先完成项目移交。" },
+          { status: 409 },
+        );
+      }
+      await db.insert(auditLogs).values({
+        actorEmail: identity.email,
+        action: "user.update",
+        entityType: "user",
+        entityId: email,
+        detailJson: JSON.stringify({
+          ...payload,
+          previousRole: existing.role,
+          previousActive: existing.active,
+        }),
+      });
+    } else {
+      await db.batch([
+        db.update(users).set(updateValues).where(eq(users.email, email)),
+        db.insert(auditLogs).values({
+          actorEmail: identity.email,
+          action: "user.update",
+          entityType: "user",
+          entityId: email,
+          detailJson: JSON.stringify({
+            ...payload,
+            previousRole: existing.role,
+            previousActive: existing.active,
+          }),
+        }),
+      ]);
+    }
     const [user] = await db
-      .update(users)
-      .set({
-        ...(payload.role ? { role: payload.role } : {}),
-        ...(typeof payload.active === "boolean" ? { active: payload.active } : {}),
-      })
+      .select()
+      .from(users)
       .where(eq(users.email, email))
-      .returning();
-    await db.insert(auditLogs).values({
-      actorEmail: identity.email,
-      action: "user.update",
-      entityType: "user",
-      entityId: email,
-      detailJson: JSON.stringify(payload),
-    });
+      .limit(1);
     return Response.json({ user });
   } catch (error) {
     return apiError(error);

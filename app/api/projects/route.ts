@@ -1,19 +1,13 @@
 import { getDb } from "@/db";
-import {
-  auditLogs,
-  baselineVersions,
-  milestoneTemplates,
-  milestones,
-  projects,
-} from "@/db/schema";
+import { milestoneTemplates } from "@/db/schema";
 import {
   ApiRequestError,
   apiError,
-  requiredEmail,
   requiredIsoDate,
   requiredString,
   safeNumber,
 } from "@/lib/api-utils";
+import { requireProjectOwnerAccount } from "@/lib/project-owner";
 import { ensureSeeded } from "@/lib/seed";
 import {
   canManagePortfolio,
@@ -108,13 +102,17 @@ export async function POST(request: Request) {
       throw new ApiRequestError("初始风险等级无效。");
     }
     const db = getDb();
+    const ownerAccount = await requireProjectOwnerAccount(
+      db,
+      payload.ownerEmail,
+    );
 
     const project = {
       id: code,
       code,
       name: requiredString(payload.name, "项目名称"),
-      ownerEmail: requiredEmail(payload.ownerEmail, "项目经理邮箱"),
-      ownerName: requiredString(payload.ownerName, "项目经理姓名"),
+      ownerEmail: ownerAccount.email,
+      ownerName: ownerAccount.displayName,
       org: requiredString(payload.org, "所属组织"),
       type: requiredString(payload.type, "项目类型"),
       riskLevel: payload.riskLevel ?? ("low" as const),
@@ -156,42 +154,80 @@ export async function POST(request: Request) {
         status: "green" as const,
       };
     });
-    const milestoneChunks = Array.from(
-      { length: Math.ceil(milestoneValues.length / 4) },
-      (_, index) => milestoneValues.slice(index * 4, index * 4 + 4),
+    const baselineJson = JSON.stringify(
+      milestoneValues.map((row) => ({
+        templateId: row.templateId,
+        name: row.name,
+        sequence: row.sequence,
+        plannedStart: row.plannedStart,
+        plannedFinish: row.plannedFinish,
+        weight: row.weight,
+        critical: row.critical,
+        applicable: row.applicable,
+      })),
     );
-    await db.batch([
-      db.insert(projects).values(project),
-      ...milestoneChunks.map((rows) => db.insert(milestones).values(rows)),
-      db.insert(baselineVersions).values({
-        projectId: project.id,
-        version: 1,
-        kind: "original",
-        milestoneJson: JSON.stringify(
-          milestoneValues.map((row) => ({
-            templateId: row.templateId,
-            name: row.name,
-            sequence: row.sequence,
-            plannedStart: row.plannedStart,
-            plannedFinish: row.plannedFinish,
-            weight: row.weight,
-            critical: row.critical,
-            applicable: row.applicable,
-          })),
+    const client = db.$client;
+    await client.batch([
+      client
+        .prepare(
+          `INSERT INTO projects
+            (id, code, name, owner_email, owner_name, org, type, risk_level)
+           SELECT ?, ?, ?, email, display_name, ?, ?, ?
+           FROM users
+           WHERE email = ? AND active = 1 AND role = 'manager'`,
+        )
+        .bind(
+          project.id,
+          project.code,
+          project.name,
+          project.org,
+          project.type,
+          project.riskLevel,
+          project.ownerEmail,
         ),
-        createdBy: identity.email,
-      }),
-      db.insert(auditLogs).values({
-        actorEmail: identity.email,
-        action: "project.create",
-        entityType: "project",
-        entityId: project.id,
-        detailJson: JSON.stringify({
-          name: project.name,
-          ownerEmail: project.ownerEmail,
-          milestoneCount: parsedMilestones.length,
-        }),
-      }),
+      client
+        .prepare(
+          `INSERT INTO milestones
+            (project_id, template_id, name, sequence, weight, critical, custom,
+             applicable, planned_start, planned_finish, forecast_finish, status)
+           SELECT
+            json_extract(value, '$.projectId'),
+            json_extract(value, '$.templateId'),
+            json_extract(value, '$.name'),
+            json_extract(value, '$.sequence'),
+            json_extract(value, '$.weight'),
+            json_extract(value, '$.critical'),
+            json_extract(value, '$.custom'),
+            json_extract(value, '$.applicable'),
+            json_extract(value, '$.plannedStart'),
+            json_extract(value, '$.plannedFinish'),
+            json_extract(value, '$.forecastFinish'),
+            json_extract(value, '$.status')
+           FROM json_each(?)`,
+        )
+        .bind(JSON.stringify(milestoneValues)),
+      client
+        .prepare(
+          `INSERT INTO baseline_versions
+            (project_id, version, kind, milestone_json, created_by)
+           VALUES (?, 1, 'original', ?, ?)`,
+        )
+        .bind(project.id, baselineJson, identity.email),
+      client
+        .prepare(
+          `INSERT INTO audit_logs
+            (actor_email, action, entity_type, entity_id, detail_json)
+           VALUES (?, 'project.create', 'project', ?, ?)`,
+        )
+        .bind(
+          identity.email,
+          project.id,
+          JSON.stringify({
+            name: project.name,
+            ownerEmail: project.ownerEmail,
+            milestoneCount: parsedMilestones.length,
+          }),
+        ),
     ]);
 
     return Response.json({ project }, { status: 201 });
@@ -199,6 +235,14 @@ export async function POST(request: Request) {
     const message = error instanceof Error ? error.message : "";
     if (message.includes("UNIQUE constraint")) {
       return Response.json({ error: "项目编码已经存在。" }, { status: 409 });
+    }
+    if (message.includes("FOREIGN KEY constraint")) {
+      return Response.json(
+        {
+          error: "项目经理账号状态已发生变化，请刷新账号目录后重新选择。",
+        },
+        { status: 409 },
+      );
     }
     return apiError(error);
   }

@@ -242,7 +242,8 @@ test("persists the twelve-node standard template and project-level milestone gov
   assert.match(promoteRoute, /syncExistingProjects/);
   assert.match(projectMilestonesRoute, /project_milestones\.update/);
   assert.match(projectMilestonesRoute, /project_milestone\.create_custom/);
-  assert.match(projectRoute, /milestoneChunks/);
+  assert.match(projectRoute, /client\.batch/);
+  assert.match(projectRoute, /FROM json_each\(\?\)/);
   assert.match(page, /项目节点治理/);
   assert.match(page, /启用权重/);
   assert.match(page, /自定义节点候选池/);
@@ -508,7 +509,7 @@ test("keeps demo projects out of production and handles a real empty portfolio",
   ]);
 
   const ruleSeed = seed.indexOf(".insert(ruleConfigs)");
-  const demoGate = seed.indexOf("if (!demoSeedEnabled()) return;");
+  const demoGate = seed.indexOf("if (!demoSeedEnabled()) return;", ruleSeed);
   const projectSeed = seed.indexOf("const projectRows = seedProjects.map");
   assert(ruleSeed >= 0 && ruleSeed < demoGate);
   assert(demoGate >= 0 && demoGate < projectSeed);
@@ -616,10 +617,37 @@ test("supports atomic Excel project import with template download and row-level 
   assert.match(page, /下载导入模板/);
   assert.match(page, /导入预检/);
   assert.match(page, /任何一行失败都不会创建项目/);
+  assert.match(page, /项目经理账号/);
+  assert.match(page, /账号目录中的已启用项目经理/);
+  assert.match(page, /sheet: "项目经理账号"/);
   assert.match(page, /工作表“\$\{sheetName\}”缺少列/);
   assert.match(css, /project-import-modal/);
   assert.match(css, /import-error-table/);
   assert.match(css, /import-success-state/);
   assert.match(packageJson, /"read-excel-file"/);
   assert.match(packageJson, /"write-excel-file"/);
+});
+
+test("keeps project ownership aligned with provisioned manager accounts", async () => {
+  const [createRoute, updateRoute, importRoute, userRoute, bootstrap, page] =
+    await Promise.all([
+      readFile(new URL("app/api/projects/route.ts", templateRoot), "utf8"),
+      readFile(new URL("app/api/projects/[id]/route.ts", templateRoot), "utf8"),
+      readFile(
+        new URL("app/api/projects/import/route.ts", templateRoot),
+        "utf8",
+      ),
+      readFile(new URL("app/api/users/[email]/route.ts", templateRoot), "utf8"),
+      readFile(new URL("app/api/bootstrap/route.ts", templateRoot), "utf8"),
+      readFile(new URL("app/page.tsx", templateRoot), "utf8"),
+    ]);
+
+  assert.match(createRoute, /requireProjectOwnerAccount/);
+  assert.match(updateRoute, /project\.owner_transfer/);
+  assert.match(importRoute, /projectOwnerAccountError/);
+  assert.match(importRoute, /姓名与账号目录不一致/);
+  assert.match(userRoute, /请先完成项目移交/);
+  assert.match(userRoute, /assignedProjects/);
+  assert.match(bootstrap, /projectManagers/);
+  assert.match(page, /负责\$\{user\.assignedProjectCount\}个项目/);
 });

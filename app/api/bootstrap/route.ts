@@ -9,6 +9,7 @@ import {
   risks,
   ruleConfigs,
   snapshots,
+  users,
   weeklyReports,
 } from "@/db/schema";
 import { apiError } from "@/lib/api-utils";
@@ -55,6 +56,7 @@ export async function GET(request: Request) {
       snapshotRows,
       ruleRows,
       templateRows,
+      userRows,
     ] = await Promise.all([
       db.select().from(projects).orderBy(asc(projects.code)),
       db.select().from(milestones).orderBy(asc(milestones.projectId), asc(milestones.sequence)),
@@ -72,6 +74,15 @@ export async function GET(request: Request) {
         .select()
         .from(milestoneTemplates)
         .orderBy(asc(milestoneTemplates.sequence)),
+      db
+        .select({
+          email: users.email,
+          displayName: users.displayName,
+          role: users.role,
+          active: users.active,
+        })
+        .from(users)
+        .orderBy(asc(users.displayName)),
     ]);
 
     const projectMilestones = new Map<string, typeof milestoneRows>();
@@ -216,6 +227,15 @@ export async function GET(request: Request) {
       })),
       activeRule: ruleRows[0] ?? null,
       milestoneTemplates: templateRows,
+      projectManagers:
+        identity.role === "pmo" || identity.role === "admin"
+          ? userRows
+              .filter((user) => user.active && user.role === "manager")
+              .map((user) => ({
+                email: user.email,
+                displayName: user.displayName,
+              }))
+          : [],
       automation,
       generatedAt: new Date().toISOString(),
     });

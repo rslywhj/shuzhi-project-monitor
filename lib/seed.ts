@@ -8,6 +8,7 @@ import {
   milestones,
   projects,
   ruleConfigs,
+  users,
 } from "@/db/schema";
 
 async function ensureBaselineVersionRows(db: ReturnType<typeof getDb>) {
@@ -126,6 +127,26 @@ function demoSeedEnabled() {
   );
 }
 
+async function ensureDemoProjectManagers(db: ReturnType<typeof getDb>) {
+  if (!demoSeedEnabled()) return;
+  const projectRows = await db
+    .select({
+      email: projects.ownerEmail,
+      displayName: projects.ownerName,
+    })
+    .from(projects);
+  const managerRows = [
+    ...new Map(projectRows.map((row) => [row.email, row])).values(),
+  ].map((row) => ({
+    ...row,
+    role: "manager" as const,
+    active: true,
+  }));
+  for (const rows of chunks(managerRows, 20)) {
+    await db.insert(users).values(rows).onConflictDoNothing();
+  }
+}
+
 export async function ensureSeeded() {
   const db = getDb();
   await db
@@ -171,6 +192,7 @@ export async function ensureSeeded() {
     .onConflictDoNothing();
   const [{ value }] = await db.select({ value: count() }).from(projects);
   if (value > 0) {
+    await ensureDemoProjectManagers(db);
     await ensureBaselineVersionRows(db);
     return;
   }
@@ -195,6 +217,7 @@ export async function ensureSeeded() {
   for (const rows of chunks(projectRows, 4)) {
     await db.insert(projects).values(rows).onConflictDoNothing();
   }
+  await ensureDemoProjectManagers(db);
 
   const templateByName = new Map(
     templateRows.map((template) => [template.name, template.id]),

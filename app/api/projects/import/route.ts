@@ -1,7 +1,11 @@
 import { asc } from "drizzle-orm";
 import { getDb } from "@/db";
-import { milestoneTemplates, projects } from "@/db/schema";
+import { milestoneTemplates, projects, users } from "@/db/schema";
 import { apiError } from "@/lib/api-utils";
+import {
+  projectOwnerAccountError,
+  type ProjectOwnerAccount,
+} from "@/lib/project-owner";
 import { ensureSeeded } from "@/lib/seed";
 import {
   canManagePortfolio,
@@ -152,6 +156,7 @@ function validateImport(
   payload: ImportPayload,
   templateRows: TemplateRow[],
   existingCodes: Set<string>,
+  ownerAccounts: Map<string, ProjectOwnerAccount>,
 ) {
   const issues: ImportIssue[] = [];
   const projectInputs = Array.isArray(payload.projects) ? payload.projects : [];
@@ -244,6 +249,26 @@ function validateImport(
         "项目经理邮箱",
         "邮箱格式不正确。",
       );
+    } else {
+      const ownerAccount = ownerAccounts.get(ownerEmail);
+      const accountError = projectOwnerAccountError(ownerAccount);
+      if (accountError) {
+        addIssue(
+          issues,
+          "项目清单",
+          row,
+          "项目经理邮箱",
+          accountError,
+        );
+      } else if (ownerName !== ownerAccount!.displayName) {
+        addIssue(
+          issues,
+          "项目清单",
+          row,
+          "项目经理姓名",
+          `姓名与账号目录不一致，应填写“${ownerAccount!.displayName}”。`,
+        );
+      }
     }
     if (!riskLevel) {
       addIssue(
@@ -262,6 +287,8 @@ function validateImport(
       org &&
       type &&
       riskLevel &&
+      !projectOwnerAccountError(ownerAccounts.get(ownerEmail)) &&
+      ownerName === ownerAccounts.get(ownerEmail)?.displayName &&
       !projectMap.has(code)
     ) {
       projectMap.set(code, {
@@ -547,17 +574,27 @@ export async function POST(request: Request) {
     const payload = (await request.json()) as ImportPayload;
     const mode = payload.mode === "commit" ? "commit" : "preview";
     const db = getDb();
-    const [templateRows, existingProjectRows] = await Promise.all([
-      db
-        .select()
-        .from(milestoneTemplates)
-        .orderBy(asc(milestoneTemplates.sequence)),
-      db.select({ code: projects.code }).from(projects),
-    ]);
+    const [templateRows, existingProjectRows, ownerAccountRows] =
+      await Promise.all([
+        db
+          .select()
+          .from(milestoneTemplates)
+          .orderBy(asc(milestoneTemplates.sequence)),
+        db.select({ code: projects.code }).from(projects),
+        db
+          .select({
+            email: users.email,
+            displayName: users.displayName,
+            role: users.role,
+            active: users.active,
+          })
+          .from(users),
+      ]);
     const validation = validateImport(
       payload,
       templateRows,
       new Set(existingProjectRows.map((project) => project.code.toUpperCase())),
+      new Map(ownerAccountRows.map((account) => [account.email, account])),
     );
     if (validation.issues.length) {
       return Response.json(
@@ -662,15 +699,20 @@ export async function POST(request: Request) {
           `INSERT INTO projects
             (id, code, name, owner_email, owner_name, org, type, risk_level)
            SELECT
-            json_extract(value, '$.id'),
-            json_extract(value, '$.code'),
-            json_extract(value, '$.name'),
-            json_extract(value, '$.ownerEmail'),
-            json_extract(value, '$.ownerName'),
-            json_extract(value, '$.org'),
-            json_extract(value, '$.type'),
-            json_extract(value, '$.riskLevel')
-           FROM json_each(?)`,
+            json_extract(imported.value, '$.id'),
+            json_extract(imported.value, '$.code'),
+            json_extract(imported.value, '$.name'),
+            account.email,
+            account.display_name,
+            json_extract(imported.value, '$.org'),
+            json_extract(imported.value, '$.type'),
+            json_extract(imported.value, '$.riskLevel')
+           FROM json_each(?) AS imported
+           JOIN users AS account
+             ON account.email = json_extract(imported.value, '$.ownerEmail')
+            AND account.display_name = json_extract(imported.value, '$.ownerName')
+            AND account.active = 1
+            AND account.role = 'manager'`,
         )
         .bind(JSON.stringify(projectValues)),
       client
@@ -739,6 +781,15 @@ export async function POST(request: Request) {
       return Response.json(
         {
           error: "导入期间项目编码被占用，未写入任何项目，请重新预检。",
+        },
+        { status: 409 },
+      );
+    }
+    if (message.includes("FOREIGN KEY constraint failed")) {
+      return Response.json(
+        {
+          error:
+            "导入期间项目经理账号状态发生变化，未写入任何项目，请重新预检。",
         },
         { status: 409 },
       );

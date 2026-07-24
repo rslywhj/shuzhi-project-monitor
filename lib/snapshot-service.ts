@@ -1,4 +1,4 @@
-import { and, count, desc, eq, ne, sql } from "drizzle-orm";
+import { and, desc, eq, ne, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   auditLogs,
@@ -45,7 +45,10 @@ export async function lockPortfolioSnapshot(options: {
     return { outcome: "reopened", snapshot: previous[0] };
   }
 
-  const projectIds = await db.select({ id: projects.id }).from(projects);
+  const projectIds = await db
+    .select({ id: projects.id })
+    .from(projects)
+    .where(eq(projects.lifecycleStatus, "active"));
   for (let index = 0; index < projectIds.length; index += 5) {
     await Promise.all(
       projectIds
@@ -59,16 +62,18 @@ export async function lockPortfolioSnapshot(options: {
   }
 
   const [
-    [projectTotal],
-    [reportTotal],
     projectRows,
+    reportRows,
     milestoneRows,
     riskRows,
     actionRows,
   ] = await Promise.all([
-    db.select({ value: count() }).from(projects),
     db
-      .select({ value: count() })
+      .select()
+      .from(projects)
+      .where(eq(projects.lifecycleStatus, "active")),
+    db
+      .select({ projectId: weeklyReports.projectId })
       .from(weeklyReports)
       .where(
         and(
@@ -76,21 +81,37 @@ export async function lockPortfolioSnapshot(options: {
           ne(weeklyReports.status, "draft"),
         ),
       ),
-    db.select().from(projects),
     db.select().from(milestones),
     db.select().from(risks),
     db.select().from(correctiveActions),
   ]);
+  const activeProjectIds = new Set(projectRows.map((project) => project.id));
+  const activeMilestones = milestoneRows.filter((row) =>
+    activeProjectIds.has(row.projectId),
+  );
+  const activeRisks = riskRows.filter((row) =>
+    activeProjectIds.has(row.projectId),
+  );
+  const activeActions = actionRows.filter((row) =>
+    activeProjectIds.has(row.projectId),
+  );
+  const submittedProjectCount = new Set(
+    reportRows
+      .filter((report) => activeProjectIds.has(report.projectId))
+      .map((report) => report.projectId),
+  ).size;
   const version = (previous[0]?.version ?? 0) + 1;
   const completeness =
-    projectTotal.value === 0
+    projectRows.length === 0
       ? 0
-      : Number(((reportTotal.value / projectTotal.value) * 100).toFixed(1));
+      : Number(
+          ((submittedProjectCount / projectRows.length) * 100).toFixed(1),
+        );
   const capturedAt = options.capturedAt ?? new Date();
   const capturedAtIso = capturedAt.toISOString();
   const capturedDate = capturedAtIso.slice(0, 10);
   const dashboardAlerts = {
-    highRisks: riskRows
+    highRisks: activeRisks
       .filter((risk) => risk.status !== "closed" && risk.level === "high")
       .map((risk) => ({
         id: risk.id,
@@ -99,7 +120,7 @@ export async function lockPortfolioSnapshot(options: {
         owner: risk.owner,
         targetDate: risk.dueDate,
       })),
-    overdueActions: actionRows
+    overdueActions: activeActions
       .filter(
         (action) =>
           action.status !== "completed" &&
@@ -117,7 +138,7 @@ export async function lockPortfolioSnapshot(options: {
   };
   const snapshotPayload = JSON.stringify({
     projects: projectRows,
-    milestones: milestoneRows,
+    milestones: activeMilestones,
     dashboardAlerts,
     capturedAt: capturedAtIso,
   });
@@ -128,7 +149,7 @@ export async function lockPortfolioSnapshot(options: {
       .values({
         weekKey: options.weekKey,
         version,
-        projectCount: projectTotal.value,
+        projectCount: projectRows.length,
         completeness,
         payloadJson: snapshotPayload,
         lockedBy: options.actorEmail,

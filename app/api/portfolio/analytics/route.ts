@@ -32,7 +32,11 @@ export async function GET(request: Request) {
     await ensureSeeded();
     const db = getDb();
     const [projectRows, milestoneRows, originalBaselineRows] = await Promise.all([
-      db.select().from(projects).orderBy(asc(projects.code)),
+      db
+        .select()
+        .from(projects)
+        .where(eq(projects.lifecycleStatus, "active"))
+        .orderBy(asc(projects.code)),
       db
         .select()
         .from(milestones)

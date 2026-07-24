@@ -1,7 +1,16 @@
 import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { auditLogs, baselineChanges, notifications } from "@/db/schema";
+import {
+  auditLogs,
+  baselineChanges,
+  notifications,
+  projects,
+} from "@/db/schema";
 import { ApiRequestError, apiError, requiredString } from "@/lib/api-utils";
+import {
+  lifecycleLockedResponse,
+  projectLifecycleLocked,
+} from "@/lib/project-lifecycle";
 import {
   canManagePortfolio,
   forbidden,
@@ -35,6 +44,15 @@ export async function POST(
     if (!existing) {
       return Response.json({ error: "未找到基线变更申请。" }, { status: 404 });
     }
+    const [project] = await db
+      .select()
+      .from(projects)
+      .where(eq(projects.id, existing.projectId))
+      .limit(1);
+    if (!project) {
+      return Response.json({ error: "未找到变更所属项目。" }, { status: 404 });
+    }
+    if (projectLifecycleLocked(project)) return lifecycleLockedResponse(project);
     if (existing.status !== "pending") {
       return Response.json({ error: "该申请已经处理，不能重复审批。" }, { status: 409 });
     }

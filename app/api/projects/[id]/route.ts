@@ -3,6 +3,10 @@ import { getDb } from "@/db";
 import { auditLogs, projects, users } from "@/db/schema";
 import { ApiRequestError, apiError } from "@/lib/api-utils";
 import { requireProjectOwnerAccount } from "@/lib/project-owner";
+import {
+  lifecycleLockedResponse,
+  projectLifecycleLocked,
+} from "@/lib/project-lifecycle";
 import { ensureSeeded } from "@/lib/seed";
 import {
   canWriteProject,
@@ -39,6 +43,7 @@ export async function PATCH(
       return Response.json({ error: "未找到指定项目。" }, { status: 404 });
     }
     if (!canWriteProject(identity, existing.ownerEmail)) return forbidden();
+    if (projectLifecycleLocked(existing)) return lifecycleLockedResponse(existing);
 
     const payload = (await request.json()) as ProjectPatch;
     if (

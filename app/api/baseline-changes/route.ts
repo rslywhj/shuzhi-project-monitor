@@ -14,6 +14,10 @@ import {
 } from "@/lib/api-utils";
 import { ensureSeeded } from "@/lib/seed";
 import {
+  lifecycleLockedResponse,
+  projectLifecycleLocked,
+} from "@/lib/project-lifecycle";
+import {
   canWriteProject,
   forbidden,
   getRequestIdentity,
@@ -48,6 +52,7 @@ export async function POST(request: Request) {
       return Response.json({ error: "未找到指定项目。" }, { status: 404 });
     }
     if (!canWriteProject(identity, project.ownerEmail)) return forbidden();
+    if (projectLifecycleLocked(project)) return lifecycleLockedResponse(project);
     const [pending] = await db
       .select({ id: baselineChanges.id })
       .from(baselineChanges)

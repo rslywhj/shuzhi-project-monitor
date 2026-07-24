@@ -38,6 +38,14 @@ export const projects = sqliteTable(
     riskLevel: text("risk_level", { enum: ["low", "medium", "high"] })
       .notNull()
       .default("low"),
+    lifecycleStatus: text("lifecycle_status", {
+      enum: ["active", "completed", "archived"],
+    })
+      .notNull()
+      .default("active"),
+    lifecycleReason: text("lifecycle_reason").notNull().default(""),
+    completedAt: text("completed_at"),
+    archivedAt: text("archived_at"),
     originalBaselineVersion: integer("original_baseline_version").notNull().default(1),
     currentBaselineVersion: integer("current_baseline_version").notNull().default(1),
     healthCalculatedAt: text("health_calculated_at"),
@@ -46,6 +54,7 @@ export const projects = sqliteTable(
   (table) => [
     uniqueIndex("projects_code_idx").on(table.code),
     index("projects_status_idx").on(table.status),
+    index("projects_lifecycle_status_idx").on(table.lifecycleStatus),
     index("projects_org_idx").on(table.org),
   ],
 );

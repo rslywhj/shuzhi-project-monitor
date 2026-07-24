@@ -17,6 +17,10 @@ import {
 import { ensureSeeded } from "@/lib/seed";
 import { recalculateProjectHealth } from "@/lib/health";
 import {
+  lifecycleLockedResponse,
+  projectLifecycleLocked,
+} from "@/lib/project-lifecycle";
+import {
   canWriteProject,
   forbidden,
   getRequestIdentity,
@@ -67,6 +71,7 @@ export async function POST(
       return Response.json({ error: "未找到指定项目。" }, { status: 404 });
     }
     if (!canWriteProject(identity, project.ownerEmail)) return forbidden();
+    if (projectLifecycleLocked(project)) return lifecycleLockedResponse(project);
 
     const payload = (await request.json()) as {
       name?: string;

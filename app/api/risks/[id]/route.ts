@@ -8,6 +8,10 @@ import {
   requiredString,
 } from "@/lib/api-utils";
 import {
+  lifecycleLockedResponse,
+  projectLifecycleLocked,
+} from "@/lib/project-lifecycle";
+import {
   canWriteProject,
   forbidden,
   getRequestIdentity,
@@ -47,6 +51,7 @@ export async function PATCH(
       return Response.json({ error: "风险所属项目不存在。" }, { status: 409 });
     }
     if (!canWriteProject(identity, project.ownerEmail)) return forbidden();
+    if (projectLifecycleLocked(project)) return lifecycleLockedResponse(project);
 
     const payload = (await request.json()) as {
       title?: string;

@@ -113,7 +113,10 @@ export async function PUT(request: Request) {
       entityId: String(rule.id),
       detailJson: JSON.stringify(values),
     });
-    const projectRows = await db.select({ id: projects.id }).from(projects);
+    const projectRows = await db
+      .select({ id: projects.id })
+      .from(projects)
+      .where(eq(projects.lifecycleStatus, "active"));
     for (let index = 0; index < projectRows.length; index += 5) {
       await Promise.all(
         projectRows

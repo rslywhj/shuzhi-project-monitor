@@ -67,7 +67,10 @@ async function createReportNotices(
 ) {
   const db = getDb();
   const [projectRows, reportRows] = await Promise.all([
-    db.select().from(projects),
+    db
+      .select()
+      .from(projects)
+      .where(eq(projects.lifecycleStatus, "active")),
     db
       .select({ projectId: weeklyReports.projectId })
       .from(weeklyReports)
@@ -153,7 +156,15 @@ async function createReportNotices(
 async function createRedEscalations(weekKey: string) {
   const db = getDb();
   const [redProjects, governanceRecipients] = await Promise.all([
-    db.select().from(projects).where(eq(projects.status, "red")),
+    db
+      .select()
+      .from(projects)
+      .where(
+        and(
+          eq(projects.status, "red"),
+          eq(projects.lifecycleStatus, "active"),
+        ),
+      ),
     db
       .select({ email: users.email })
       .from(users)

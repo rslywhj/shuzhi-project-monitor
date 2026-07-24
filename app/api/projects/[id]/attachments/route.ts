@@ -10,6 +10,10 @@ import {
 import { ApiRequestError, apiError, requiredWeekKey } from "@/lib/api-utils";
 import { ensureSeeded } from "@/lib/seed";
 import {
+  lifecycleLockedResponse,
+  projectLifecycleLocked,
+} from "@/lib/project-lifecycle";
+import {
   canWriteProject,
   forbidden,
   getRequestIdentity,
@@ -137,6 +141,7 @@ export async function POST(
       return Response.json({ error: "未找到指定项目。" }, { status: 404 });
     }
     if (!canWriteProject(identity, project.ownerEmail)) return forbidden();
+    if (projectLifecycleLocked(project)) return lifecycleLockedResponse(project);
 
     const form = await request.formData();
     const weekKey = requiredWeekKey(form.get("weekKey"), "附件周期");

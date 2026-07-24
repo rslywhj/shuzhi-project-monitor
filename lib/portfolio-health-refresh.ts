@@ -116,7 +116,8 @@ export async function refreshPortfolioHealth(options: {
         planProgress: projects.planProgress,
         actualProgress: projects.actualProgress,
       })
-      .from(projects);
+      .from(projects)
+      .where(eq(projects.lifecycleStatus, "active"));
     let changedProjectCount = 0;
     for (const batch of chunks(projectRows, PROJECT_BATCH_SIZE)) {
       const results = await Promise.all(

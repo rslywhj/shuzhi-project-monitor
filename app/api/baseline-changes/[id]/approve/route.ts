@@ -12,6 +12,10 @@ import { apiError } from "@/lib/api-utils";
 import { ensureSeeded } from "@/lib/seed";
 import { recalculateProjectHealth } from "@/lib/health";
 import {
+  lifecycleLockedResponse,
+  projectLifecycleLocked,
+} from "@/lib/project-lifecycle";
+import {
   canManagePortfolio,
   forbidden,
   getRequestIdentity,
@@ -45,6 +49,15 @@ export async function POST(
     if (!change) {
       return Response.json({ error: "未找到基线变更申请。" }, { status: 404 });
     }
+    const [project] = await db
+      .select()
+      .from(projects)
+      .where(eq(projects.id, change.projectId))
+      .limit(1);
+    if (!project) {
+      return Response.json({ error: "未找到变更所属项目。" }, { status: 404 });
+    }
+    if (projectLifecycleLocked(project)) return lifecycleLockedResponse(project);
     if (change.status !== "pending") {
       return Response.json({ error: "该申请已经处理，不能重复审批。" }, { status: 409 });
     }

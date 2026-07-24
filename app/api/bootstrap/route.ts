@@ -159,6 +159,10 @@ export async function GET(request: Request) {
               ? "中"
               : "低",
         baselineVersion: project.currentBaselineVersion,
+        lifecycleStatus: project.lifecycleStatus,
+        lifecycleReason: project.lifecycleReason,
+        completedAt: project.completedAt,
+        archivedAt: project.archivedAt,
         cells: matrixCells(snapshotMilestones.get(project.id) ?? []),
         milestones: snapshotMilestones.get(project.id) ?? [],
         updatedAt: project.updatedAt,
@@ -186,6 +190,10 @@ export async function GET(request: Request) {
               ? "中"
               : "低",
         baselineVersion: project.currentBaselineVersion,
+        lifecycleStatus: project.lifecycleStatus,
+        lifecycleReason: project.lifecycleReason,
+        completedAt: project.completedAt,
+        archivedAt: project.archivedAt,
         cells: matrixCells(projectMilestones.get(project.id) ?? []),
         milestones: projectMilestones.get(project.id) ?? [],
         updatedAt: project.updatedAt,

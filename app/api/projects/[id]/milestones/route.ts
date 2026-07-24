@@ -11,6 +11,10 @@ import {
 import { recalculateProjectHealth } from "@/lib/health";
 import { ensureSeeded } from "@/lib/seed";
 import {
+  lifecycleLockedResponse,
+  projectLifecycleLocked,
+} from "@/lib/project-lifecycle";
+import {
   canWriteProject,
   forbidden,
   getRequestIdentity,
@@ -76,6 +80,7 @@ export async function PUT(
       return Response.json({ error: "未找到指定项目。" }, { status: 404 });
     }
     if (!canWriteProject(identity, project.ownerEmail)) return forbidden();
+    if (projectLifecycleLocked(project)) return lifecycleLockedResponse(project);
     const payload = (await request.json()) as { milestones?: MilestoneUpdate[] };
     if (!Array.isArray(payload.milestones) || payload.milestones.length < 2) {
       throw new ApiRequestError("项目至少需要保留两个节点。");
@@ -193,6 +198,7 @@ export async function POST(
       return Response.json({ error: "未找到指定项目。" }, { status: 404 });
     }
     if (!canWriteProject(identity, project.ownerEmail)) return forbidden();
+    if (projectLifecycleLocked(project)) return lifecycleLockedResponse(project);
     const payload = (await request.json()) as {
       name?: string;
       sequence?: number;

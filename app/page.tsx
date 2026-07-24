@@ -97,7 +97,24 @@ type ProjectData = (typeof projects)[number] & {
   updatedAt?: string;
   openRiskCount?: number;
   openActionCount?: number;
+  lifecycleStatus?: "active" | "completed" | "archived";
+  lifecycleReason?: string;
+  completedAt?: string | null;
+  archivedAt?: string | null;
   milestones?: MilestoneData[];
+};
+type ProjectLifecycleStatus = NonNullable<ProjectData["lifecycleStatus"]>;
+type ProjectClosureState = {
+  incompleteMilestoneCount: number;
+  incompleteMilestones: Array<{
+    id: number;
+    name: string;
+    completion: number;
+  }>;
+  openRiskCount: number;
+  openActionCount: number;
+  pendingBaselineCount: number;
+  clear: boolean;
 };
 type DashboardSnapshot = {
   id: number;
@@ -253,6 +270,13 @@ type ProjectActivityData = {
 
 const statusLabel: Record<Status, string> = { green: "正常", yellow: "预警", red: "严重", na: "不适用" };
 const statusSymbol: Record<Status, string> = { green: "●", yellow: "▲", red: "■", na: "—" };
+const lifecycleLabel: Record<ProjectLifecycleStatus, string> = {
+  active: "在建",
+  completed: "已结项",
+  archived: "已归档",
+};
+const projectLifecycle = (project: ProjectData): ProjectLifecycleStatus =>
+  project.lifecycleStatus ?? "active";
 
 function shanghaiDateParts(value = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -493,20 +517,24 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
   const [health, setHealth] = useState("全部状态");
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState<{ project: ProjectData; index: number } | null>(null);
+  const activeProjects = useMemo(
+    () => projectData.filter((project) => projectLifecycle(project) === "active"),
+    [projectData],
+  );
   const matrixMilestones = templateData
     .filter((template) => template.active)
     .sort((left, right) => left.sequence - right.sequence)
     .map((template) => template.name);
   const matching = useMemo(
     () =>
-      projectData.filter(
+      activeProjects.filter(
         (project) =>
           (org === "全部组织" || project.org === org) &&
           (owner === "全部负责人" || project.owner === owner) &&
           (projectType === "全部类型" || project.type === projectType) &&
           (health === "全部状态" || statusLabel[project.status] === health),
       ),
-    [health, org, owner, projectData, projectType],
+    [activeProjects, health, org, owner, projectType],
   );
   const pageCount = Math.max(
     1,
@@ -516,21 +544,21 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
     page * COCKPIT_PAGE_SIZE,
     page * COCKPIT_PAGE_SIZE + COCKPIT_PAGE_SIZE,
   );
-  const total = projectData.length;
-  const green = projectData.filter((project) => project.status === "green").length;
-  const yellow = projectData.filter((project) => project.status === "yellow").length;
-  const red = projectData.filter((project) => project.status === "red").length;
+  const total = activeProjects.length;
+  const green = activeProjects.filter((project) => project.status === "green").length;
+  const yellow = activeProjects.filter((project) => project.status === "yellow").length;
+  const red = activeProjects.filter((project) => project.status === "red").length;
   const planProgress = total
-    ? projectData.reduce((sum, project) => sum + project.plan, 0) / total
+    ? activeProjects.reduce((sum, project) => sum + project.plan, 0) / total
     : 0;
   const actualProgress = total
-    ? projectData.reduce((sum, project) => sum + project.actual, 0) / total
+    ? activeProjects.reduce((sum, project) => sum + project.actual, 0) / total
     : 0;
   const progressGap = actualProgress - planProgress;
-  const organizations = [...new Set(projectData.map((project) => project.org))].sort();
-  const owners = [...new Set(projectData.map((project) => project.owner))].sort();
+  const organizations = [...new Set(activeProjects.map((project) => project.org))].sort();
+  const owners = [...new Set(activeProjects.map((project) => project.owner))].sort();
   const projectTypes = [
-    ...new Set(projectData.map((project) => project.type)),
+    ...new Set(activeProjects.map((project) => project.type)),
   ].sort();
   const snapshotLabel = snapshot
     ? `${snapshot.weekKey.replace("-W", "年第")}周 · V${snapshot.version}`
@@ -538,7 +566,7 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
   const snapshotTime = snapshot?.lockedAt
     ? snapshot.lockedAt.replace("T", " ").slice(5, 16)
     : "等待 PMO 锁定";
-  const attentionProjects = [...projectData]
+  const attentionProjects = [...activeProjects]
     .filter((project) => project.status === "red" || project.status === "yellow")
     .sort((left, right) => left.score - right.score)
     .slice(0, 3);
@@ -1422,6 +1450,9 @@ function Portfolio({
 }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("全部");
+  const [lifecycle, setLifecycle] = useState<ProjectLifecycleStatus | "all">(
+    "active",
+  );
   const [displayMode, setDisplayMode] = useState<"table" | "heatmap">("table");
   const [page, setPage] = useState(0);
   const [showCreate, setShowCreate] = useState(false);
@@ -1438,23 +1469,28 @@ function Portfolio({
   const [projectPlanError, setProjectPlanError] = useState("");
   const canManagePortfolio =
     identity?.role === "pmo" || identity?.role === "admin";
+  const activeProjects = useMemo(
+    () => projectData.filter((project) => projectLifecycle(project) === "active"),
+    [projectData],
+  );
   const matching = useMemo(
     () =>
       projectData.filter(
         (project) =>
           project.name.includes(query.trim()) &&
+          (lifecycle === "all" || projectLifecycle(project) === lifecycle) &&
           (status === "全部" || statusLabel[project.status] === status),
       ),
-    [query, status, projectData],
+    [lifecycle, query, status, projectData],
   );
   const pageCount = Math.max(1, Math.ceil(matching.length / 10));
   const safePage = Math.min(page, pageCount - 1);
   const filtered = matching.slice(safePage * 10, safePage * 10 + 10);
   const counts = {
-    all: projectData.length,
-    green: projectData.filter((project) => project.status === "green").length,
-    yellow: projectData.filter((project) => project.status === "yellow").length,
-    red: projectData.filter((project) => project.status === "red").length,
+    all: activeProjects.length,
+    green: activeProjects.filter((project) => project.status === "green").length,
+    yellow: activeProjects.filter((project) => project.status === "yellow").length,
+    red: activeProjects.filter((project) => project.status === "red").length,
   };
   const percent = (value: number) => counts.all ? `${((value / counts.all) * 100).toFixed(1)}%` : "0%";
   const reportingWeek = currentReportingPeriod().weekKey;
@@ -1462,7 +1498,9 @@ function Portfolio({
     weeklyReports
       .filter(
         (report) =>
-          report.weekKey === reportingWeek && report.status !== "draft",
+          report.weekKey === reportingWeek &&
+          report.status !== "draft" &&
+          activeProjects.some((project) => project.id === report.projectId),
       )
       .map((report) => report.projectId),
   ).size;
@@ -1593,10 +1631,10 @@ function Portfolio({
     }
   }
   return <div className="workspace-page">
-    <WorkspaceHeader title="项目组合总览" subtitle={`以统一口径监控 ${counts.all} 个统建项目的进度与健康状态`} onNavigate={onNavigate} identity={identity} />
+    <WorkspaceHeader title="项目组合总览" subtitle={`以统一口径监控 ${counts.all} 个在建项目，项目库共 ${projectData.length} 个`} onNavigate={onNavigate} identity={identity} />
     <div className="page-content">
       <div className="summary-strip">
-        <div className="summary-card"><span className="summary-icon blue">▦</span><div><small>全部项目</small><strong>{counts.all}</strong><em>100%</em></div></div>
+        <div className="summary-card"><span className="summary-icon blue">▦</span><div><small>在建项目</small><strong>{counts.all}</strong><em>项目库 {projectData.length}</em></div></div>
         <div className="summary-card"><span className="summary-icon green">●</span><div><small>绿色项目</small><strong>{counts.green}</strong><em>{percent(counts.green)}</em></div></div>
         <div className="summary-card"><span className="summary-icon yellow">▲</span><div><small>黄色项目</small><strong>{counts.yellow}</strong><em>{percent(counts.yellow)}</em></div></div>
         <div className="summary-card"><span className="summary-icon red">■</span><div><small>红色项目</small><strong>{counts.red}</strong><em>{percent(counts.red)}</em></div></div>
@@ -1607,6 +1645,7 @@ function Portfolio({
           <div><h2>{displayMode === "table" ? "项目清单" : "项目节点热力矩阵"}</h2><span>当前批准基线口径</span></div>
           <div className="toolbar-actions">
             <label className="search"><span>⌕</span><input placeholder="搜索项目名称" value={query} onChange={e => { setQuery(e.target.value); setPage(0); }} /></label>
+            <select aria-label="生命周期筛选" value={lifecycle} onChange={e => { setLifecycle(e.target.value as ProjectLifecycleStatus | "all"); setPage(0); }}><option value="active">在建</option><option value="completed">已结项</option><option value="archived">已归档</option><option value="all">全部状态</option></select>
             <select value={status} onChange={e => { setStatus(e.target.value); setPage(0); }}><option>全部</option><option>正常</option><option>预警</option><option>严重</option></select>
             <div className="view-switch" aria-label="项目视图"><button className={displayMode === "table" ? "active" : ""} onClick={() => setDisplayMode("table")}>列表</button><button className={displayMode === "heatmap" ? "active" : ""} onClick={() => setDisplayMode("heatmap")}>节点热力</button></div>
             {canManagePortfolio && <div className="portfolio-import-actions">
@@ -1620,13 +1659,13 @@ function Portfolio({
         {displayMode === "table" ? <div className="project-table">
           <div className="table-head"><span>项目名称</span><span>健康状态</span><span>项目经理</span><span>计划 / 实际</span><span>进度偏差</span><span>风险</span><span>更新时间</span><span /></div>
           {filtered.map(p => <div className="table-row" key={p.id}>
-            <button className="project-name" onClick={() => onNavigate("project", p.id)}><i>{p.id}</i><span><strong>{p.name}</strong><small>{p.org} · {p.type}</small></span></button>
+            <button className="project-name" onClick={() => onNavigate("project", p.id)}><i>{p.id}</i><span><strong>{p.name} <em className={`lifecycle-badge ${projectLifecycle(p)}`}>{lifecycleLabel[projectLifecycle(p)]}</em></strong><small>{p.org} · {p.type}</small></span></button>
             <span><StatusPill status={p.status} /></span><span className="owner"><i>{p.owner[0]}</i>{p.owner}</span>
             <span className="dual-progress"><b>{p.actual}%</b><ProgressBar value={p.actual} tone={p.status} /><small>计划 {p.plan}%</small></span>
             <span className={p.actual - p.plan < -5 ? "negative" : "positive"}>{p.actual - p.plan > 0 ? "+" : ""}{(p.actual - p.plan).toFixed(1)} pp</span>
             <span className={`risk ${p.risk === "高" ? "high" : p.risk === "中" ? "medium" : "low"}`}>{p.risk}风险</span><span>{p.updatedAt ? p.updatedAt.replace("T", " ").slice(5, 16) : "数据未同步"}</span><button className="more" aria-label={`查看${p.name}`} onClick={() => onNavigate("project", p.id)}>•••</button>
           </div>)}
-        </div> : <div className="portfolio-matrix"><div className="portfolio-matrix-grid" style={{ "--portfolio-milestone-count": matrixTemplates.length } as React.CSSProperties}><div className="portfolio-matrix-head"><div>项目 / 健康度</div>{matrixTemplates.map((template) => <div key={template.id}><span>{template.code}</span>{template.name}</div>)}</div>{filtered.map((project) => <div className="portfolio-matrix-row" key={project.id}><button className="portfolio-project-cell" onClick={() => onNavigate("project", project.id)}><StatusPill status={project.status} compact /><span><strong>{project.name}</strong><small>{project.owner} · {project.org}</small></span><b>{project.score}</b></button>{matrixTemplates.map((template) => { const milestone = project.milestones?.find((row) => row.templateId === template.id || row.name === template.name); const cellStatus = milestone?.status ?? "na"; return <button key={template.id} className={`portfolio-heat-cell ${cellStatus}`} aria-label={`${project.name} ${template.name} ${statusLabel[cellStatus]}`} onClick={() => onNavigate("project", project.id)}><span>{statusSymbol[cellStatus]}</span><small>{cellStatus === "na" ? "N/A" : milestone && milestone.deviationDays > 0 ? `+${milestone.deviationDays}天` : `${milestone?.completion ?? 0}%`}</small></button>; })}</div>)}</div></div>}
+        </div> : <div className="portfolio-matrix"><div className="portfolio-matrix-grid" style={{ "--portfolio-milestone-count": matrixTemplates.length } as React.CSSProperties}><div className="portfolio-matrix-head"><div>项目 / 健康度</div>{matrixTemplates.map((template) => <div key={template.id}><span>{template.code}</span>{template.name}</div>)}</div>{filtered.map((project) => <div className="portfolio-matrix-row" key={project.id}><button className="portfolio-project-cell" onClick={() => onNavigate("project", project.id)}><StatusPill status={project.status} compact /><span><strong>{project.name} <em className={`lifecycle-badge ${projectLifecycle(project)}`}>{lifecycleLabel[projectLifecycle(project)]}</em></strong><small>{project.owner} · {project.org}</small></span><b>{project.score}</b></button>{matrixTemplates.map((template) => { const milestone = project.milestones?.find((row) => row.templateId === template.id || row.name === template.name); const cellStatus = milestone?.status ?? "na"; return <button key={template.id} className={`portfolio-heat-cell ${cellStatus}`} aria-label={`${project.name} ${template.name} ${statusLabel[cellStatus]}`} onClick={() => onNavigate("project", project.id)}><span>{statusSymbol[cellStatus]}</span><small>{cellStatus === "na" ? "N/A" : milestone && milestone.deviationDays > 0 ? `+${milestone.deviationDays}天` : `${milestone?.completion ?? 0}%`}</small></button>; })}</div>)}</div></div>}
         <div className="pagination"><span>共 {matching.length} 条，每页 10 条</span><div><button disabled={safePage === 0} onClick={() => setPage((current) => Math.max(0, current - 1))}>‹</button>{Array.from({ length: pageCount }, (_, index) => <button key={index} className={safePage === index ? "active" : ""} onClick={() => setPage(index)}>{index + 1}</button>)}<button disabled={safePage === pageCount - 1} onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))}>›</button></div></div>
       </section>
     </div>
@@ -2165,6 +2204,7 @@ function ProjectActivityPanel({
     "baseline_change.reject": "驳回基线变更",
     "project.update": "更新项目信息",
     "project.owner_transfer": "移交项目负责人",
+    "project.lifecycle_change": "变更项目生命周期",
     "project_milestones.update": "更新项目节点治理",
     "project_milestone.create_custom": "新增项目自定义节点",
     "risk.create": "登记风险",
@@ -2209,6 +2249,14 @@ function ProjectDetail({
   const [projectWorking, setProjectWorking] = useState(false);
   const [projectError, setProjectError] = useState("");
   const [projectSuccess, setProjectSuccess] = useState(false);
+  const [showLifecycle, setShowLifecycle] = useState(false);
+  const [lifecycleClosure, setLifecycleClosure] =
+    useState<ProjectClosureState | null>(null);
+  const [lifecycleReason, setLifecycleReason] = useState("");
+  const [lifecycleOverride, setLifecycleOverride] = useState(false);
+  const [lifecycleLoading, setLifecycleLoading] = useState(false);
+  const [lifecycleWorking, setLifecycleWorking] = useState(false);
+  const [lifecycleError, setLifecycleError] = useState("");
   const currentProject =
     projectData.find((project) => project.id === projectId) ??
     projectData[0] ??
@@ -2216,13 +2264,18 @@ function ProjectDetail({
   const variance = Number(
     (currentProject.actual - currentProject.plan).toFixed(1),
   );
+  const currentLifecycle = projectLifecycle(currentProject);
+  const lifecycleLocked = currentLifecycle !== "active";
   const canUpdate =
-    identity?.role === "admin" ||
-    identity?.role === "pmo" ||
-    (identity?.role === "manager" &&
-      Boolean(currentProject.ownerEmail) &&
-      identity.email === currentProject.ownerEmail);
+    !lifecycleLocked &&
+    (identity?.role === "admin" ||
+      identity?.role === "pmo" ||
+      (identity?.role === "manager" &&
+        Boolean(currentProject.ownerEmail) &&
+        identity.email === currentProject.ownerEmail));
   const canChangeOwner =
+    identity?.role === "admin" || identity?.role === "pmo";
+  const canChangeLifecycle =
     identity?.role === "admin" || identity?.role === "pmo";
   const currentOwnerInDirectory = projectManagers.some(
     (manager) => manager.email === currentProject.ownerEmail,
@@ -2232,6 +2285,76 @@ function ProjectDetail({
   const displayMilestones = [...(currentProject.milestones ?? [])].sort(
     (left, right) => left.sequence - right.sequence,
   );
+
+  async function openLifecyclePanel() {
+    setShowLifecycle(true);
+    setLifecycleLoading(true);
+    setLifecycleError("");
+    setLifecycleReason("");
+    setLifecycleOverride(false);
+    try {
+      const response = await fetch(
+        `/api/projects/${encodeURIComponent(currentProject.id)}/lifecycle`,
+        { cache: "no-store" },
+      );
+      const result = (await response.json()) as {
+        error?: string;
+        closure?: ProjectClosureState;
+      };
+      if (!response.ok || !result.closure) {
+        throw new Error(result.error || "项目结项检查读取失败");
+      }
+      setLifecycleClosure(result.closure);
+    } catch (error) {
+      setLifecycleError(
+        error instanceof Error ? error.message : "项目结项检查读取失败",
+      );
+    } finally {
+      setLifecycleLoading(false);
+    }
+  }
+
+  async function changeLifecycle(status: ProjectLifecycleStatus) {
+    if (lifecycleReason.trim().length < 10) {
+      setLifecycleError("状态变更原因至少填写10个字符。");
+      return;
+    }
+    setLifecycleWorking(true);
+    setLifecycleError("");
+    try {
+      const response = await fetch(
+        `/api/projects/${encodeURIComponent(currentProject.id)}/lifecycle`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            status,
+            reason: lifecycleReason,
+            overrideOpenItems:
+              status === "completed" ? lifecycleOverride : false,
+          }),
+        },
+      );
+      const result = (await response.json()) as {
+        error?: string;
+        closure?: ProjectClosureState;
+      };
+      if (!response.ok) {
+        if (result.closure) setLifecycleClosure(result.closure);
+        throw new Error(result.error || "项目状态变更失败");
+      }
+      await onDataChanged();
+      setShowLifecycle(false);
+      setProjectSuccess(true);
+      window.setTimeout(() => setProjectSuccess(false), 3000);
+    } catch (error) {
+      setLifecycleError(
+        error instanceof Error ? error.message : "项目状态变更失败",
+      );
+    } finally {
+      setLifecycleWorking(false);
+    }
+  }
 
   async function saveProject(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -2414,10 +2537,11 @@ function ProjectDetail({
     <div className="page-content project-detail">
       <button className="back-link" onClick={() => onNavigate("portfolio")}>← 返回项目总览</button>
       <section className="project-hero">
-        <div className="project-identity"><div className="project-code">{currentProject.name[0]}</div><div><div><StatusPill status={currentProject.status} /><span className="project-tag">{currentProject.type}</span>{currentProject.cells.some((cell) => cell === "red") && <span className="project-tag">重点关注</span>}</div><h2>{currentProject.name}</h2><p>项目经理 {currentProject.owner}　·　{currentProject.org}　·　当前批准基线口径</p></div></div>
+        <div className="project-identity"><div className="project-code">{currentProject.name[0]}</div><div><div><StatusPill status={currentProject.status} /><span className={`lifecycle-badge ${currentLifecycle}`}>{lifecycleLabel[currentLifecycle]}</span><span className="project-tag">{currentProject.type}</span>{currentProject.cells.some((cell) => cell === "red") && <span className="project-tag">重点关注</span>}</div><h2>{currentProject.name}</h2><p>项目经理 {currentProject.owner}　·　{currentProject.org}　·　当前批准基线口径</p></div></div>
         <div className="hero-metrics"><div><small>健康度</small><strong className={currentProject.status === "red" ? "red-text" : ""}>{currentProject.score}</strong><span>/100</span></div><div><small>计划进度</small><strong>{currentProject.plan}%</strong></div><div><small>实际进度</small><strong>{currentProject.actual}%</strong></div><div><small>进度偏差</small><strong className={variance < -5 ? "red-text" : ""}>{variance > 0 ? "+" : ""}{variance}pp</strong></div></div>
-        <div className="hero-actions"><button className="outline-button" onClick={() => window.print()}>导出报告</button>{canUpdate && <><button className="outline-button" onClick={() => { setProjectError(""); setShowProjectEdit(true); }}>编辑信息</button><button className="primary-button" onClick={() => onNavigate("report", currentProject.id)}>更新本周进度</button></>}</div>
+        <div className="hero-actions"><button className="outline-button" onClick={() => window.print()}>导出报告</button>{canChangeLifecycle && <button className="outline-button" onClick={openLifecyclePanel}>项目状态</button>}{canUpdate && <><button className="outline-button" onClick={() => { setProjectError(""); setShowProjectEdit(true); }}>编辑信息</button><button className="primary-button" onClick={() => onNavigate("report", currentProject.id)}>更新本周进度</button></>}</div>
       </section>
+      {lifecycleLocked && <div className="lifecycle-readonly-banner"><span>▣</span><div><strong>项目{lifecycleLabel[currentLifecycle]}，当前为只读状态</strong><p>已停止周报、催报、健康度重算和快照统计；如需继续处理未闭环事项，请由 PMO 或管理员先恢复为在建。</p></div>{currentProject.lifecycleReason && <small>最近变更原因：{currentProject.lifecycleReason}</small>}</div>}
       <section className="score-explain">
         <div className="score-ring"><strong>{currentProject.score}</strong><span>综合健康度</span></div><div className="score-copy"><h3>项目{statusLabel[currentProject.status]}：评分与一票否决规则共同判定</h3><p>基础分 100，当前累计扣分 {100 - currentProject.score} 分。所有扣分均可追溯至节点、风险或数据更新记录。</p><div className="deductions"><span>进度偏差 <b>{variance}pp</b></span><span>节点预警 <b>{currentProject.cells.filter((cell) => cell === "yellow").length}项</b></span><span>严重节点 <b>{currentProject.cells.filter((cell) => cell === "red").length}项</b></span></div></div><span className="count-badge">规则可解释</span>
       </section>
@@ -2562,6 +2686,7 @@ function ProjectDetail({
         </section>
       </div>
     )}
+    {showLifecycle && <div className="modal-backdrop" onClick={() => setShowLifecycle(false)}><section className="create-modal lifecycle-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowLifecycle(false)}>×</button><span className="modal-kicker">PROJECT LIFECYCLE</span><h2>项目状态管理</h2><p>{currentProject.name} · 当前状态 <b>{lifecycleLabel[currentLifecycle]}</b></p>{lifecycleLoading ? <div className="panel-loading">正在执行结项检查…</div> : lifecycleClosure && <div className="closure-checks"><div className={lifecycleClosure.incompleteMilestoneCount ? "blocked" : "clear"}><span>{lifecycleClosure.incompleteMilestoneCount ? "!" : "✓"}</span><strong>{lifecycleClosure.incompleteMilestoneCount}</strong><small>未完成适用节点</small></div><div className={lifecycleClosure.openRiskCount ? "blocked" : "clear"}><span>{lifecycleClosure.openRiskCount ? "!" : "✓"}</span><strong>{lifecycleClosure.openRiskCount}</strong><small>开放风险</small></div><div className={lifecycleClosure.openActionCount ? "blocked" : "clear"}><span>{lifecycleClosure.openActionCount ? "!" : "✓"}</span><strong>{lifecycleClosure.openActionCount}</strong><small>未完成措施</small></div><div className={lifecycleClosure.pendingBaselineCount ? "blocked" : "clear"}><span>{lifecycleClosure.pendingBaselineCount ? "!" : "✓"}</span><strong>{lifecycleClosure.pendingBaselineCount}</strong><small>待审批基线</small></div></div>}<label className="full-label">状态变更原因 <b>*</b><textarea value={lifecycleReason} minLength={10} maxLength={500} onChange={(event) => setLifecycleReason(event.target.value)} placeholder="至少10个字符，说明结项、归档或恢复在建的依据与后续安排" /></label>{currentLifecycle === "active" && lifecycleClosure && !lifecycleClosure.clear && <label className="lifecycle-override"><input type="checkbox" checked={lifecycleOverride} onChange={(event) => setLifecycleOverride(event.target.checked)} /><span><strong>确认带未闭环事项结项</strong><small>结项后项目业务数据将锁定；必须先恢复为在建，才能继续处理上述事项。</small></span></label>}{lifecycleError && <div className="form-error" role="alert">! {lifecycleError}</div>}<div className="modal-actions"><button className="outline-button" onClick={() => setShowLifecycle(false)}>取消</button>{currentLifecycle === "active" && <button className="primary-button" disabled={lifecycleLoading || lifecycleWorking || !lifecycleClosure || (!lifecycleClosure.clear && !lifecycleOverride) || lifecycleReason.trim().length < 10} onClick={() => changeLifecycle("completed")}>{lifecycleWorking ? "处理中…" : "标记结项"}</button>}{currentLifecycle === "completed" && <><button className="outline-button" disabled={lifecycleWorking || lifecycleReason.trim().length < 10} onClick={() => changeLifecycle("active")}>恢复在建</button><button className="primary-button" disabled={lifecycleWorking || lifecycleReason.trim().length < 10} onClick={() => changeLifecycle("archived")}>归档项目</button></>}{currentLifecycle === "archived" && <button className="primary-button" disabled={lifecycleWorking || lifecycleReason.trim().length < 10} onClick={() => changeLifecycle("active")}>恢复在建</button>}</div></section></div>}
     {baselineSuccess && <div className="toast"><span>✓</span><div><strong>基线变更申请已提交</strong><p>PMO 审批前当前批准基线保持不变。</p></div></div>}
     {projectSuccess && <div className="toast"><span>✓</span><div><strong>项目信息已更新</strong><p>修改已写入操作审计。</p></div></div>}
   </div>;
@@ -2572,6 +2697,7 @@ function WeeklyReport({ onNavigate, onDataChanged, projectId, projectData = proj
     projectData.find((project) => project.id === projectId) ??
     projectData[0] ??
     projects[0];
+  const lifecycleLocked = projectLifecycle(currentProject) !== "active";
   const reportingPeriod = useMemo(() => {
     const current = currentReportingPeriod();
     return snapshot?.weekKey === current.weekKey
@@ -2812,6 +2938,10 @@ function WeeklyReport({ onNavigate, onDataChanged, projectId, projectData = proj
   async function uploadAttachment(
     event: React.ChangeEvent<HTMLInputElement>,
   ) {
+    if (lifecycleLocked) {
+      setSubmitError("项目已结项或归档，恢复为在建后才能上传附件。");
+      return;
+    }
     const file = event.currentTarget.files?.[0];
     event.currentTarget.value = "";
     if (!file) return;
@@ -2843,6 +2973,10 @@ function WeeklyReport({ onNavigate, onDataChanged, projectId, projectData = proj
   }
 
   async function deleteAttachment(attachment: AttachmentData) {
+    if (lifecycleLocked) {
+      setSubmitError("项目已结项或归档，恢复为在建后才能删除附件。");
+      return;
+    }
     setUploadingAttachment(true);
     setSubmitError("");
     try {
@@ -2862,6 +2996,10 @@ function WeeklyReport({ onNavigate, onDataChanged, projectId, projectData = proj
   }
 
   async function saveWeeklyReport(submitMode: "draft" | "submitted") {
+    if (lifecycleLocked) {
+      setSubmitError("项目已结项或归档，恢复为在建后才能填报周报。");
+      return;
+    }
     if (!selectedMilestone) {
       setSubmitError("当前项目没有可填报的适用节点。");
       return;
@@ -2940,8 +3078,9 @@ function WeeklyReport({ onNavigate, onDataChanged, projectId, projectData = proj
     <WorkspaceHeader title="周度进度填报" subtitle={`${reportingPeriod.year}年第${reportingPeriod.week}周 · 填报截止 ${reportingPeriod.fridayLabel} 17:00`} onNavigate={onNavigate} identity={identity} />
     <div className="page-content report-page">
       <div className="report-top"><div><button className="back-link" onClick={() => onNavigate("project", projectId)}>← 返回项目详情</button><h2>{currentProject.name}</h2><p>{currentProject.owner}负责 · {rolledToNextWeek ? `${snapshot?.weekKey} 已锁定，已自动切换到下一填报周期` : "本周数据将进入下一次周度快照"}</p></div><div className="save-state"><span>{loadingDraft ? "正在检查草稿" : "服务端校验已启用"}</span><i /> {loadingDraft ? "同步中" : "实时"}</div></div>
+      {lifecycleLocked && <div className="lifecycle-readonly-banner"><span>▣</span><div><strong>项目{lifecycleLabel[projectLifecycle(currentProject)]}，周报只读</strong><p>该项目不再进入催报与快照完整率统计。如需继续填报或收尾，请先由 PMO 或管理员恢复为在建。</p></div></div>}
       <div className="report-layout">
-        <div className="report-form">
+        <div className={`report-form ${lifecycleLocked ? "lifecycle-readonly" : ""}`}>
           <section className="content-card form-section">
             <div className="form-title"><span>01</span><div><h3>总体进度确认</h3><p>系统根据节点权重自动计算，申报值偏差超过 5pp 将提示核验。</p></div></div>
             <div className="progress-compare"><div><small>系统计算进度</small><strong>{systemProgress}%</strong><ProgressBar value={systemProgress} /></div><div><small>项目经理申报进度</small><strong>{declared}%</strong><input aria-label="项目经理申报进度" type="range" min="0" max="100" value={declared} onChange={e => setDeclared(Number(e.target.value))} /></div><div className={Math.abs(diff) > 5 ? "compare-warning" : "compare-ok"}><span>{Math.abs(diff) > 5 ? "!" : "✓"}</span><strong>{diff > 0 ? "+" : ""}{diff}pp</strong><small>{Math.abs(diff) > 5 ? "需说明差异" : "口径一致"}</small></div></div>
@@ -2959,11 +3098,11 @@ function WeeklyReport({ onNavigate, onDataChanged, projectId, projectData = proj
             <div className="action-form"><div className="form-grid"><label>措施名称 <b>*</b><input value={actionName} onChange={(event) => setActionName(event.target.value)} placeholder="例如：接口联调专项攻坚" /></label><label>责任人 <b>*</b><input value={actionOwner} onChange={(event) => setActionOwner(event.target.value)} /></label><label>预计恢复日期 <b>*</b><input type="date" value={recoveryDate} onChange={(event) => setRecoveryDate(event.target.value)} /></label><label>措施状态<div className="readonly-input">进行中</div></label></div><label className="full-label">具体行动 <b>*</b><input value={actionDetail} onChange={(event) => setActionDetail(event.target.value)} placeholder="说明动作、资源投入、检查频率和完成标准" /></label></div>
           </section>}
           <section className="content-card form-section attachment-section">
-            <div className="form-title"><span>04</span><div><h3>支撑附件</h3><p>上传会议纪要、验收材料、进度截图或问题清单；单个文件不超过10MB。</p></div><label className={`attachment-upload ${uploadingAttachment ? "disabled" : ""}`}>＋ {uploadingAttachment ? "正在处理…" : "选择文件"}<input type="file" disabled={uploadingAttachment} accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.png,.jpg,.jpeg,.txt,.csv,.zip" onChange={uploadAttachment} /></label></div>
-            {attachmentRows.length ? <div className="attachment-list">{attachmentRows.map((attachment) => <div key={attachment.id}><span className="attachment-type">↧</span><div><a href={`/api/attachments/${attachment.id}`} target="_blank" rel="noreferrer">{attachment.filename}</a><small>{formatFileSize(attachment.sizeBytes)} · {attachment.uploadedBy} · {attachment.createdAt.replace("T", " ").slice(0, 16)}</small></div><button type="button" disabled={uploadingAttachment} onClick={() => deleteAttachment(attachment)}>删除</button></div>)}</div> : <div className="attachment-empty">尚未上传附件，本项为选填。</div>}
+            <div className="form-title"><span>04</span><div><h3>支撑附件</h3><p>上传会议纪要、验收材料、进度截图或问题清单；单个文件不超过10MB。</p></div><label className={`attachment-upload ${uploadingAttachment || lifecycleLocked ? "disabled" : ""}`}>＋ {uploadingAttachment ? "正在处理…" : "选择文件"}<input type="file" disabled={uploadingAttachment || lifecycleLocked} accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.png,.jpg,.jpeg,.txt,.csv,.zip" onChange={uploadAttachment} /></label></div>
+            {attachmentRows.length ? <div className="attachment-list">{attachmentRows.map((attachment) => <div key={attachment.id}><span className="attachment-type">↧</span><div><a href={`/api/attachments/${attachment.id}`} target="_blank" rel="noreferrer">{attachment.filename}</a><small>{formatFileSize(attachment.sizeBytes)} · {attachment.uploadedBy} · {attachment.createdAt.replace("T", " ").slice(0, 16)}</small></div><button type="button" disabled={uploadingAttachment || lifecycleLocked} onClick={() => deleteAttachment(attachment)}>删除</button></div>)}</div> : <div className="attachment-empty">尚未上传附件，本项为选填。</div>}
           </section>
           {submitError && <div className="form-error" role="alert">! {submitError}</div>}
-          <div className="report-actions"><button className="outline-button" disabled={submitting || loadingDraft} onClick={() => saveWeeklyReport("draft")}>{submitting ? "处理中…" : "保存草稿"}</button><button className="primary-button" disabled={submitting || loadingDraft || !selectedMilestone} onClick={() => saveWeeklyReport("submitted")}>{submitting ? "正在提交…" : "提交本周进度"}</button></div>
+          <div className="report-actions"><button className="outline-button" disabled={lifecycleLocked || submitting || loadingDraft} onClick={() => saveWeeklyReport("draft")}>{submitting ? "处理中…" : "保存草稿"}</button><button className="primary-button" disabled={lifecycleLocked || submitting || loadingDraft || !selectedMilestone} onClick={() => saveWeeklyReport("submitted")}>{submitting ? "正在提交…" : "提交本周进度"}</button></div>
         </div>
         <aside className="report-aside">
           <div className="aside-card"><h3>填报完整度</h3><div className="completion-circle" style={{ background: `conic-gradient(var(--blue) ${formCompleteness}%,#e9edf3 0)` }}><strong>{formCompleteness}%</strong></div><ul><li className="done">✓ 总体进度</li><li className={selectedMilestone ? "done" : ""}>{selectedMilestone ? "✓" : "○"} 节点更新</li><li className={reason.trim() ? "done" : ""}>{reason.trim() ? "✓" : "○"} 本周进展说明</li><li className={!requiresAction || actionComplete ? "done" : ""}>{!requiresAction || actionComplete ? "✓" : "○"} 纠偏措施</li><li className={attachmentRows.length ? "done" : ""}>{attachmentRows.length ? "✓" : "○"} 支撑附件（选填）</li></ul></div>
@@ -3915,31 +4054,37 @@ function PmoPage({ onNavigate, onDataChanged, identity, projectData = projects }
   const currentSnapshotRow = snapshotRows.find(
     (snapshot) => snapshot.id === snapshotId,
   );
+  const activeProjects = projectData.filter(
+    (project) => projectLifecycle(project) === "active",
+  );
+  const activeProjectIds = new Set(activeProjects.map((project) => project.id));
   const submittedProjectIds = new Set(
     reportRows
       .filter(
         (report) =>
           report.weekKey === reportingPeriod.weekKey &&
-          report.status !== "draft",
+          report.status !== "draft" &&
+          activeProjectIds.has(report.projectId),
       )
       .map((report) => report.projectId),
   );
   const submittedReports = reportRows.filter(
     (report) =>
       report.weekKey === reportingPeriod.weekKey &&
-      report.status !== "draft",
+      report.status !== "draft" &&
+      activeProjectIds.has(report.projectId),
   );
-  const missingProjects = projectData.filter(
+  const missingProjects = activeProjects.filter(
     (project) => !submittedProjectIds.has(project.id),
   );
-  const redProjects = projectData.filter(
+  const redProjects = activeProjects.filter(
     (project) => project.status === "red",
   );
   const varianceReports = submittedReports.filter(
     (report) => Math.abs(report.variance) > 5,
   );
   const snapshotProjectCount =
-    currentSnapshotRow?.projectCount ?? projectData.length;
+    currentSnapshotRow?.projectCount ?? activeProjects.length;
   const submittedProjectCount = currentSnapshotRow
     ? Math.round(
         (snapshotProjectCount * currentSnapshotRow.completeness) / 100,

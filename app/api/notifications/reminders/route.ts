@@ -63,9 +63,16 @@ export async function POST(request: Request) {
     const projectRows = await db
       .select()
       .from(projects)
-      .where(inArray(projects.id, projectIds));
+      .where(
+        and(
+          inArray(projects.id, projectIds),
+          eq(projects.lifecycleStatus, "active"),
+        ),
+      );
     if (projectRows.length !== projectIds.length) {
-      throw new ApiRequestError("部分催报项目不存在，请刷新后重试。");
+      throw new ApiRequestError(
+        "部分催报项目不存在或已结项归档，请刷新后重试。",
+      );
     }
     if (
       kind === "red_escalation" &&

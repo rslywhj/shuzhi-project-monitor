@@ -9,6 +9,10 @@ import {
   safeNumber,
 } from "@/lib/api-utils";
 import {
+  lifecycleLockedResponse,
+  projectLifecycleLocked,
+} from "@/lib/project-lifecycle";
+import {
   canWriteProject,
   forbidden,
   getRequestIdentity,
@@ -47,6 +51,7 @@ export async function PATCH(
       .where(eq(projects.id, existing.projectId))
       .limit(1);
     if (!project || !canWriteProject(identity, project.ownerEmail)) return forbidden();
+    if (projectLifecycleLocked(project)) return lifecycleLockedResponse(project);
 
     const payload = (await request.json()) as {
       name?: string;

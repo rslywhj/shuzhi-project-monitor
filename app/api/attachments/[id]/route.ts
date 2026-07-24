@@ -3,6 +3,10 @@ import { getDb } from "@/db";
 import { attachments, projects, snapshots } from "@/db/schema";
 import { ApiRequestError, apiError } from "@/lib/api-utils";
 import {
+  lifecycleLockedResponse,
+  projectLifecycleLocked,
+} from "@/lib/project-lifecycle";
+import {
   canWriteProject,
   forbidden,
   getRequestIdentity,
@@ -87,6 +91,7 @@ export async function DELETE(
       return Response.json({ error: "附件所属项目不存在。" }, { status: 404 });
     }
     if (!canWriteProject(identity, project.ownerEmail)) return forbidden();
+    if (projectLifecycleLocked(project)) return lifecycleLockedResponse(project);
     const [latest] = await db
       .select({ status: snapshots.status })
       .from(snapshots)

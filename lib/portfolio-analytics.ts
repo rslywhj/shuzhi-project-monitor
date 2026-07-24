@@ -375,7 +375,20 @@ function csvCell(value: string | number) {
 
 export function portfolioAnalyticsCsv(
   rows: ReturnType<typeof buildPortfolioAnalytics>["projects"],
+  delayForecasts: Array<{
+    projectId: string;
+    probability: number;
+    riskBand: "low" | "medium" | "high";
+    expectedDelayDays: number;
+    forecastFinish: string | null;
+    confidence: "low" | "medium" | "high";
+    topMilestone: { name: string } | null;
+    earlyWarning: boolean;
+  }> = [],
 ) {
+  const forecastByProject = new Map(
+    delayForecasts.map((forecast) => [forecast.projectId, forecast]),
+  );
   const headers = [
     "项目编码",
     "项目名称",
@@ -393,28 +406,47 @@ export function portfolioAnalyticsCsv(
     "最终完成日漂移(天)",
     "延期节点数",
     "红色节点数",
+    "预测延期概率(%)",
+    "预测风险等级",
+    "预测关注节点",
+    "预计延期(天)",
+    "预测完成日",
+    "预测置信度",
+    "提前预警",
   ];
   const statusNames = { green: "绿色", yellow: "黄色", red: "红色" };
+  const riskBandNames = { low: "低", medium: "中", high: "高" };
+  const confidenceNames = { low: "低", medium: "中", high: "高" };
   return [
     headers,
-    ...rows.map((row) => [
-      row.code,
-      row.name,
-      row.org,
-      row.type,
-      row.owner,
-      statusNames[row.status],
-      row.score,
-      row.planProgress,
-      row.actualProgress,
-      row.progressGap,
-      `V${row.baselineVersion}`,
-      row.changedMilestoneCount,
-      row.cumulativeBaselineDriftDays,
-      row.latestFinishDriftDays,
-      row.delayedMilestoneCount,
-      row.redMilestoneCount,
-    ]),
+    ...rows.map((row) => {
+      const forecast = forecastByProject.get(row.id);
+      return [
+        row.code,
+        row.name,
+        row.org,
+        row.type,
+        row.owner,
+        statusNames[row.status],
+        row.score,
+        row.planProgress,
+        row.actualProgress,
+        row.progressGap,
+        `V${row.baselineVersion}`,
+        row.changedMilestoneCount,
+        row.cumulativeBaselineDriftDays,
+        row.latestFinishDriftDays,
+        row.delayedMilestoneCount,
+        row.redMilestoneCount,
+        forecast?.probability ?? 0,
+        forecast ? riskBandNames[forecast.riskBand] : "低",
+        forecast?.topMilestone?.name ?? "",
+        forecast?.expectedDelayDays ?? 0,
+        forecast?.forecastFinish ?? "",
+        forecast ? confidenceNames[forecast.confidence] : "低",
+        forecast?.earlyWarning ? "是" : "否",
+      ];
+    }),
   ]
     .map((row) => row.map(csvCell).join(","))
     .join("\r\n");

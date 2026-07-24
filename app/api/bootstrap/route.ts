@@ -30,6 +30,15 @@ type DashboardAlertItem = {
 type DashboardAlerts = {
   highRisks: DashboardAlertItem[];
   overdueActions: DashboardAlertItem[];
+  predictedDelays: Array<{
+    projectId: string;
+    probability: number;
+    riskBand: "low" | "medium" | "high";
+    expectedDelayDays: number;
+    milestoneName: string;
+    confidence: "low" | "medium" | "high";
+    earlyWarning: boolean;
+  }>;
 };
 
 function parseHealthExplanation(value: string) {
@@ -135,6 +144,7 @@ export async function GET(request: Request) {
     let dashboardAlerts: DashboardAlerts = {
       highRisks: [],
       overdueActions: [],
+      predictedDelays: [],
     };
     if (lockedSnapshot) {
       const payload = JSON.parse(lockedSnapshot.payloadJson) as {
@@ -142,7 +152,12 @@ export async function GET(request: Request) {
         milestones?: typeof milestoneRows;
         dashboardAlerts?: DashboardAlerts;
       };
-      dashboardAlerts = payload.dashboardAlerts ?? dashboardAlerts;
+      dashboardAlerts = {
+        highRisks: payload.dashboardAlerts?.highRisks ?? [],
+        overdueActions: payload.dashboardAlerts?.overdueActions ?? [],
+        predictedDelays:
+          payload.dashboardAlerts?.predictedDelays ?? [],
+      };
       const snapshotMilestones = new Map<string, typeof milestoneRows>();
       for (const milestone of payload.milestones ?? []) {
         const rows = snapshotMilestones.get(milestone.projectId) ?? [];

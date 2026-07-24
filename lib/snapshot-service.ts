@@ -10,6 +10,7 @@ import {
   snapshots,
   weeklyReports,
 } from "@/db/schema";
+import { buildPortfolioDelayForecast } from "@/lib/delay-forecast";
 import { recalculateProjectHealth } from "@/lib/health";
 import { ensureSeeded } from "@/lib/seed";
 
@@ -63,26 +64,18 @@ export async function lockPortfolioSnapshot(options: {
   }
 
   const [
-    projectRows,
+    allProjectRows,
     reportRows,
     milestoneRows,
     riskRows,
     actionRows,
     activeRuleRows,
   ] = await Promise.all([
+    db.select().from(projects),
     db
       .select()
-      .from(projects)
-      .where(eq(projects.lifecycleStatus, "active")),
-    db
-      .select({ projectId: weeklyReports.projectId })
       .from(weeklyReports)
-      .where(
-        and(
-          eq(weeklyReports.weekKey, options.weekKey),
-          ne(weeklyReports.status, "draft"),
-        ),
-      ),
+      .where(ne(weeklyReports.status, "draft")),
     db.select().from(milestones),
     db.select().from(risks),
     db.select().from(correctiveActions),
@@ -93,6 +86,9 @@ export async function lockPortfolioSnapshot(options: {
       .orderBy(desc(ruleConfigs.version))
       .limit(1),
   ]);
+  const projectRows = allProjectRows.filter(
+    (project) => project.lifecycleStatus === "active",
+  );
   const activeProjectIds = new Set(projectRows.map((project) => project.id));
   const activeMilestones = milestoneRows.filter((row) =>
     activeProjectIds.has(row.projectId),
@@ -103,9 +99,12 @@ export async function lockPortfolioSnapshot(options: {
   const activeActions = actionRows.filter((row) =>
     activeProjectIds.has(row.projectId),
   );
+  const activeReports = reportRows.filter((row) =>
+    activeProjectIds.has(row.projectId),
+  );
   const submittedProjectCount = new Set(
-    reportRows
-      .filter((report) => activeProjectIds.has(report.projectId))
+    activeReports
+      .filter((report) => report.weekKey === options.weekKey)
       .map((report) => report.projectId),
   ).size;
   const version = (previous[0]?.version ?? 0) + 1;
@@ -118,6 +117,15 @@ export async function lockPortfolioSnapshot(options: {
   const capturedAt = options.capturedAt ?? new Date();
   const capturedAtIso = capturedAt.toISOString();
   const capturedDate = capturedAtIso.slice(0, 10);
+  const delayForecast = buildPortfolioDelayForecast({
+    projects: allProjectRows,
+    milestones: milestoneRows,
+    weeklyReports: reportRows,
+    risks: riskRows,
+    actions: actionRows,
+    asOfDate: capturedDate,
+    scopeProjectIds: activeProjectIds,
+  });
   const dashboardAlerts = {
     highRisks: activeRisks
       .filter((risk) => risk.status !== "closed" && risk.level === "high")
@@ -143,11 +151,27 @@ export async function lockPortfolioSnapshot(options: {
         owner: action.owner,
         targetDate: action.recoveryDate,
       })),
+    predictedDelays: delayForecast.projects
+      .filter(
+        (project) =>
+          project.probability >= 35 && Boolean(project.topMilestone),
+      )
+      .slice(0, 10)
+      .map((project) => ({
+        projectId: project.projectId,
+        probability: project.probability,
+        riskBand: project.riskBand,
+        expectedDelayDays: project.expectedDelayDays,
+        milestoneName: project.topMilestone!.name,
+        confidence: project.confidence,
+        earlyWarning: project.earlyWarning,
+      })),
   };
   const snapshotPayload = JSON.stringify({
     projects: projectRows,
     milestones: activeMilestones,
     dashboardAlerts,
+    delayForecast,
     ruleConfig: activeRuleRows[0] ?? null,
     capturedAt: capturedAtIso,
   });
@@ -180,6 +204,10 @@ export async function lockPortfolioSnapshot(options: {
             source: options.source,
             highRiskCount: dashboardAlerts.highRisks.length,
             overdueActionCount: dashboardAlerts.overdueActions.length,
+            predictedHighRiskCount:
+              delayForecast.summary.highRiskProjectCount,
+            earlyWarningCount:
+              delayForecast.summary.earlyWarningProjectCount,
           })}`.as("detail_json"),
           createdAt: sql<string>`${capturedAtIso}`.as("created_at"),
         })

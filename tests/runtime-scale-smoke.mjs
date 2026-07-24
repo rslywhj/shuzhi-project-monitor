@@ -82,6 +82,20 @@ while (projectCount < targetProjectCount && candidateIndex <= 100) {
   if (initial.body.projects.some((project) => project.id === payload.code)) {
     continue;
   }
+  const provisionedOwner = await readJson("/api/users", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      email: payload.ownerEmail,
+      displayName: payload.ownerName,
+      role: "manager",
+    }),
+  });
+  assert(
+    provisionedOwner.response.status === 201 ||
+      provisionedOwner.response.status === 409,
+    JSON.stringify(provisionedOwner.body),
+  );
   const created = await readJson("/api/projects", {
     method: "POST",
     headers: { "content-type": "application/json" },

@@ -54,6 +54,46 @@ type BaselineDrift = {
   cumulativeBaselineDriftDays: number;
   latestFinishDriftDays: number;
 };
+type ForecastSignal = {
+  code: string;
+  label: string;
+  impact: number;
+  direction: "risk" | "protective" | "context";
+};
+type MilestoneForecast = {
+  milestoneId: number;
+  name: string;
+  sequence: number;
+  critical: boolean;
+  plannedFinish: string;
+  probability: number;
+  riskBand: "low" | "medium" | "high";
+  expectedDelayDays: number;
+  forecastFinish: string;
+  confidence: "low" | "medium" | "high";
+  historicalSampleCount: number;
+  historicalDelayRate: number;
+  earlyWarning: boolean;
+  signals: ForecastSignal[];
+};
+type ProjectForecast = {
+  projectId: string;
+  code: string;
+  name: string;
+  owner: string;
+  org: string;
+  type: string;
+  probability: number;
+  riskBand: "low" | "medium" | "high";
+  expectedDelayDays: number;
+  forecastFinish: string | null;
+  confidence: "low" | "medium" | "high";
+  highRiskMilestoneCount: number;
+  earlyWarning: boolean;
+  topMilestone: MilestoneForecast | null;
+  milestones: MilestoneForecast[];
+  drivers: ForecastSignal[];
+};
 type AnalyticsData = {
   summary: Summary;
   dimensions: {
@@ -67,6 +107,25 @@ type AnalyticsData = {
     orgs: string[];
     types: string[];
     owners: string[];
+  };
+  delayForecast: {
+    model: {
+      version: string;
+      method: string;
+      asOfDate: string;
+      historicalSampleCount: number;
+      generatedAt: string;
+    };
+    summary: {
+      analyzedProjectCount: number;
+      highRiskProjectCount: number;
+      mediumRiskProjectCount: number;
+      lowRiskProjectCount: number;
+      earlyWarningProjectCount: number;
+      highRiskMilestoneCount: number;
+      averageProbability: number;
+    };
+    projects: ProjectForecast[];
   };
   generatedAt: string;
 };
@@ -82,6 +141,18 @@ const statusMeta = {
   yellow: { label: "预警", symbol: "▲" },
   red: { label: "严重", symbol: "■" },
 } satisfies Record<HealthStatus, { label: string; symbol: string }>;
+
+const forecastRiskMeta = {
+  low: { label: "低风险", symbol: "●" },
+  medium: { label: "中风险", symbol: "▲" },
+  high: { label: "高风险", symbol: "■" },
+} as const;
+
+const confidenceNames = {
+  low: "低置信度",
+  medium: "中置信度",
+  high: "高置信度",
+} as const;
 
 function signedDays(value: number) {
   return value > 0 ? `+${value}天` : value < 0 ? `${value}天` : "0天";
@@ -109,6 +180,9 @@ export default function PortfolioAnalytics({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [dimension, setDimension] = useState<"org" | "type" | "owner">("org");
+  const [expandedForecastId, setExpandedForecastId] = useState<string | null>(
+    null,
+  );
   const [filters, setFilters] = useState<Filters>({
     org: "",
     type: "",
@@ -309,6 +383,207 @@ export default function PortfolioAnalytics({
                 <span>当前批准基线相对原始基线</span>
               </article>
             </div>
+
+            <section className="content-card delay-forecast-card">
+              <div className="card-title delay-forecast-title">
+                <div>
+                  <span className="analytics-kicker">PREDICTIVE WARNING</span>
+                  <h2>节点延期概率预警</h2>
+                  <p>
+                    使用同类节点历史延期先验，融合当前进度、预测日期、风险、措施和周报时效；每项结果均可解释
+                  </p>
+                </div>
+                <div className="forecast-model-note">
+                  <strong>{data?.delayForecast.model.version ?? "—"}</strong>
+                  <span>
+                    度量日 {data?.delayForecast.model.asOfDate ?? "—"} ·{" "}
+                    {data?.delayForecast.model.historicalSampleCount ?? 0} 个历史完成样本
+                  </span>
+                </div>
+              </div>
+              <div className="forecast-summary-strip">
+                <div className="high">
+                  <span>高概率项目</span>
+                  <strong>
+                    {data?.delayForecast.summary.highRiskProjectCount ?? 0}
+                  </strong>
+                  <small>概率 ≥ 65%</small>
+                </div>
+                <div className="warning">
+                  <span>提前预警项目</span>
+                  <strong>
+                    {data?.delayForecast.summary.earlyWarningProjectCount ?? 0}
+                  </strong>
+                  <small>尚未红灯但已高概率</small>
+                </div>
+                <div>
+                  <span>高概率节点</span>
+                  <strong>
+                    {data?.delayForecast.summary.highRiskMilestoneCount ?? 0}
+                  </strong>
+                  <small>未完成节点口径</small>
+                </div>
+                <div>
+                  <span>组合平均概率</span>
+                  <strong>
+                    {data?.delayForecast.summary.averageProbability ?? 0}
+                    <em>%</em>
+                  </strong>
+                  <small>按项目最高风险节点</small>
+                </div>
+              </div>
+              <div className="forecast-table-head">
+                <span>项目 / 关注节点</span>
+                <span>延期概率</span>
+                <span>预计影响</span>
+                <span>置信度</span>
+                <span>预警性质</span>
+                <span />
+              </div>
+              <div className="forecast-project-list">
+                {(data?.delayForecast.projects ?? [])
+                  .slice(0, 12)
+                  .map((forecast) => {
+                    const expanded =
+                      expandedForecastId === forecast.projectId;
+                    return (
+                      <article
+                        className={`${forecast.riskBand}${expanded ? " expanded" : ""}`}
+                        key={forecast.projectId}
+                      >
+                        <button
+                          className="forecast-project-row"
+                          aria-expanded={expanded}
+                          onClick={() =>
+                            setExpandedForecastId(
+                              expanded ? null : forecast.projectId,
+                            )
+                          }
+                        >
+                          <span className="forecast-project-name">
+                            <i>{forecast.code}</i>
+                            <span>
+                              <strong>{forecast.name}</strong>
+                              <small>
+                                {forecast.topMilestone
+                                  ? `${forecast.topMilestone.sequence}. ${forecast.topMilestone.name}${forecast.topMilestone.critical ? " ◆" : ""}`
+                                  : "无未完成适用节点"}
+                              </small>
+                            </span>
+                          </span>
+                          <span className="forecast-probability">
+                            <b>{forecast.probability}%</b>
+                            <i>
+                              <em
+                                style={{
+                                  width: `${forecast.probability}%`,
+                                }}
+                              />
+                            </i>
+                          </span>
+                          <span>
+                            <b>
+                              {forecast.expectedDelayDays > 0
+                                ? `+${forecast.expectedDelayDays} 天`
+                                : "按期"}
+                            </b>
+                            <small>{forecast.forecastFinish ?? "—"}</small>
+                          </span>
+                          <span className={`confidence ${forecast.confidence}`}>
+                            {confidenceNames[forecast.confidence]}
+                          </span>
+                          <span>
+                            <b className={`forecast-band ${forecast.riskBand}`}>
+                              {forecastRiskMeta[forecast.riskBand].symbol}{" "}
+                              {forecastRiskMeta[forecast.riskBand].label}
+                            </b>
+                            {forecast.earlyWarning && (
+                              <small className="early-warning-badge">
+                                提前预警
+                              </small>
+                            )}
+                          </span>
+                          <em>{expanded ? "⌃" : "⌄"}</em>
+                        </button>
+                        {expanded && (
+                          <div className="forecast-explanation">
+                            <div className="forecast-driver-panel">
+                              <h3>概率驱动因素</h3>
+                              <div>
+                                {(forecast.topMilestone?.signals ?? []).map(
+                                  (signal) => (
+                                    <span
+                                      className={signal.direction}
+                                      key={`${forecast.projectId}-${signal.code}`}
+                                    >
+                                      <b>
+                                        {signal.direction === "context"
+                                          ? "基准"
+                                          : `${signal.impact > 0 ? "+" : ""}${signal.impact}pp`}
+                                      </b>
+                                      {signal.label}
+                                    </span>
+                                  ),
+                                )}
+                              </div>
+                            </div>
+                            <div className="forecast-node-panel">
+                              <div>
+                                <h3>高风险节点</h3>
+                                <button
+                                  onClick={() =>
+                                    onNavigate("project", forecast.projectId)
+                                  }
+                                >
+                                  进入项目详情 →
+                                </button>
+                              </div>
+                              {(forecast.milestones ?? [])
+                                .slice(0, 4)
+                                .map((milestone) => (
+                                  <div key={milestone.milestoneId}>
+                                    <span>
+                                      <strong>
+                                        {milestone.sequence}. {milestone.name}
+                                      </strong>
+                                      <small>
+                                        计划 {milestone.plannedFinish} ·
+                                        预测 {milestone.forecastFinish}
+                                      </small>
+                                    </span>
+                                    <b className={milestone.riskBand}>
+                                      {milestone.probability}%
+                                    </b>
+                                    <em>
+                                      历史 {milestone.historicalDelayRate}% ·{" "}
+                                      {milestone.historicalSampleCount} 样本
+                                    </em>
+                                  </div>
+                                ))}
+                              {!forecast.milestones.length && (
+                                <div className="forecast-no-node">
+                                  当前项目没有未完成的适用节点
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </article>
+                    );
+                  })}
+                {!data?.delayForecast.projects.length && (
+                  <div className="analytics-empty">
+                    当前筛选条件下暂无可预测项目
+                  </div>
+                )}
+              </div>
+              <div className="forecast-disclaimer">
+                <span>i</span>
+                <p>
+                  概率用于提前排序和干预，不替代项目经理判断；置信度由同类完成样本与正式周报数量共同决定。
+                </p>
+              </div>
+            </section>
 
             <div className="analytics-grid">
               <section className="content-card analytics-dimension-card">

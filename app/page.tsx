@@ -167,6 +167,15 @@ type DashboardAlertItem = {
 type DashboardAlerts = {
   highRisks: DashboardAlertItem[];
   overdueActions: DashboardAlertItem[];
+  predictedDelays: Array<{
+    projectId: string;
+    probability: number;
+    riskBand: "low" | "medium" | "high";
+    expectedDelayDays: number;
+    milestoneName: string;
+    confidence: "low" | "medium" | "high";
+    earlyWarning: boolean;
+  }>;
 };
 type TrendPoint = {
   weekKey: string;
@@ -599,9 +608,29 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
   const snapshotTime = snapshot?.lockedAt
     ? snapshot.lockedAt.replace("T", " ").slice(5, 16)
     : "等待 PMO 锁定";
+  const predictionByProject = new Map(
+    (alerts.predictedDelays ?? []).map((prediction) => [
+      prediction.projectId,
+      prediction,
+    ]),
+  );
   const attentionProjects = [...activeProjects]
-    .filter((project) => project.status === "red" || project.status === "yellow")
-    .sort((left, right) => left.score - right.score)
+    .filter(
+      (project) =>
+        project.status === "red" ||
+        project.status === "yellow" ||
+        (predictionByProject.get(project.id)?.probability ?? 0) >= 65,
+    )
+    .sort((left, right) => {
+      const statusWeight = { red: 20, yellow: 10, green: 0, na: 0 };
+      const leftPriority =
+        (predictionByProject.get(left.id)?.probability ?? 0) +
+        statusWeight[left.status];
+      const rightPriority =
+        (predictionByProject.get(right.id)?.probability ?? 0) +
+        statusWeight[right.status];
+      return rightPriority - leftPriority || left.score - right.score;
+    })
     .slice(0, 3);
   const todayParts = shanghaiDateParts();
   const today = `${todayParts.year}-${String(todayParts.month).padStart(2, "0")}-${String(todayParts.day).padStart(2, "0")}`;
@@ -722,6 +751,7 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
       <aside className="attention-panel">
         <div className="attention-head"><div><span className="section-index">02</span><h2>重点关注</h2></div><button onClick={() => onNavigate("portfolio")}>查看全部</button></div>
         {attentionProjects.length ? attentionProjects.map((project, index) => {
+          const prediction = predictionByProject.get(project.id);
           const issue = [...(project.milestones ?? [])]
             .filter((milestone) => milestone.applicable)
             .sort((left, right) => {
@@ -729,7 +759,7 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
               return rank[right.status] - rank[left.status] || right.deviationDays - left.deviationDays;
             })[0];
           return <button className={`alert-card ${index === 0 ? "primary" : ""}`} key={project.id} onClick={() => onNavigate("project", project.id)}>
-            <div className="rank">{String(index + 1).padStart(2, "0")}</div><div><StatusPill status={project.status} /><h3>{project.name}</h3><p>{issue ? `${issue.name}${issue.deviationDays > 0 ? `预计延期 ${issue.deviationDays} 天` : "需要重点关注"}` : "综合健康度触发预警"}</p><span>责任人 {project.owner} · 风险 {project.risk}</span></div><b>{project.actual - project.plan > 0 ? "+" : ""}{(project.actual - project.plan).toFixed(1)}pp</b>
+            <div className="rank">{String(index + 1).padStart(2, "0")}</div><div><StatusPill status={project.status} /><h3>{project.name}</h3><p>{prediction ? `${prediction.milestoneName} 延期概率 ${prediction.probability}% · 预计 +${prediction.expectedDelayDays} 天` : issue ? `${issue.name}${issue.deviationDays > 0 ? `预计延期 ${issue.deviationDays} 天` : "需要重点关注"}` : "综合健康度触发预警"}</p><span>责任人 {project.owner} · 风险 {project.risk}{prediction?.earlyWarning ? " · 提前预警" : ""}</span></div><b>{prediction ? `${prediction.probability}%` : `${project.actual - project.plan > 0 ? "+" : ""}${(project.actual - project.plan).toFixed(1)}pp`}</b>
           </button>;
         }) : <div className="dark-empty-state">当前无红黄项目</div>}
         <div className="upcoming">
@@ -4292,6 +4322,7 @@ export default function Home() {
   const [dashboardAlerts, setDashboardAlerts] = useState<DashboardAlerts>({
     highRisks: [],
     overdueActions: [],
+    predictedDelays: [],
   });
   const [trendData, setTrendData] = useState<TrendPoint[]>([]);
   const [templateData, setTemplateData] =
@@ -4337,7 +4368,11 @@ export default function Home() {
       }
       setDashboardSnapshot(data.dashboardSnapshot ?? null);
       setDashboardAlerts(
-        data.dashboardAlerts ?? { highRisks: [], overdueActions: [] },
+        data.dashboardAlerts ?? {
+          highRisks: [],
+          overdueActions: [],
+          predictedDelays: [],
+        },
       );
       if (data.milestoneTemplates?.length) {
         setTemplateData(data.milestoneTemplates);

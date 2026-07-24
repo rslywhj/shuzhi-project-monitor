@@ -1,7 +1,15 @@
 import { asc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { baselineVersions, milestones, projects } from "@/db/schema";
+import {
+  baselineVersions,
+  correctiveActions,
+  milestones,
+  projects,
+  risks,
+  weeklyReports,
+} from "@/db/schema";
 import { apiError } from "@/lib/api-utils";
+import { buildPortfolioDelayForecast } from "@/lib/delay-forecast";
 import {
   buildPortfolioAnalytics,
   portfolioAnalyticsCsv,
@@ -31,11 +39,17 @@ export async function GET(request: Request) {
     if (!identity) return unauthorized();
     await ensureSeeded();
     const db = getDb();
-    const [projectRows, milestoneRows, originalBaselineRows] = await Promise.all([
+    const [
+      allProjectRows,
+      milestoneRows,
+      originalBaselineRows,
+      reportRows,
+      riskRows,
+      actionRows,
+    ] = await Promise.all([
       db
         .select()
         .from(projects)
-        .where(eq(projects.lifecycleStatus, "active"))
         .orderBy(asc(projects.code)),
       db
         .select()
@@ -48,26 +62,50 @@ export async function GET(request: Request) {
         })
         .from(baselineVersions)
         .where(eq(baselineVersions.version, 1)),
+      db.select().from(weeklyReports),
+      db.select().from(risks),
+      db.select().from(correctiveActions),
     ]);
     const url = new URL(request.url);
+    const projectRows = allProjectRows.filter(
+      (project) => project.lifecycleStatus === "active",
+    );
     const analytics = buildPortfolioAnalytics({
       projects: projectRows,
       milestones: milestoneRows,
       originalBaselines: originalBaselineRows,
       filters: analyticsFilters(url),
     });
+    const delayForecast = buildPortfolioDelayForecast({
+      projects: allProjectRows,
+      milestones: milestoneRows,
+      weeklyReports: reportRows,
+      risks: riskRows,
+      actions: actionRows,
+      asOfDate: new Date().toISOString().slice(0, 10),
+      scopeProjectIds: new Set(
+        analytics.projects.map((project) => project.id),
+      ),
+    });
     if (url.searchParams.get("format") === "csv") {
       const timestamp = new Date().toISOString().slice(0, 10);
-      return new Response(`\uFEFF${portfolioAnalyticsCsv(analytics.projects)}`, {
+      return new Response(
+        `\uFEFF${portfolioAnalyticsCsv(
+          analytics.projects,
+          delayForecast.projects,
+        )}`,
+        {
         headers: {
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="portfolio-analytics-${timestamp}.csv"`,
           "content-type": "text/csv; charset=utf-8",
         },
-      });
+        },
+      );
     }
     return Response.json({
       ...analytics,
+      delayForecast,
       filters: analyticsFilters(url),
       generatedAt: new Date().toISOString(),
     });

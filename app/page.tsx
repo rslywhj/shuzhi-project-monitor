@@ -646,7 +646,12 @@ function LoginScreen() {
   </main>;
 }
 
-const COCKPIT_PAGE_SIZE = 7;
+const COCKPIT_DEFAULT_PAGE_SIZE = 7;
+const COCKPIT_MIN_PAGE_SIZE = 1;
+const COCKPIT_MAX_PAGE_SIZE = 50;
+const COCKPIT_DEFAULT_AUTO_PAGE_SECONDS = 20;
+const COCKPIT_AUTO_PAGE_SECONDS_OPTIONS = [5, 10, 15, 20, 30, 60] as const;
+const COCKPIT_PAGINATION_STORAGE_KEY = "shuzhi-cockpit-pagination-v1";
 
 function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = defaultTemplateData, trends = [], alerts }: { onNavigate: Navigate; projectData?: ProjectData[]; snapshot: DashboardSnapshot | null; templateData?: TemplateData[]; trends?: TrendPoint[]; alerts: DashboardAlerts }) {
   const [org, setOrg] = useState("全部组织");
@@ -654,7 +659,19 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
   const [projectType, setProjectType] = useState("全部类型");
   const [health, setHealth] = useState("全部状态");
   const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(COCKPIT_DEFAULT_PAGE_SIZE);
+  const [pageSizeInput, setPageSizeInput] = useState(
+    String(COCKPIT_DEFAULT_PAGE_SIZE),
+  );
+  const [autoPageEnabled, setAutoPageEnabled] = useState(true);
+  const [autoPageSeconds, setAutoPageSeconds] = useState(
+    COCKPIT_DEFAULT_AUTO_PAGE_SECONDS,
+  );
+  const [paginationPreferencesReady, setPaginationPreferencesReady] =
+    useState(false);
   const [selected, setSelected] = useState<{ project: ProjectData; index: number } | null>(null);
+  const [matrixFullscreen, setMatrixFullscreen] = useState(false);
+  const matrixRef = useRef<HTMLDivElement>(null);
   const activeProjects = useMemo(
     () => projectData.filter((project) => projectLifecycle(project) === "active"),
     [projectData],
@@ -676,11 +693,12 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
   );
   const pageCount = Math.max(
     1,
-    Math.ceil(matching.length / COCKPIT_PAGE_SIZE),
+    Math.ceil(matching.length / pageSize),
   );
+  const currentPage = Math.min(page, pageCount - 1);
   const filtered = matching.slice(
-    page * COCKPIT_PAGE_SIZE,
-    page * COCKPIT_PAGE_SIZE + COCKPIT_PAGE_SIZE,
+    currentPage * pageSize,
+    currentPage * pageSize + pageSize,
   );
   const total = activeProjects.length;
   const green = activeProjects.filter((project) => project.status === "green").length;
@@ -763,14 +781,108 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
       )
     : undefined;
 
+  function applyPageSize(value: string) {
+    const parsed = Number(value);
+    const nextPageSize = Number.isFinite(parsed)
+      ? Math.min(
+          COCKPIT_MAX_PAGE_SIZE,
+          Math.max(COCKPIT_MIN_PAGE_SIZE, Math.round(parsed)),
+        )
+      : COCKPIT_DEFAULT_PAGE_SIZE;
+    setPageSize(nextPageSize);
+    setPageSizeInput(String(nextPageSize));
+    setPage(0);
+  }
+
+  function focusMatrixByHealth(nextHealth: string) {
+    setOrg("全部组织");
+    setOwner("全部负责人");
+    setProjectType("全部类型");
+    setHealth(nextHealth);
+    setPage(0);
+  }
+
+  async function toggleMatrixFullscreen() {
+    if (document.fullscreenElement === matrixRef.current) {
+      await document.exitFullscreen();
+      return;
+    }
+    await matrixRef.current?.requestFullscreen();
+  }
+
   useEffect(() => {
-    if (pageCount <= 1) return;
-    const timer = window.setInterval(
-      () => setPage((current) => (current + 1) % pageCount),
-      20_000,
+    const timer = window.setTimeout(() => {
+      try {
+        const saved = window.localStorage.getItem(
+          COCKPIT_PAGINATION_STORAGE_KEY,
+        );
+        if (saved) {
+          const preferences = JSON.parse(saved) as {
+            pageSize?: number;
+            autoPageEnabled?: boolean;
+            autoPageSeconds?: number;
+          };
+          if (
+            Number.isInteger(preferences.pageSize) &&
+            preferences.pageSize! >= COCKPIT_MIN_PAGE_SIZE &&
+            preferences.pageSize! <= COCKPIT_MAX_PAGE_SIZE
+          ) {
+            setPageSize(preferences.pageSize!);
+            setPageSizeInput(String(preferences.pageSize));
+          }
+          if (typeof preferences.autoPageEnabled === "boolean") {
+            setAutoPageEnabled(preferences.autoPageEnabled);
+          }
+          if (
+            COCKPIT_AUTO_PAGE_SECONDS_OPTIONS.includes(
+              preferences.autoPageSeconds as (typeof COCKPIT_AUTO_PAGE_SECONDS_OPTIONS)[number],
+            )
+          ) {
+            setAutoPageSeconds(preferences.autoPageSeconds!);
+          }
+        }
+      } catch {
+        // Ignore invalid browser preferences and keep safe defaults.
+      } finally {
+        setPaginationPreferencesReady(true);
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    const syncFullscreenState = () =>
+      setMatrixFullscreen(document.fullscreenElement === matrixRef.current);
+    document.addEventListener("fullscreenchange", syncFullscreenState);
+    return () =>
+      document.removeEventListener("fullscreenchange", syncFullscreenState);
+  }, []);
+
+  useEffect(() => {
+    if (!paginationPreferencesReady) return;
+    window.localStorage.setItem(
+      COCKPIT_PAGINATION_STORAGE_KEY,
+      JSON.stringify({ pageSize, autoPageEnabled, autoPageSeconds }),
     );
-    return () => window.clearInterval(timer);
-  }, [pageCount]);
+  }, [
+    autoPageEnabled,
+    autoPageSeconds,
+    pageSize,
+    paginationPreferencesReady,
+  ]);
+
+  useEffect(() => {
+    if (!autoPageEnabled || pageCount <= 1 || selected) return;
+    const timer = window.setTimeout(
+      () =>
+        setPage(
+          (current) =>
+            (Math.min(current, pageCount - 1) + 1) % pageCount,
+        ),
+      autoPageSeconds * 1_000,
+    );
+    return () => window.clearTimeout(timer);
+  }, [autoPageEnabled, autoPageSeconds, currentPage, pageCount, selected]);
 
   return <main className="cockpit">
     <header className="cockpit-header">
@@ -787,10 +899,10 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
     </header>
 
     <section className="metric-grid">
-      <div className="metric-card total"><span>统建项目总数</span><strong>{total}</strong><small>统一节点口径监控</small></div>
-      <div className="metric-card green"><span>绿色 · 正常</span><strong>{green}</strong><small>{total ? ((green / total) * 100).toFixed(1) : "0.0"}% 项目受控</small></div>
-      <div className="metric-card yellow"><span>黄色 · 预警</span><strong>{yellow}</strong><small>需提前干预</small></div>
-      <div className="metric-card red"><span>红色 · 严重</span><strong>{red}</strong><small>需管理层关注</small></div>
+      <button type="button" className={`metric-card total filter-card ${health === "全部状态" ? "active" : ""}`} aria-pressed={health === "全部状态"} onClick={() => focusMatrixByHealth("全部状态")}><span>统建项目总数</span><strong>{total}</strong><small>点击查看全部项目</small></button>
+      <button type="button" className={`metric-card green filter-card ${health === "正常" ? "active" : ""}`} aria-pressed={health === "正常"} onClick={() => focusMatrixByHealth("正常")}><span>绿色 · 正常</span><strong>{green}</strong><small>{total ? ((green / total) * 100).toFixed(1) : "0.0"}% 项目受控 · 点击筛选</small></button>
+      <button type="button" className={`metric-card yellow filter-card ${health === "预警" ? "active" : ""}`} aria-pressed={health === "预警"} onClick={() => focusMatrixByHealth("预警")}><span>黄色 · 预警</span><strong>{yellow}</strong><small>需提前干预 · 点击筛选</small></button>
+      <button type="button" className={`metric-card red filter-card ${health === "严重" ? "active" : ""}`} aria-pressed={health === "严重"} onClick={() => focusMatrixByHealth("严重")}><span>红色 · 严重</span><strong>{red}</strong><small>需管理层关注 · 点击筛选</small></button>
       <div className="metric-card progress"><span>组合总体进度</span><div className="metric-progress"><strong>{actualProgress.toFixed(1)}%</strong><em>计划 {planProgress.toFixed(1)}%</em></div><ProgressBar value={actualProgress} /><small className={progressGap < 0 ? "negative" : "positive"}>{progressGap < 0 ? "落后" : "领先"}计划 {Math.abs(progressGap).toFixed(1)} 个百分点</small></div>
       <div className="metric-card quality"><span>周报完成率</span><strong>{snapshot?.completeness ?? 0}%</strong><small>当前锁定快照口径</small></div>
     </section>
@@ -823,7 +935,7 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
     </section>
 
     <section className="cockpit-main">
-      <div className="heatmap-panel">
+      <div className="heatmap-panel" ref={matrixRef}>
         <div className="heatmap-table" style={{ "--milestone-count": matrixMilestones.length } as React.CSSProperties}>
           <div className="heatmap-head"><div className="project-col">项目 / 健康度</div>{matrixMilestones.map((m, i) => <div key={`${m}-${i}`}><span>{String(i + 1).padStart(2, "0")}</span>{m}</div>)}</div>
           {filtered.map((p) => <div className="heatmap-row" key={p.id}>
@@ -841,7 +953,98 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
             })}
           </div>)}
         </div>
-        <div className="matrix-footer"><span>当前展示 {filtered.length} / {matching.length} 个匹配项目</span><span>矩阵每 20 秒自动翻页 <i>{String(page + 1).padStart(2, "0")} / {pageCount}</i></span></div>
+        <div className="matrix-footer">
+          <span>当前展示 {filtered.length} / {matching.length} 个匹配项目</span>
+          <div className="matrix-pagination-settings" title="设置保存在当前浏览器">
+            <label>
+              每页
+              <input
+                type="number"
+                aria-label="管理大屏每页项目行数"
+                min={COCKPIT_MIN_PAGE_SIZE}
+                max={COCKPIT_MAX_PAGE_SIZE}
+                step="1"
+                inputMode="numeric"
+                value={pageSizeInput}
+                onChange={(event) => {
+                  if (/^\d{0,2}$/.test(event.target.value)) {
+                    setPageSizeInput(event.target.value);
+                  }
+                }}
+                onFocus={(event) => event.currentTarget.select()}
+                onBlur={(event) => applyPageSize(event.currentTarget.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") event.currentTarget.blur();
+                }}
+              />
+              行
+            </label>
+            <label className="matrix-auto-switch">
+              <input
+                type="checkbox"
+                checked={autoPageEnabled}
+                onChange={(event) => setAutoPageEnabled(event.target.checked)}
+              />
+              <span aria-hidden="true" />
+              自动翻页
+            </label>
+            <label className={!autoPageEnabled ? "disabled" : ""}>
+              间隔
+              <select
+                aria-label="管理大屏自动翻页时间"
+                value={autoPageSeconds}
+                disabled={!autoPageEnabled}
+                onChange={(event) =>
+                  setAutoPageSeconds(Number(event.target.value))
+                }
+              >
+                {COCKPIT_AUTO_PAGE_SECONDS_OPTIONS.map((seconds) => (
+                  <option key={seconds} value={seconds}>{seconds}秒</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <button
+            type="button"
+            className="matrix-fullscreen-button"
+            aria-pressed={matrixFullscreen}
+            onClick={() => void toggleMatrixFullscreen()}
+          >
+            {matrixFullscreen ? "退出全屏" : "全屏矩阵"}
+          </button>
+          <nav className="matrix-pagination" aria-label="管理大屏项目分页">
+            <button
+              type="button"
+              aria-label="上一页"
+              title="上一页"
+              disabled={pageCount <= 1}
+              onClick={() =>
+                setPage(
+                  (current) =>
+                    (Math.min(current, pageCount - 1) - 1 + pageCount) %
+                    pageCount,
+                )
+              }
+            >
+              ‹
+            </button>
+            <i>{String(currentPage + 1).padStart(2, "0")} / {String(pageCount).padStart(2, "0")}</i>
+            <button
+              type="button"
+              aria-label="下一页"
+              title="下一页"
+              disabled={pageCount <= 1}
+              onClick={() =>
+                setPage(
+                  (current) =>
+                    (Math.min(current, pageCount - 1) + 1) % pageCount,
+                )
+              }
+            >
+              ›
+            </button>
+          </nav>
+        </div>
       </div>
 
       <aside className="attention-panel">

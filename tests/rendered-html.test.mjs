@@ -481,7 +481,21 @@ test("supports all required management heatmap filter dimensions", async () => {
   assert.match(page, /project\.owner === owner/);
   assert.match(page, /project\.type === projectType/);
   assert.match(page, /setPage\(0\)/);
-  assert.match(page, /COCKPIT_PAGE_SIZE = 7/);
+  assert.match(page, /COCKPIT_DEFAULT_PAGE_SIZE = 7/);
+  assert.match(page, /COCKPIT_MIN_PAGE_SIZE = 1/);
+  assert.match(page, /COCKPIT_MAX_PAGE_SIZE = 50/);
+  assert.match(page, /COCKPIT_AUTO_PAGE_SECONDS_OPTIONS = \[5, 10, 15, 20, 30, 60\]/);
+  assert.match(page, /COCKPIT_PAGINATION_STORAGE_KEY/);
+  assert.match(page, /type="number"/);
+  assert.match(page, /管理大屏每页项目行数/);
+  assert.match(page, /管理大屏自动翻页时间/);
+  assert.match(page, /aria-label="上一页"/);
+  assert.match(page, /aria-label="下一页"/);
+  assert.match(page, /全屏矩阵/);
+  assert.match(page, /requestFullscreen/);
+  assert.match(page, /fullscreenchange/);
+  assert.match(page, /focusMatrixByHealth/);
+  assert.match(page, /aria-pressed=/);
 });
 
 test("shows a real authentication boundary with self-service and administrator password recovery", async () => {

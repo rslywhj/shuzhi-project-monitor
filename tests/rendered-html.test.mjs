@@ -472,7 +472,11 @@ test("delivers recipient-scoped notifications, report reminders and red escalati
 });
 
 test("supports all required management heatmap filter dimensions", async () => {
-  const page = await readFile(new URL("app/page.tsx", templateRoot), "utf8");
+  const [page, css, layout] = await Promise.all([
+    readFile(new URL("app/page.tsx", templateRoot), "utf8"),
+    readFile(new URL("app/globals.css", templateRoot), "utf8"),
+    readFile(new URL("app/layout.tsx", templateRoot), "utf8"),
+  ]);
 
   assert.match(page, /全部组织/);
   assert.match(page, /全部负责人/);
@@ -515,6 +519,11 @@ test("supports all required management heatmap filter dimensions", async () => {
       milestoneDrawer < attentionPanelStart,
     "the milestone drawer must stay inside the fullscreen matrix subtree",
   );
+  assert.match(css, /\.cockpit-header \.light-button\{display:inline-flex/);
+  assert.match(css, /\.filter-row\{display:grid;grid-template-columns:1fr 1fr/);
+  assert.match(css, /\.heatmap-head \.project-col\{position:sticky/);
+  assert.match(css, /\.sidebar\{left:0;right:0;top:auto;bottom:0;width:100%/);
+  assert.match(layout, /viewportFit: "cover"/);
 });
 
 test("shows a real authentication boundary with self-service and administrator password recovery", async () => {

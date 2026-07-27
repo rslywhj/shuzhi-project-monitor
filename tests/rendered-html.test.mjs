@@ -496,6 +496,25 @@ test("supports all required management heatmap filter dimensions", async () => {
   assert.match(page, /fullscreenchange/);
   assert.match(page, /focusMatrixByHealth/);
   assert.match(page, /aria-pressed=/);
+
+  const fullscreenPanelStart = page.indexOf(
+    '<div className="heatmap-panel" ref={matrixRef}>',
+  );
+  const attentionPanelStart = page.indexOf(
+    '<aside className="attention-panel">',
+    fullscreenPanelStart,
+  );
+  const milestoneDrawer = page.indexOf(
+    '{selected && <div className="drawer-backdrop"',
+    fullscreenPanelStart,
+  );
+  assert.ok(fullscreenPanelStart >= 0);
+  assert.ok(attentionPanelStart > fullscreenPanelStart);
+  assert.ok(
+    milestoneDrawer > fullscreenPanelStart &&
+      milestoneDrawer < attentionPanelStart,
+    "the milestone drawer must stay inside the fullscreen matrix subtree",
+  );
 });
 
 test("shows a real authentication boundary with self-service and administrator password recovery", async () => {

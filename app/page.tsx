@@ -1045,6 +1045,17 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
             </button>
           </nav>
         </div>
+        {selected && <div className="drawer-backdrop" onClick={() => setSelected(null)}>
+          <aside className="detail-drawer" onClick={e => e.stopPropagation()}>
+            <button className="drawer-close" onClick={() => setSelected(null)} aria-label="关闭">×</button>
+            <span className="drawer-kicker">节点运行详情</span>
+            <h2>{selected.project.name}</h2><p>{matrixMilestones[selected.index]} · 第 {selected.index + 1} 阶段</p>
+            <div className="drawer-status"><StatusPill status={selected.project.cells[selected.index] ?? "na"} /><strong>{selectedMilestone?.deviationDays ? `${selectedMilestone.deviationDays > 0 ? "延期" : "提前"} ${Math.abs(selectedMilestone.deviationDays)} 天` : selectedMilestone ? "按计划推进" : "该节点不适用"}</strong></div>
+            <div className="drawer-grid"><div><small>计划完成</small><strong>{selectedMilestone?.plannedFinish ?? "—"}</strong></div><div><small>预测 / 实际</small><strong>{selectedMilestone?.actualFinish ?? selectedMilestone?.forecastFinish ?? "未填报"}</strong></div><div><small>节点权重</small><strong>{selectedMilestone?.applicable ? `${selectedMilestone.weight}%` : "N/A"}</strong></div><div><small>当前完成度</small><strong>{selectedMilestone?.applicable ? `${selectedMilestone.completion}%` : "N/A"}</strong></div></div>
+            <div className="cause-card"><span>偏差归因</span><p>{selectedMilestone?.reason || (selectedMilestone ? "当前暂无偏差说明。" : "项目未启用该标准节点。")}</p></div>
+            <button className="drawer-primary" onClick={() => onNavigate("project", selected.project.id)}>进入项目详情 <span>→</span></button>
+          </aside>
+        </div>}
       </div>
 
       <aside className="attention-panel">
@@ -1098,17 +1109,6 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
       </div>
     </section>
 
-    {selected && <div className="drawer-backdrop" onClick={() => setSelected(null)}>
-      <aside className="detail-drawer" onClick={e => e.stopPropagation()}>
-        <button className="drawer-close" onClick={() => setSelected(null)} aria-label="关闭">×</button>
-        <span className="drawer-kicker">节点运行详情</span>
-        <h2>{selected.project.name}</h2><p>{matrixMilestones[selected.index]} · 第 {selected.index + 1} 阶段</p>
-        <div className="drawer-status"><StatusPill status={selected.project.cells[selected.index] ?? "na"} /><strong>{selectedMilestone?.deviationDays ? `${selectedMilestone.deviationDays > 0 ? "延期" : "提前"} ${Math.abs(selectedMilestone.deviationDays)} 天` : selectedMilestone ? "按计划推进" : "该节点不适用"}</strong></div>
-        <div className="drawer-grid"><div><small>计划完成</small><strong>{selectedMilestone?.plannedFinish ?? "—"}</strong></div><div><small>预测 / 实际</small><strong>{selectedMilestone?.actualFinish ?? selectedMilestone?.forecastFinish ?? "未填报"}</strong></div><div><small>节点权重</small><strong>{selectedMilestone?.applicable ? `${selectedMilestone.weight}%` : "N/A"}</strong></div><div><small>当前完成度</small><strong>{selectedMilestone?.applicable ? `${selectedMilestone.completion}%` : "N/A"}</strong></div></div>
-        <div className="cause-card"><span>偏差归因</span><p>{selectedMilestone?.reason || (selectedMilestone ? "当前暂无偏差说明。" : "项目未启用该标准节点。")}</p></div>
-        <button className="drawer-primary" onClick={() => onNavigate("project", selected.project.id)}>进入项目详情 <span>→</span></button>
-      </aside>
-    </div>}
   </main>;
 }
 

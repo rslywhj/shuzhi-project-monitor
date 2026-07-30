@@ -96,9 +96,15 @@ export async function lockPortfolioSnapshot(options: {
   const projectRows = allProjectRows.filter(
     (project) => project.lifecycleStatus === "active",
   );
+  const snapshotProjectRows = allProjectRows.filter(
+    (project) => project.lifecycleStatus !== "archived",
+  );
   const activeProjectIds = new Set(projectRows.map((project) => project.id));
-  const activeMilestones = milestoneRows.filter((row) =>
-    activeProjectIds.has(row.projectId),
+  const snapshotProjectIds = new Set(
+    snapshotProjectRows.map((project) => project.id),
+  );
+  const snapshotMilestones = milestoneRows.filter((row) =>
+    snapshotProjectIds.has(row.projectId),
   );
   const activeRisks = riskRows.filter((row) =>
     activeProjectIds.has(row.projectId),
@@ -200,8 +206,8 @@ export async function lockPortfolioSnapshot(options: {
     ),
   };
   const snapshotPayload = JSON.stringify({
-    projects: projectRows,
-    milestones: activeMilestones,
+    projects: snapshotProjectRows,
+    milestones: snapshotMilestones,
     dashboardAlerts,
     delayForecast,
     resourceCapacity,

@@ -73,8 +73,6 @@ export async function PATCH(
       return Response.json({ error: "未找到指定用户。" }, { status: 404 });
     }
     const resultingRole = payload.role ?? existing.role;
-    const resultingActive =
-      typeof payload.active === "boolean" ? payload.active : existing.active;
     const invalidatesProjectOwnership =
       payload.active === false ||
       (Boolean(payload.role) && resultingRole !== "manager");

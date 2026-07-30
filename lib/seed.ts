@@ -4,14 +4,20 @@ import { getDb } from "@/db";
 import {
   baselineChanges,
   baselineVersions,
+  correctiveActions,
   milestoneTemplates,
   milestones,
+  notifications,
   projects,
   resourceAllocations,
   resources,
+  risks,
   ruleConfigs,
   users,
+  weeklyReports,
 } from "@/db/schema";
+import { shanghaiDateIso } from "@/lib/date-time";
+import { isoWeekKeyForDate } from "@/lib/reporting-period";
 
 async function ensureBaselineVersionRows(db: ReturnType<typeof getDb>) {
   const [projectRows, versionRows] = await Promise.all([
@@ -88,31 +94,51 @@ const standardMilestoneTemplates = [
   ["M12", "结项移交", 5, false, "完成项目结项、资料归档和运维移交"],
 ] as const;
 
-const milestoneNames = [
-  "立项启动",
-  "需求确认",
-  "方案评审",
-  "开发完成",
-  "联调测试",
-  "用户验收",
-  "上线切换",
+type DemoProjectSeed = {
+  id: string;
+  name: string;
+  owner: string;
+  org: string;
+  type: string;
+  startOffset: number;
+  completeThrough: number;
+  partialCompletion: number;
+  forecastDelay: number;
+  actualDelay: number;
+  riskLevel: "low" | "medium" | "high";
+  lifecycleStatus?: "active" | "completed" | "archived";
+  naSequences?: number[];
+  currentBaselineVersion?: number;
+};
+
+const seedProjects: DemoProjectSeed[] = [
+  { id: "P01", name: "司库管理系统", owner: "王嘉", org: "财务数智组", type: "核心系统", startOffset: -310, completeThrough: 12, partialCompletion: 100, forecastDelay: 0, actualDelay: 0, riskLevel: "low", lifecycleStatus: "completed" },
+  { id: "P02", name: "智慧采购平台", owner: "李程", org: "供应链组", type: "业务平台", startOffset: -130, completeThrough: 5, partialCompletion: 62, forecastDelay: 14, actualDelay: 1, riskLevel: "high", currentBaselineVersion: 2 },
+  { id: "P03", name: "人力资源共享平台", owner: "陈路", org: "人力数智组", type: "业务平台", startOffset: -100, completeThrough: 5, partialCompletion: 58, forecastDelay: 0, actualDelay: 0, riskLevel: "high" },
+  { id: "P04", name: "合同全生命周期管理", owner: "周航", org: "法务数智组", type: "核心系统", startOffset: -70, completeThrough: 3, partialCompletion: 82, forecastDelay: 0, actualDelay: 0, riskLevel: "low", naSequences: [8] },
+  { id: "P05", name: "财务共享中心二期", owner: "赵敏", org: "财务数智组", type: "核心系统", startOffset: -160, completeThrough: 4, partialCompletion: 45, forecastDelay: 18, actualDelay: 3, riskLevel: "high" },
+  { id: "P06", name: "数据资产管理平台", owner: "孙悦", org: "数据治理组", type: "数据平台", startOffset: -90, completeThrough: 4, partialCompletion: 70, forecastDelay: 5, actualDelay: -1, riskLevel: "medium", naSequences: [8, 9] },
+  { id: "P07", name: "经营分析驾驶舱", owner: "何清", org: "数据治理组", type: "数据平台", startOffset: -200, completeThrough: 11, partialCompletion: 45, forecastDelay: -2, actualDelay: -4, riskLevel: "low" },
+  { id: "P08", name: "审计数字化平台", owner: "刘可", org: "监督数智组", type: "业务平台", startOffset: -70, completeThrough: 3, partialCompletion: 78, forecastDelay: 0, actualDelay: 0, riskLevel: "low" },
+  { id: "P09", name: "主数据治理一期", owner: "林亦", org: "数据治理组", type: "数据平台", startOffset: -95, completeThrough: 5, partialCompletion: 22, forecastDelay: 2, actualDelay: 2, riskLevel: "medium", currentBaselineVersion: 2 },
+  { id: "P10", name: "统一门户升级项目", owner: "高远", org: "技术平台组", type: "技术底座", startOffset: -400, completeThrough: 12, partialCompletion: 100, forecastDelay: 0, actualDelay: 4, riskLevel: "low", lifecycleStatus: "archived" },
+  { id: "P11", name: "投资管理一体化平台", owner: "宋妍", org: "投资数智组", type: "业务平台", startOffset: -5, completeThrough: 0, partialCompletion: 15, forecastDelay: 0, actualDelay: 0, riskLevel: "low" },
+  { id: "P12", name: "审计整改闭环平台", owner: "郑睿", org: "监督数智组", type: "业务平台", startOffset: -230, completeThrough: 12, partialCompletion: 100, forecastDelay: 0, actualDelay: 2, riskLevel: "low", lifecycleStatus: "completed" },
+  { id: "P13", name: "供应商协同门户", owner: "徐宁", org: "供应链组", type: "业务平台", startOffset: -80, completeThrough: 4, partialCompletion: 75, forecastDelay: 0, actualDelay: 0, riskLevel: "low" },
+  { id: "P14", name: "数据中台能力升级", owner: "叶川", org: "技术平台组", type: "技术底座", startOffset: -110, completeThrough: 5, partialCompletion: 52, forecastDelay: 6, actualDelay: 1, riskLevel: "medium" },
+  { id: "P15", name: "费用报销智能审核", owner: "沈佳", org: "财务数智组", type: "核心系统", startOffset: -55, completeThrough: 2, partialCompletion: 68, forecastDelay: 0, actualDelay: 0, riskLevel: "low" },
+  { id: "P16", name: "统一身份权限治理", owner: "唐宇", org: "技术平台组", type: "技术底座", startOffset: -145, completeThrough: 7, partialCompletion: 65, forecastDelay: 4, actualDelay: 0, riskLevel: "medium" },
 ];
 
-const seedProjects = [
-  ["P01", "司库管理系统", "王嘉", "财务数智组", "核心系统", 92, "green", 72, 74, 74, "low", ["green","green","green","green","green","green","yellow"]],
-  ["P02", "智慧采购平台", "李程", "供应链组", "业务平台", 63, "red", 68, 53, 55, "high", ["green","green","yellow","red","red","na","na"]],
-  ["P03", "人力资源共享平台", "陈路", "人力数智组", "业务平台", 81, "yellow", 57, 51, 52, "medium", ["green","green","green","yellow","yellow","na","na"]],
-  ["P04", "合同全生命周期管理", "周航", "法务数智组", "核心系统", 88, "green", 46, 44, 44, "low", ["green","green","green","green","na","na","na"]],
-  ["P05", "财务共享中心二期", "赵敏", "财务数智组", "核心系统", 59, "red", 83, 68, 71, "high", ["green","green","green","yellow","red","red","na"]],
-  ["P06", "数据资产管理平台", "孙悦", "数据治理组", "数据平台", 76, "yellow", 64, 56, 57, "medium", ["green","green","yellow","yellow","green","na","na"]],
-  ["P07", "经营分析驾驶舱", "何清", "数据治理组", "数据平台", 95, "green", 89, 91, 91, "low", ["green","green","green","green","green","green","green"]],
-  ["P08", "审计数字化平台", "刘可", "监督数智组", "业务平台", 84, "yellow", 39, 34, 35, "medium", ["green","green","green","yellow","na","na","na"]],
-  ["P09", "主数据治理一期", "林亦", "数据治理组", "数据平台", 90, "green", 76, 75, 75, "low", ["green","green","green","green","green","yellow","na"]],
-  ["P10", "统一门户升级项目", "高远", "技术平台组", "技术底座", 67, "red", 94, 81, 82, "high", ["green","green","green","green","yellow","red","red"]],
-] as const;
+function demoDateAt(days: number) {
+  const value = new Date(`${shanghaiDateIso()}T00:00:00Z`);
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString().slice(0, 10);
+}
 
-function isoDate(month: number, day: number) {
-  return `2026-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+function demoWeekKeyAt(days: number) {
+  const [year, month, day] = demoDateAt(days).split("-").map(Number);
+  return isoWeekKeyForDate(year, month, day);
 }
 
 function chunks<T>(rows: T[], size: number) {
@@ -147,6 +173,29 @@ async function ensureDemoProjectManagers(db: ReturnType<typeof getDb>) {
   for (const rows of chunks(managerRows, 20)) {
     await db.insert(users).values(rows).onConflictDoNothing();
   }
+  await db
+    .insert(users)
+    .values([
+      {
+        email: "executive.demo@projects.internal",
+        displayName: "管理层演示用户",
+        role: "executive",
+        active: true,
+      },
+      {
+        email: "pmo.demo@projects.internal",
+        displayName: "PMO演示用户",
+        role: "pmo",
+        active: true,
+      },
+      {
+        email: "inactive.demo@projects.internal",
+        displayName: "已停用项目经理",
+        role: "manager",
+        active: false,
+      },
+    ])
+    .onConflictDoNothing();
 }
 
 async function ensureDemoResourcePlanning(db: ReturnType<typeof getDb>) {
@@ -206,11 +255,14 @@ async function ensureDemoResourcePlanning(db: ReturnType<typeof getDb>) {
     ["数据治理专家组", "P09", "标准与质量核验", 7, 63, 36, "planned"],
     ["集成测试团队", "P05", "集成测试执行", -7, 42, 50, "confirmed"],
     ["集成测试团队", "P10", "回归与性能测试", 7, 56, 40, "planned"],
+    ["集成测试团队", "P14", "数据中台专项测试", 7, 56, 46, "confirmed"],
     ["核心供应商A", "P02", "核心模块交付", -14, 49, 42, "confirmed"],
+    ["核心供应商A", "P13", "供应商门户交付", 0, 42, 30, "planned"],
     ["UAT共享环境", "P02", "采购业务验收", 14, 42, 30, "confirmed"],
     ["UAT共享环境", "P08", "审计场景验收", 14, 42, 20, "planned"],
     ["生产切换窗口", "P05", "生产切换保障", 49, 63, 16, "planned"],
     ["生产切换窗口", "P10", "门户升级切换", 49, 63, 12, "planned"],
+    ["生产切换窗口", "P16", "权限治理切换", 49, 63, 10, "planned"],
   ] as const;
   const rows = allocationSeeds.flatMap(
     ([
@@ -240,8 +292,267 @@ async function ensureDemoResourcePlanning(db: ReturnType<typeof getDb>) {
       ];
     },
   );
-  for (const rowsChunk of chunks(rows, 10)) {
+  for (const rowsChunk of chunks(rows, 8)) {
     await db.insert(resourceAllocations).values(rowsChunk);
+  }
+}
+
+async function ensureDemoScenarioData(db: ReturnType<typeof getDb>) {
+  if (!demoSeedEnabled()) return;
+  const [projectRows, milestoneRows] = await Promise.all([
+    db.select().from(projects),
+    db.select().from(milestones),
+  ]);
+  const projectById = new Map(projectRows.map((project) => [project.id, project]));
+  const milestoneByProjectAndSequence = new Map(
+    milestoneRows.map((milestone) => [
+      `${milestone.projectId}:${milestone.sequence}`,
+      milestone,
+    ]),
+  );
+
+  const [{ value: reportCount }] = await db
+    .select({ value: count() })
+    .from(weeklyReports);
+  if (reportCount === 0) {
+    const reportRows = seedProjects.flatMap((seed) => {
+      const project = projectById.get(seed.id);
+      if (!project) return [];
+      const active = (project.lifecycleStatus ?? "active") === "active";
+      const weekOffsets =
+        seed.id === "P08"
+          ? [-28]
+          : seed.id === "P15"
+            ? [-21, 0]
+            : active
+              ? [-14, -7, 0]
+              : [-28, -21, -14, -7];
+      const currentProgress = Math.min(
+        100,
+        Number(
+          (
+            (seed.completeThrough / 12) * 100 +
+            seed.partialCompletion / 12
+          ).toFixed(1),
+        ),
+      );
+      return weekOffsets.map((offset, index) => {
+        const isDraft = seed.id === "P15" && offset === 0;
+        const systemProgress = Math.max(
+          0,
+          Number(
+            (
+              currentProgress -
+              (weekOffsets.length - index - 1) * (seed.id === "P07" ? 6 : 4)
+            ).toFixed(1),
+          ),
+        );
+        const declaredGap =
+          seed.id === "P05" ? 12 : seed.id === "P03" ? 6 : seed.id === "P07" ? 2 : 0;
+        return {
+          projectId: seed.id,
+          weekKey: demoWeekKeyAt(offset),
+          systemProgress,
+          declaredProgress: Math.min(100, systemProgress + declaredGap),
+          variance: declaredGap,
+          reason:
+            declaredGap > 10
+              ? "经理申报值包含已完成但尚待验收的交付物，已补充口径说明。"
+              : declaredGap > 5
+                ? "部分成果已提交业务确认，申报进度略高于系统权重计算值。"
+                : seed.id === "P07"
+                  ? "关键分析模型提前交付，本周进展好于计划。"
+                  : "本周按批准基线推进，节点状态已完成核验。",
+          forecastFinish: demoDateAt(
+            seed.startOffset + 12 * 18 + seed.forecastDelay,
+          ),
+          draftJson: JSON.stringify(
+            isDraft
+              ? {
+                  submitMode: "draft",
+                  weekKey: demoWeekKeyAt(offset),
+                  declaredProgress: systemProgress,
+                  reason: "演示中的未提交草稿，等待项目经理补充。",
+                }
+              : {},
+          ),
+          status: isDraft ? ("draft" as const) : ("submitted" as const),
+          submittedBy: `${seed.id.toLowerCase()}@projects.internal`,
+          submittedAt: `${demoDateAt(offset + 4)}T09:30:00.000Z`,
+        };
+      });
+    });
+    for (const rowsChunk of chunks(reportRows, 8)) {
+      await db.insert(weeklyReports).values(rowsChunk).onConflictDoNothing();
+    }
+  }
+
+  const [{ value: riskCount }] = await db
+    .select({ value: count() })
+    .from(risks);
+  if (riskCount === 0) {
+    const riskSeeds = [
+      { projectId: "P02", title: "核心供应商接口交付延迟", category: "供应商", level: "high", status: "open", description: "核心接口规范多次调整，可能影响开发完成与联调窗口。", mitigation: "安排驻场联合攻关，每日跟踪接口完成清单。", owner: "李程", dueDate: demoDateAt(12) },
+      { projectId: "P03", title: "历史人事数据质量波动", category: "数据", level: "high", status: "monitoring", description: "历史组织和人员主数据存在重复及缺失，若未及时清洗将影响迁移与验收。", mitigation: "建立清洗规则并分批完成业务复核。", owner: "陈路", dueDate: demoDateAt(25) },
+      { projectId: "P05", title: "月结窗口与上线切换冲突", category: "进度", level: "high", status: "open", description: "财务月结冻结窗口压缩生产切换时间。", mitigation: "拆分切换批次并准备双轨回退方案。", owner: "赵敏", dueDate: demoDateAt(-5) },
+      { projectId: "P13", title: "供应商账号同步范围争议", category: "范围", level: "low", status: "closed", description: "外部账号同步边界曾存在分歧。", mitigation: "已通过专题会确认首期范围并完成签字。", owner: "徐宁", dueDate: demoDateAt(-12) },
+      { projectId: "P14", title: "集成测试团队并行项目超配", category: "资源", level: "medium", status: "open", description: "共享测试团队在同一窗口承担多个项目任务。", mitigation: "调整测试批次并补充供应商测试人员。", owner: "叶川", dueDate: demoDateAt(18) },
+      { projectId: "P16", title: "存量权限回收确认周期偏长", category: "合规", level: "medium", status: "monitoring", description: "部分组织尚未完成高权限账号复核。", mitigation: "按组织发布待确认清单并升级超期事项。", owner: "唐宇", dueDate: demoDateAt(20) },
+    ] as const;
+    const riskIds = new Map<string, number>();
+    for (const risk of riskSeeds) {
+      const inserted = await db
+        .insert(risks)
+        .values({
+          ...risk,
+          createdBy: "pmo.demo@projects.internal",
+        })
+        .returning({ id: risks.id });
+      riskIds.set(risk.projectId, inserted[0].id);
+    }
+
+    const actionSeeds = [
+      { projectId: "P02", sequence: 6, riskId: riskIds.get("P02") ?? null, name: "接口交付每日清零", owner: "李程", recoveryDate: demoDateAt(10), detail: "供应商驻场、接口分级、每日17点核验未完成项。", status: "in_progress", progress: 55 },
+      { projectId: "P03", sequence: 6, riskId: riskIds.get("P03") ?? null, name: "历史数据专项清洗", owner: "陈路", recoveryDate: demoDateAt(14), detail: "完成重复数据合并、缺失字段补录和抽样复核。", status: "pending", progress: 20 },
+      { projectId: "P05", sequence: 6, riskId: riskIds.get("P05") ?? null, name: "切换窗口重排与回退演练", owner: "赵敏", recoveryDate: demoDateAt(-3), detail: "原定恢复日期已逾期，需升级协调财务与运维窗口。", status: "overdue", progress: 65 },
+      { projectId: "P13", sequence: 4, riskId: riskIds.get("P13") ?? null, name: "账号范围确认", owner: "徐宁", recoveryDate: demoDateAt(-8), detail: "专题会已完成范围确认并归档会议纪要。", status: "completed", progress: 100 },
+      { projectId: "P14", sequence: 7, riskId: riskIds.get("P14") ?? null, name: "补充专项测试人力", owner: "叶川", recoveryDate: demoDateAt(-1), detail: "临时测试资源尚未全部到位，当前措施已逾期。", status: "overdue", progress: 40 },
+      { projectId: "P16", sequence: 8, riskId: riskIds.get("P16") ?? null, name: "权限确认升级催办", owner: "唐宇", recoveryDate: demoDateAt(15), detail: "按组织每周通报确认率，超期事项升级至分管负责人。", status: "in_progress", progress: 60 },
+    ] as const;
+    for (const action of actionSeeds) {
+      await db.insert(correctiveActions).values({
+        projectId: action.projectId,
+        milestoneId:
+          milestoneByProjectAndSequence.get(
+            `${action.projectId}:${action.sequence}`,
+          )?.id ?? null,
+        riskId: action.riskId,
+        name: action.name,
+        owner: action.owner,
+        recoveryDate: action.recoveryDate,
+        detail: action.detail,
+        status: action.status,
+        progress: action.progress,
+        createdBy: "pmo.demo@projects.internal",
+      });
+    }
+  }
+
+  const [{ value: changeCount }] = await db
+    .select({ value: count() })
+    .from(baselineChanges);
+  if (changeCount === 0) {
+    const pending = await db
+      .insert(baselineChanges)
+      .values({
+        projectId: "P02",
+        versionFrom: 2,
+        versionTo: 3,
+        reason: "核心供应商接口规范调整，经专题会确认增加开发与联调周期。",
+        changesJson: JSON.stringify([
+          { milestone: "开发完成", from: demoDateAt(-22), to: demoDateAt(-8), days: 14 },
+          { milestone: "联调测试", from: demoDateAt(14), to: demoDateAt(24), days: 10 },
+        ]),
+        impact: "预计影响联调窗口，但通过分批上线确保年度目标不变。",
+        requestedBy: "p02@projects.internal",
+      })
+      .returning({ id: baselineChanges.id });
+    void pending;
+    const approved = await db
+      .insert(baselineChanges)
+      .values({
+        projectId: "P09",
+        versionFrom: 1,
+        versionTo: 2,
+        reason: "新增数据标准映射范围，经PMO批准调整阶段计划。",
+        changesJson: JSON.stringify([
+          { milestone: "开发完成", from: demoDateAt(13), to: demoDateAt(15), days: 2 },
+        ]),
+        impact: "总体上线目标不变，开发完成节点顺延2天。",
+        status: "approved",
+        requestedBy: "p09@projects.internal",
+        approvedBy: "pmo.demo@projects.internal",
+        approvedAt: `${demoDateAt(-9)}T09:00:00.000Z`,
+      })
+      .returning({ id: baselineChanges.id });
+    await db
+      .update(baselineVersions)
+      .set({ kind: "approved", changeId: approved[0].id })
+      .where(
+        and(
+          eq(baselineVersions.projectId, "P09"),
+          eq(baselineVersions.version, 2),
+        ),
+      );
+    await db.insert(baselineChanges).values({
+      projectId: "P13",
+      versionFrom: 1,
+      versionTo: 2,
+      reason: "申请扩大外部供应商账号同步范围。",
+      changesJson: JSON.stringify([
+        { milestone: "用户验收", from: demoDateAt(100), to: demoDateAt(114), days: 14 },
+      ]),
+      impact: "会增加首期范围和安全评审工作量。",
+      status: "rejected",
+      requestedBy: "p13@projects.internal",
+      rejectedBy: "pmo.demo@projects.internal",
+      rejectedAt: `${demoDateAt(-6)}T10:00:00.000Z`,
+      rejectionReason: "超出首期批准范围，建议纳入后续迭代。",
+    });
+  }
+
+  const [{ value: notificationCount }] = await db
+    .select({ value: count() })
+    .from(notifications);
+  if (notificationCount === 0) {
+    await db.insert(notifications).values([
+      {
+        recipientEmail: "local-admin@example.com",
+        projectId: "P05",
+        type: "red_escalation",
+        severity: "critical",
+        title: "财务共享中心二期触发红灯升级",
+        message: "关键节点延期且高风险纠偏措施逾期，请管理层协调切换窗口。",
+        actionView: "project",
+        referenceKey: "demo-red-P05",
+        createdBy: "system",
+      },
+      {
+        recipientEmail: "local-admin@example.com",
+        projectId: "P08",
+        type: "report_reminder",
+        severity: "warning",
+        title: "审计数字化平台连续缺报",
+        message: "项目连续多个周期未提交正式周报，请完成催报和责任确认。",
+        actionView: "report",
+        referenceKey: "demo-report-P08",
+        createdBy: "system",
+      },
+      {
+        recipientEmail: "local-admin@example.com",
+        projectId: "P09",
+        type: "baseline_decision",
+        severity: "info",
+        title: "主数据治理一期基线变更已批准",
+        message: "开发完成节点顺延2天，总体上线目标保持不变。",
+        actionView: "project",
+        referenceKey: "demo-baseline-P09",
+        status: "read",
+        createdBy: "pmo.demo@projects.internal",
+        readAt: `${demoDateAt(-8)}T11:00:00.000Z`,
+      },
+      {
+        recipientEmail: "local-admin@example.com",
+        projectId: "P14",
+        type: "system",
+        severity: "warning",
+        title: "共享测试资源出现超配",
+        message: "集成测试团队在未来窗口超过可用容量，请调整资源分配。",
+        actionView: "portfolio",
+        referenceKey: "demo-resource-P14",
+        createdBy: "system",
+      },
+    ]);
   }
 }
 
@@ -293,26 +604,48 @@ export async function ensureSeeded() {
     await ensureDemoProjectManagers(db);
     await ensureBaselineVersionRows(db);
     await ensureDemoResourcePlanning(db);
+    await ensureDemoScenarioData(db);
     return;
   }
   if (!demoSeedEnabled()) return;
 
-  const projectRows = seedProjects.map((p) => ({
-        id: p[0],
-        code: p[0],
-        name: p[1],
-        ownerEmail: `${p[0].toLowerCase()}@projects.internal`,
-        ownerName: p[2],
-        org: p[3],
-        type: p[4],
-        score: p[5],
-        status: p[6],
-        planProgress: p[7],
-        actualProgress: p[8],
-        declaredProgress: p[9],
-        riskLevel: p[10],
-        currentBaselineVersion: p[0] === "P02" ? 2 : 1,
-      }));
+  const projectRows = seedProjects.map((project) => {
+    const completed = project.lifecycleStatus === "completed";
+    const archived = project.lifecycleStatus === "archived";
+    const progress = Math.min(
+      100,
+      Number(
+        (
+          (project.completeThrough / 12) * 100 +
+          project.partialCompletion / 12
+        ).toFixed(1),
+      ),
+    );
+    return {
+      id: project.id,
+      code: project.id,
+      name: project.name,
+      ownerEmail: `${project.id.toLowerCase()}@projects.internal`,
+      ownerName: project.owner,
+      org: project.org,
+      type: project.type,
+      score: completed || archived ? 100 : 90,
+      status: "green" as const,
+      planProgress: completed || archived ? 100 : progress,
+      actualProgress: completed || archived ? 100 : progress,
+      declaredProgress: completed || archived ? 100 : progress,
+      riskLevel: project.riskLevel,
+      lifecycleStatus: project.lifecycleStatus ?? ("active" as const),
+      lifecycleReason: completed
+        ? "全部里程碑已完成，已通过结项检查。"
+        : archived
+          ? "历史项目已完成资料归档，仅保留只读记录。"
+          : "",
+      completedAt: completed ? `${demoDateAt(project.id === "P12" ? -5 : -70)}T09:00:00.000Z` : null,
+      archivedAt: archived ? `${demoDateAt(-100)}T09:00:00.000Z` : null,
+      currentBaselineVersion: project.currentBaselineVersion ?? 1,
+    };
+  });
   for (const rows of chunks(projectRows, 4)) {
     await db.insert(projects).values(rows).onConflictDoNothing();
   }
@@ -321,55 +654,96 @@ export async function ensureSeeded() {
   const templateByName = new Map(
     templateRows.map((template) => [template.name, template.id]),
   );
-  const milestoneRows = seedProjects.flatMap((project, projectIndex) =>
-    milestoneNames.map((name, index) => {
-      const status = project[11][index];
-      const deviationDays = status === "red" ? index + 3 : status === "yellow" ? index + 1 : 0;
-      const completion = status === "na" ? 0 : Math.min(100, 28 + index * 14);
-      const finishMonth = 3 + index;
-      const finishDay = 10 + index;
-      return {
-        projectId: project[0],
-        templateId: templateByName.get(name) ?? null,
-        name,
-        sequence: index + 1,
-        weight: [5, 10, 10, 20, 20, 20, 15][index],
-        critical: index === 3 || index === 6,
-        applicable: status !== "na",
-        plannedStart: isoDate(Math.max(2, finishMonth - 1), 1 + projectIndex),
-        plannedFinish: isoDate(finishMonth, finishDay),
-        forecastFinish:
-          status === "na" ? null : isoDate(finishMonth, Math.min(28, finishDay + deviationDays)),
-        actualFinish: completion === 100 ? isoDate(finishMonth, finishDay + deviationDays) : null,
-        completion,
-        status,
-        deviationDays,
-        reason:
-          status === "red"
-            ? "接口或资源约束影响当前节点，已纳入重点纠偏。"
-            : status === "yellow"
-              ? "预测完成日期晚于批准基线，正在采取提前干预措施。"
-              : "",
-      };
-    }),
-  );
+  const milestoneRows = seedProjects.flatMap((project) => {
+    const standardRows = standardMilestoneTemplates.map(
+      ([, name, defaultWeight, critical], index) => {
+        const sequence = index + 1;
+        const applicable = !(project.naSequences ?? []).includes(sequence);
+        const completed = applicable && sequence <= project.completeThrough;
+        const current =
+          applicable && sequence === project.completeThrough + 1;
+        const plannedFinishOffset = project.startOffset + sequence * 18;
+        const deviationDays = completed
+          ? project.actualDelay
+          : current || sequence > project.completeThrough
+            ? project.forecastDelay
+            : 0;
+        const yellowDays = critical ? 1 : 4;
+        const redDays = critical ? 4 : 8;
+        const status = !applicable
+          ? ("na" as const)
+          : deviationDays >= redDays
+            ? ("red" as const)
+            : deviationDays >= yellowDays
+              ? ("yellow" as const)
+              : ("green" as const);
+        return {
+          projectId: project.id,
+          templateId: templateByName.get(name) ?? null,
+          name,
+          sequence,
+          weight:
+            project.id === "P06" && sequence === 12
+              ? 0
+              : defaultWeight,
+          critical,
+          applicable,
+          custom: false,
+          plannedStart: demoDateAt(project.startOffset + index * 18),
+          plannedFinish: demoDateAt(plannedFinishOffset),
+          forecastFinish:
+            applicable && !completed
+              ? demoDateAt(plannedFinishOffset + project.forecastDelay)
+              : null,
+          actualFinish:
+            completed
+              ? demoDateAt(plannedFinishOffset + project.actualDelay)
+              : null,
+          completion: completed ? 100 : current ? project.partialCompletion : 0,
+          status,
+          deviationDays,
+          reason:
+            status === "red"
+              ? project.id === "P05"
+                ? "切换窗口冲突导致关键节点延期，已升级管理层协调。"
+                : "接口、资源或交付约束影响节点，已纳入重点纠偏。"
+              : status === "yellow"
+                ? "预测完成日期晚于批准基线，正在提前干预。"
+                : completed && project.actualDelay < 0
+                  ? "节点提前完成并已通过成果确认。"
+                  : "",
+        };
+      },
+    );
+    if (project.id !== "P06") return standardRows;
+    return [
+      ...standardRows,
+      {
+        projectId: project.id,
+        templateId: null,
+        name: "数据分级分类验收",
+        sequence: 13,
+        weight: 5,
+        critical: false,
+        applicable: true,
+        custom: true,
+        plannedStart: demoDateAt(22),
+        plannedFinish: demoDateAt(38),
+        forecastFinish: demoDateAt(43),
+        actualFinish: null,
+        completion: 20,
+        status: "yellow" as const,
+        deviationDays: 5,
+        reason: "自定义治理节点，部分业务域分类确认进度偏慢。",
+      },
+    ];
+  });
   for (const rows of chunks(milestoneRows, 4)) {
     await db.insert(milestones).values(rows).onConflictDoNothing();
   }
 
+  await ensureBaselineVersionRows(db);
   await ensureDemoResourcePlanning(db);
-  await db.insert(baselineChanges).values({
-    projectId: "P02",
-    versionFrom: 2,
-    versionTo: 3,
-    reason: "核心供应商接口规范调整，经项目专题会确认增加开发与联调周期。",
-    changesJson: JSON.stringify([
-      { milestone: "开发完成", from: "2026-07-16", to: "2026-07-28", days: 12 },
-      { milestone: "联调测试", from: "2026-08-18", to: "2026-08-22", days: 4 },
-      { milestone: "上线切换", from: "2026-10-20", to: "2026-10-31", days: 11 },
-    ]),
-    impact: "较原始基线累计延期23天；不影响年度总体目标；项目成本预计增加3.2%。",
-    requestedBy: "p02@projects.internal",
-  }).onConflictDoNothing();
+  await ensureDemoScenarioData(db);
   await ensureBaselineVersionRows(db);
 }

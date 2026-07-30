@@ -81,6 +81,12 @@ test("locks closed projects and excludes them from live monitoring", async () =>
   }
   assert.match(snapshotService, /projectCount:\s*projectRows\.length/);
   assert.match(snapshotService, /activeProjectIds/);
+  assert.match(
+    snapshotService,
+    /snapshotProjectRows = allProjectRows\.filter\([\s\S]*?lifecycleStatus !== "archived"/,
+  );
+  assert.match(snapshotService, /projects:\s*snapshotProjectRows/);
+  assert.match(snapshotService, /milestones:\s*snapshotMilestones/);
 });
 
 test("exposes lifecycle filtering, closure checks and read-only UX", async () => {

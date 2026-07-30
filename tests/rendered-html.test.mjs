@@ -526,6 +526,37 @@ test("supports all required management heatmap filter dimensions", async () => {
   assert.match(layout, /viewportFit: "cover"/);
 });
 
+test("uses the six-month milestone timeline as the primary management cockpit", async () => {
+  const [page, timeline, timelineLogic, css, manual] = await Promise.all([
+    readFile(new URL("app/page.tsx", templateRoot), "utf8"),
+    readFile(new URL("app/timeline-cockpit.tsx", templateRoot), "utf8"),
+    readFile(new URL("lib/timeline-cockpit.ts", templateRoot), "utf8"),
+    readFile(new URL("app/globals.css", templateRoot), "utf8"),
+    readFile(new URL("docs/按角色用户使用手册.md", templateRoot), "utf8"),
+  ]);
+
+  assert.match(page, /\| "timeline-cockpit"/);
+  assert.match(page, /useState<View>\("timeline-cockpit"\)/);
+  assert.match(page, /view === "timeline-cockpit"/);
+  assert.match(page, /onNavigate\("timeline-cockpit"\)/);
+  assert.match(timeline, /统建项目里程碑时间轴/);
+  assert.match(timeline, /上月复盘 · 本月跟踪 · 未来4个月预警/);
+  assert.match(timeline, /本月计划到期/);
+  assert.match(timeline, /本月已完成/);
+  assert.match(timeline, /本月预测完成/);
+  assert.match(timeline, /逾期未完成/);
+  assert.match(timeline, /全屏时间轴/);
+  assert.match(timeline, /timeline-drawer-backdrop/);
+  assert.match(timeline, /节点矩阵/);
+  assert.match(timelineLogic, /Array\.from\(\{ length: 6 \}/);
+  assert.match(timelineLogic, /index - 1/);
+  assert.match(timelineLogic, /milestone\.actualFinish/);
+  assert.match(timelineLogic, /timelineProjectIsVisible/);
+  assert.match(css, /\.timeline-grid-head,.timeline-grid-row/);
+  assert.match(css, /\.timeline-project-cell\{position:sticky/);
+  assert.match(manual, /里程碑时间轴/);
+});
+
 test("shows a real authentication boundary with self-service and administrator password recovery", async () => {
   const [page, css, passwordAuth, loginRoute, logoutRoute, changePasswordRoute, userRoute, serverAuth, readme] = await Promise.all([
     readFile(new URL("app/page.tsx", templateRoot), "utf8"),

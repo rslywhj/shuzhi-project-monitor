@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PortfolioAnalytics from "./portfolio-analytics";
 import NotificationChannelPanel from "./notification-channel-panel";
 import ResourcePlanning from "./resource-planning";
+import TimelineCockpit from "./timeline-cockpit";
 import {
   addIsoDays,
   buildWeightedProjectSchedule,
@@ -22,6 +23,7 @@ import {
 
 type Status = "green" | "yellow" | "red" | "na";
 type View =
+  | "timeline-cockpit"
   | "cockpit"
   | "portfolio"
   | "analytics"
@@ -288,7 +290,7 @@ type NotificationData = {
   severity: "info" | "warning" | "critical";
   title: string;
   message: string;
-  actionView: Exclude<View, "cockpit">;
+  actionView: Exclude<View, "timeline-cockpit" | "cockpit">;
   referenceKey: string;
   status: "unread" | "read" | "dismissed";
   createdBy: string;
@@ -895,7 +897,10 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
         <span className="live-dot" /> 已锁定 · {snapshotLabel}
         <strong>{snapshotTime}</strong>
       </div>
-      <button className="light-button" onClick={() => onNavigate("portfolio")}>进入工作台 <span>↗</span></button>
+      <div className="cockpit-header-actions">
+        <button className="cockpit-view-switch" onClick={() => onNavigate("timeline-cockpit")}>时间轴</button>
+        <button className="light-button" onClick={() => onNavigate("portfolio")}>进入工作台 <span>↗</span></button>
+      </div>
     </header>
 
     <section className="metric-grid">
@@ -1130,7 +1135,7 @@ function Sidebar({ view, onNavigate, identity }: { view: View; onNavigate: Navig
     <nav>{visibleItems.map(item => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => onNavigate(item.id)}><Icon>{item.icon}</Icon>{item.label}</button>)}</nav>
     <div className="sidebar-divider" />
     <div className="subnav"><span>常用功能</span><button onClick={() => onNavigate("project")}><Icon>◫</Icon>风险与措施</button>{canGovern && <><button onClick={() => onNavigate("pmo")}><Icon>≋</Icon>基线变更</button><button onClick={() => onNavigate("pmo")}><Icon>⚙</Icon>规则配置</button><button onClick={() => onNavigate("admin")}><Icon>♙</Icon>用户与权限</button></>}</div>
-    <div className="sidebar-bottom"><div className="system-state"><i /><span><strong>系统运行正常</strong><small>服务端实时数据</small></span></div><button className="cockpit-link" onClick={() => onNavigate("cockpit")}><Icon>▦</Icon>打开管理大屏 <span>↗</span></button></div>
+    <div className="sidebar-bottom"><div className="system-state"><i /><span><strong>系统运行正常</strong><small>服务端实时数据</small></span></div><button className="cockpit-link" onClick={() => onNavigate("timeline-cockpit")}><Icon>▦</Icon>打开管理大屏 <span>↗</span></button></div>
   </aside>;
 }
 
@@ -1291,7 +1296,7 @@ function WorkspaceHeader({ title, subtitle, onNavigate, identity }: { title: str
             修改密码
           </button>
           <button onClick={() => onNavigate("portfolio")}>项目工作台</button>
-          <button onClick={() => onNavigate("cockpit")}>打开管理大屏</button>
+          <button onClick={() => onNavigate("timeline-cockpit")}>打开管理大屏</button>
           <button onClick={logout}>退出登录</button>
         </div>
       )}
@@ -5063,7 +5068,7 @@ function EmptyProjectWorkspace({
 }
 
 export default function Home() {
-  const [view, setView] = useState<View>("cockpit");
+  const [view, setView] = useState<View>("timeline-cockpit");
   const [projectData, setProjectData] = useState<ProjectData[]>([]);
   const [identity, setIdentity] = useState<Identity | null>(null);
   const [dashboardData, setDashboardData] = useState<ProjectData[]>([]);
@@ -5159,6 +5164,7 @@ export default function Home() {
   }, [refreshData]);
 
   if (dataState === "unauthenticated") return <LoginScreen />;
+  if (view === "timeline-cockpit") return <><TimelineCockpit onNavigate={navigate} projectData={dashboardData} snapshot={dashboardSnapshot} />{dataState === "fallback" && <div className="data-banner">当前数据服务不可用，管理大屏不展示未核实的演示数据。</div>}</>;
   if (view === "cockpit") return <><Cockpit onNavigate={navigate} projectData={dashboardData} snapshot={dashboardSnapshot} templateData={templateData} trends={trendData} alerts={dashboardAlerts} />{dataState === "fallback" && <div className="data-banner">当前数据服务不可用，管理大屏不展示未核实的演示数据。</div>}</>;
   return <div className="app-shell"><Sidebar view={view} onNavigate={navigate} identity={identity} /><div className="workspace">{view === "portfolio" && <Portfolio onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} identity={identity} templateData={templateData} projectManagers={projectManagers} weeklyReports={weeklyReportData} />}{view === "analytics" && <PortfolioAnalytics onNavigate={(next, projectId) => navigate(next, projectId)} identity={identity} header={<WorkspaceHeader title="项目组合分析" subtitle="从组织、类型、负责人和标准节点维度识别共性瓶颈与基线漂移" onNavigate={navigate} identity={identity} />} />}{view === "resources" && <ResourcePlanning identity={identity} onOpenProject={(projectId) => navigate("project", projectId)} header={<WorkspaceHeader title="跨项目资源计划" subtitle="统一资源池、周容量、项目分配与超配治理" onNavigate={navigate} identity={identity} />} />}{view === "project" && (projectData.length ? <ProjectDetail onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} projectId={selectedProjectId} identity={identity} projectManagers={projectManagers} /> : <EmptyProjectWorkspace onNavigate={navigate} identity={identity} />)}{view === "report" && (projectData.length ? <WeeklyReport onNavigate={navigate} onDataChanged={refreshData} projectId={selectedProjectId} projectData={projectData} identity={identity} snapshot={dashboardSnapshot} /> : <EmptyProjectWorkspace onNavigate={navigate} identity={identity} />)}{view === "pmo" && <PmoPage onNavigate={navigate} onDataChanged={refreshData} identity={identity} projectData={projectData} />}{view === "admin" && <AdminPage onNavigate={navigate} identity={identity} />}</div></div>;
 }

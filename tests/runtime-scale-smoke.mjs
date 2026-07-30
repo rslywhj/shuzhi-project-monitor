@@ -73,6 +73,20 @@ async function bootstrap() {
 }
 
 const initial = await bootstrap();
+const securityConfig = await readJson("/api/security-config", {
+  cache: "no-store",
+});
+assert.equal(
+  securityConfig.response.status,
+  200,
+  JSON.stringify(securityConfig.body),
+);
+const minimumPasswordLength = Number(
+  securityConfig.body.passwordPolicy?.minPasswordLength ?? 12,
+);
+const scalePassword =
+  "ScaleDemo2026!" +
+  "x".repeat(Math.max(0, minimumPasswordLength - "ScaleDemo2026!".length));
 let projectCount = initial.body.projects.length;
 let candidateIndex = 1;
 
@@ -89,6 +103,7 @@ while (projectCount < targetProjectCount && candidateIndex <= 100) {
       email: payload.ownerEmail,
       displayName: payload.ownerName,
       role: "manager",
+      password: scalePassword,
     }),
   });
   assert(

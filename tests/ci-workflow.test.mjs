@@ -24,7 +24,13 @@ test("gates production deployment on CI and verifies Cloudflare health", async (
   assert.match(workflow, /secrets\.CLOUDFLARE_API_TOKEN/);
   assert.match(workflow, /secrets\.CLOUDFLARE_ACCOUNT_ID/);
   assert.match(workflow, /https:\/\/itpm\.dougge\.top\/api\/health/);
+  assert.match(
+    workflow,
+    /https:\/\/shuzhi-project-monitor\.849916182\.workers\.dev\/api\/health/,
+  );
   assert.match(workflow, /"database":"connected"/);
   assert.match(packageJson, /"deploy:cloudflare:ci"/);
   assert.match(deployConfigScript, /delete config\.routes/);
+  assert.match(deployConfigScript, /config\.workers_dev = true/);
+  assert.match(deployConfigScript, /config\.preview_urls = false/);
 });

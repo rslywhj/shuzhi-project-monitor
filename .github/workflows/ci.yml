@@ -57,10 +57,20 @@ jobs:
       - name: Verify production health
         shell: bash
         run: |
-          health="$(curl --fail --silent --show-error \
-            --retry 10 --retry-delay 5 --retry-all-errors \
-            --connect-timeout 10 --max-time 20 \
-            https://itpm.dougge.top/api/health)"
+          probe() {
+            curl --fail --silent --show-error \
+              --connect-timeout 10 --max-time 20 \
+              --header 'Cache-Control: no-cache' \
+              --user-agent 'shuzhi-project-monitor-ci/1.0' \
+              "$1"
+          }
+          if ! health="$(probe https://itpm.dougge.top/api/health)"; then
+            echo "::warning::Custom domain rejected the GitHub runner; verifying the deployed Worker origin instead."
+            health="$(curl --fail --silent --show-error \
+              --retry 10 --retry-delay 5 --retry-all-errors \
+              --connect-timeout 10 --max-time 20 \
+              https://shuzhi-project-monitor.849916182.workers.dev/api/health)"
+          fi
           printf '%s\n' "$health"
           grep -q '"status":"ok"' <<<"$health"
           grep -q '"database":"connected"' <<<"$health"

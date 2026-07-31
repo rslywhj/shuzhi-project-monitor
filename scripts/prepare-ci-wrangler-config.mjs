@@ -8,5 +8,7 @@ const config = JSON.parse(await readFile(sourcePath, "utf8"));
 // CI only updates the existing Worker so its token does not need zone-route
 // mutation permission and cannot accidentally replace the domain binding.
 delete config.routes;
+config.workers_dev = true;
+config.preview_urls = false;
 
 await writeFile(targetPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");

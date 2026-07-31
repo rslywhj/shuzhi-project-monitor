@@ -25,6 +25,7 @@ import {
   formatShanghaiMonthDayTime,
   shanghaiDateIso,
 } from "@/lib/date-time";
+import { ThemeControl } from "./theme-provider";
 
 type TimelineDestination = "cockpit" | "portfolio" | "project";
 type TimelineSnapshot = {
@@ -392,6 +393,7 @@ export default function TimelineCockpit({
           <strong>{snapshotTime}</strong>
         </div>
         <div className="cockpit-header-actions">
+          <ThemeControl surface="cockpit" />
           <button
             className="cockpit-view-switch"
             onClick={() => onNavigate("cockpit")}

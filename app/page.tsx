@@ -6,6 +6,11 @@ import NotificationChannelPanel from "./notification-channel-panel";
 import ResourcePlanning from "./resource-planning";
 import TimelineCockpit from "./timeline-cockpit";
 import {
+  ThemeControl,
+  ThemeProvider,
+  useTheme,
+} from "./theme-provider";
+import {
   addIsoDays,
   buildWeightedProjectSchedule,
   isoDaySpan,
@@ -471,6 +476,8 @@ function WeeklyProgressChart({ reports }: { reports: WeeklyReportRow[] }) {
       canvas.style.height = `${height}px`;
       const context = canvas.getContext("2d");
       if (!context) return;
+      const darkTheme =
+        document.documentElement.dataset.theme === "dark";
       context.scale(ratio, ratio);
       context.clearRect(0, 0, width, height);
       const padding = { left: 38, right: 18, top: 16, bottom: 32 };
@@ -489,13 +496,13 @@ function WeeklyProgressChart({ reports }: { reports: WeeklyReportRow[] }) {
       context.textBaseline = "middle";
       for (let value = 0; value <= 100; value += 25) {
         const y = yFor(value);
-        context.strokeStyle = "#e9edf3";
+        context.strokeStyle = darkTheme ? "#2b3d4d" : "#e9edf3";
         context.lineWidth = 1;
         context.beginPath();
         context.moveTo(padding.left, y);
         context.lineTo(width - padding.right, y);
         context.stroke();
-        context.fillStyle = "#9aa4b3";
+        context.fillStyle = darkTheme ? "#7f95a7" : "#9aa4b3";
         context.fillText(`${value}%`, padding.left - 7, y);
       }
 
@@ -516,7 +523,7 @@ function WeeklyProgressChart({ reports }: { reports: WeeklyReportRow[] }) {
         });
         context.stroke();
         chartReports.forEach((report, index) => {
-          context.fillStyle = "#fff";
+          context.fillStyle = darkTheme ? "#101d29" : "#fff";
           context.strokeStyle = color;
           context.lineWidth = 2;
           context.beginPath();
@@ -528,7 +535,7 @@ function WeeklyProgressChart({ reports }: { reports: WeeklyReportRow[] }) {
       drawSeries((report) => report.systemProgress, "#1b64f2");
       drawSeries((report) => report.declaredProgress, "#17a875");
 
-      context.fillStyle = "#8792a4";
+      context.fillStyle = darkTheme ? "#7f95a7" : "#8792a4";
       context.font = "8px Arial";
       context.textAlign = "center";
       context.textBaseline = "top";
@@ -541,8 +548,16 @@ function WeeklyProgressChart({ reports }: { reports: WeeklyReportRow[] }) {
       });
     };
     draw();
+    const themeObserver = new MutationObserver(draw);
+    themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme"],
+    });
     window.addEventListener("resize", draw);
-    return () => window.removeEventListener("resize", draw);
+    return () => {
+      themeObserver.disconnect();
+      window.removeEventListener("resize", draw);
+    };
   }, [chartReports]);
 
   if (chartReports.length === 0) return null;
@@ -898,6 +913,7 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
         <strong>{snapshotTime}</strong>
       </div>
       <div className="cockpit-header-actions">
+        <ThemeControl surface="cockpit" />
         <button className="cockpit-view-switch" onClick={() => onNavigate("timeline-cockpit")}>时间轴</button>
         <button className="light-button" onClick={() => onNavigate("portfolio")}>进入工作台 <span>↗</span></button>
       </div>
@@ -1285,7 +1301,7 @@ function WorkspaceHeader({ title, subtitle, onNavigate, identity }: { title: str
   return (
     <header className="workspace-header">
       <div><h1>{title}</h1><p>{subtitle}</p></div>
-      <div className="header-actions"><button className="icon-button" aria-label="搜索项目" onClick={() => onNavigate("portfolio")}>⌕</button><button className="icon-button notice" aria-label={`通知${unreadCount ? `，${unreadCount}条未读` : ""}`} aria-expanded={noticeOpen} onClick={() => { setNoticeOpen((value) => !value); setMenu(false); if (!noticeOpen) void loadNotifications(); }}>♢{unreadCount > 0 && <b>{unreadCount > 9 ? "9+" : unreadCount}</b>}</button><button className="user-button" onClick={() => { setMenu(!menu); setNoticeOpen(false); }}><span className="avatar">{displayName[0]}</span><span><strong>{displayName}</strong><small>{roleName}</small></span><em>⌄</em></button></div>
+      <div className="header-actions"><ThemeControl surface="workspace" /><button className="icon-button" aria-label="搜索项目" onClick={() => onNavigate("portfolio")}>⌕</button><button className="icon-button notice" aria-label={`通知${unreadCount ? `，${unreadCount}条未读` : ""}`} aria-expanded={noticeOpen} onClick={() => { setNoticeOpen((value) => !value); setMenu(false); if (!noticeOpen) void loadNotifications(); }}>♢{unreadCount > 0 && <b>{unreadCount > 9 ? "9+" : unreadCount}</b>}</button><button className="user-button" onClick={() => { setMenu(!menu); setNoticeOpen(false); }}><span className="avatar">{displayName[0]}</span><span><strong>{displayName}</strong><small>{roleName}</small></span><em>⌄</em></button></div>
       {noticeOpen && <section className="notification-center"><div className="notification-head"><div><strong>通知中心</strong><span>{unreadCount} 条未读</span></div>{unreadCount > 0 && <button onClick={markAllNotificationsRead}>全部已读</button>}</div>{notificationError ? <div className="notification-error">! {notificationError}</div> : notificationRows.filter((row) => row.status !== "dismissed").length ? <div className="notification-list">{notificationRows.filter((row) => row.status !== "dismissed").slice(0, 20).map((notification) => <button className={`${notification.severity} ${notification.status}`} key={notification.id} onClick={() => openNotification(notification)}><span className="notification-symbol">{notification.severity === "critical" ? "■" : notification.severity === "warning" ? "▲" : "●"}</span><div><strong>{notification.title}</strong><p>{notification.message}</p><small title={SHANGHAI_TIME_ZONE_LABEL}>{formatShanghaiDateTime(notification.createdAt)} · {notification.createdBy}</small></div>{notification.status === "unread" && <i />}</button>)}</div> : <div className="notification-empty">暂无通知</div>}<div className="notification-foot">{canGovern ? <button onClick={() => onNavigate("pmo")}>进入 PMO 待办</button> : <span>通知由 PMO 与系统工作流生成</span>}</div></section>}
       {menu && (
         <div className="user-menu">
@@ -5067,7 +5083,8 @@ function EmptyProjectWorkspace({
   );
 }
 
-export default function Home() {
+function HomeContent() {
+  const { resolvedTheme } = useTheme();
   const [view, setView] = useState<View>("timeline-cockpit");
   const [projectData, setProjectData] = useState<ProjectData[]>([]);
   const [identity, setIdentity] = useState<Identity | null>(null);
@@ -5166,5 +5183,9 @@ export default function Home() {
   if (dataState === "unauthenticated") return <LoginScreen />;
   if (view === "timeline-cockpit") return <><TimelineCockpit onNavigate={navigate} projectData={dashboardData} snapshot={dashboardSnapshot} />{dataState === "fallback" && <div className="data-banner">当前数据服务不可用，管理大屏不展示未核实的演示数据。</div>}</>;
   if (view === "cockpit") return <><Cockpit onNavigate={navigate} projectData={dashboardData} snapshot={dashboardSnapshot} templateData={templateData} trends={trendData} alerts={dashboardAlerts} />{dataState === "fallback" && <div className="data-banner">当前数据服务不可用，管理大屏不展示未核实的演示数据。</div>}</>;
-  return <div className="app-shell"><Sidebar view={view} onNavigate={navigate} identity={identity} /><div className="workspace">{view === "portfolio" && <Portfolio onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} identity={identity} templateData={templateData} projectManagers={projectManagers} weeklyReports={weeklyReportData} />}{view === "analytics" && <PortfolioAnalytics onNavigate={(next, projectId) => navigate(next, projectId)} identity={identity} header={<WorkspaceHeader title="项目组合分析" subtitle="从组织、类型、负责人和标准节点维度识别共性瓶颈与基线漂移" onNavigate={navigate} identity={identity} />} />}{view === "resources" && <ResourcePlanning identity={identity} onOpenProject={(projectId) => navigate("project", projectId)} header={<WorkspaceHeader title="跨项目资源计划" subtitle="统一资源池、周容量、项目分配与超配治理" onNavigate={navigate} identity={identity} />} />}{view === "project" && (projectData.length ? <ProjectDetail onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} projectId={selectedProjectId} identity={identity} projectManagers={projectManagers} /> : <EmptyProjectWorkspace onNavigate={navigate} identity={identity} />)}{view === "report" && (projectData.length ? <WeeklyReport onNavigate={navigate} onDataChanged={refreshData} projectId={selectedProjectId} projectData={projectData} identity={identity} snapshot={dashboardSnapshot} /> : <EmptyProjectWorkspace onNavigate={navigate} identity={identity} />)}{view === "pmo" && <PmoPage onNavigate={navigate} onDataChanged={refreshData} identity={identity} projectData={projectData} />}{view === "admin" && <AdminPage onNavigate={navigate} identity={identity} />}</div></div>;
+  return <div className="app-shell" data-theme={resolvedTheme}><Sidebar view={view} onNavigate={navigate} identity={identity} /><div className="workspace">{view === "portfolio" && <Portfolio onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} identity={identity} templateData={templateData} projectManagers={projectManagers} weeklyReports={weeklyReportData} />}{view === "analytics" && <PortfolioAnalytics onNavigate={(next, projectId) => navigate(next, projectId)} identity={identity} header={<WorkspaceHeader title="项目组合分析" subtitle="从组织、类型、负责人和标准节点维度识别共性瓶颈与基线漂移" onNavigate={navigate} identity={identity} />} />}{view === "resources" && <ResourcePlanning identity={identity} onOpenProject={(projectId) => navigate("project", projectId)} header={<WorkspaceHeader title="跨项目资源计划" subtitle="统一资源池、周容量、项目分配与超配治理" onNavigate={navigate} identity={identity} />} />}{view === "project" && (projectData.length ? <ProjectDetail onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} projectId={selectedProjectId} identity={identity} projectManagers={projectManagers} /> : <EmptyProjectWorkspace onNavigate={navigate} identity={identity} />)}{view === "report" && (projectData.length ? <WeeklyReport onNavigate={navigate} onDataChanged={refreshData} projectId={selectedProjectId} projectData={projectData} identity={identity} snapshot={dashboardSnapshot} /> : <EmptyProjectWorkspace onNavigate={navigate} identity={identity} />)}{view === "pmo" && <PmoPage onNavigate={navigate} onDataChanged={refreshData} identity={identity} projectData={projectData} />}{view === "admin" && <AdminPage onNavigate={navigate} identity={identity} />}</div></div>;
+}
+
+export default function Home() {
+  return <ThemeProvider><HomeContent /></ThemeProvider>;
 }

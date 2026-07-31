@@ -394,3 +394,267 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   .timeline-detail-drawer{width:100vw;max-width:none;padding:27px 16px 88px}
   .timeline-drawer-list{padding-right:0}
 }
+
+/* color scheme controls */
+.theme-control{height:38px;min-width:0;display:flex;align-items:center;gap:5px;padding:0 7px;border:1px solid;border-radius:4px;white-space:nowrap}
+.theme-control>span{flex:0 0 auto;font-size:12px}
+.theme-control select{width:100%;min-width:0;border:0;outline:0;background:transparent;color:inherit;font-size:9px;cursor:pointer}
+.theme-control select:focus-visible{outline:2px solid rgba(73,154,217,.5);outline-offset:2px}
+.theme-control.theme-cockpit{border-color:#27506e;background:#0a1f31;color:#91b8d0}
+.theme-control.theme-cockpit option{background:#0d2233;color:#d9eaf5}
+.theme-control.theme-workspace{width:104px;border-color:var(--line);background:#f7f9fc;color:#657187}
+.cockpit-header{grid-template-columns:230px minmax(0,1fr) 240px 360px}
+.cockpit-header-actions{grid-template-columns:112px 92px minmax(130px,1fr)}
+
+/* light management cockpit */
+html[data-theme="light"] .cockpit{
+  color:#263e56;
+  background:
+    linear-gradient(rgba(64,119,162,.08) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(64,119,162,.08) 1px,transparent 1px),
+    radial-gradient(circle at 52% 18%,rgba(47,137,201,.13),transparent 34%),
+    #eef4f9;
+}
+html[data-theme="light"] .cockpit-header{border-bottom-color:#c8d8e6}
+html[data-theme="light"] .cockpit-header:after{background:linear-gradient(90deg,transparent,#3e91c8,transparent)}
+html[data-theme="light"] .cockpit .brand.dark strong{color:#16324b}
+html[data-theme="light"] .cockpit .brand.dark small{color:#6e8497}
+html[data-theme="light"] .cockpit-title .eyebrow{color:#367eae}
+html[data-theme="light"] .cockpit-title h1{color:#17344e;text-shadow:0 4px 24px rgba(43,117,170,.12)}
+html[data-theme="light"] .cockpit .snapshot{color:#6c8498}
+html[data-theme="light"] .cockpit .snapshot strong{color:#29465e}
+html[data-theme="light"] .cockpit .light-button,
+html[data-theme="light"] .cockpit-view-switch,
+html[data-theme="light"] .theme-control.theme-cockpit{
+  border-color:#bfd1df;
+  background:#f8fbfd;
+  color:#356b91;
+}
+html[data-theme="light"] .theme-control.theme-cockpit option{background:#fff;color:#29465e}
+html[data-theme="light"] .cockpit .light-button:hover,
+html[data-theme="light"] .cockpit-view-switch:hover{border-color:#72a8ca;background:#eaf4fa;color:#174f76}
+html[data-theme="light"] .cockpit .metric-card{
+  border-color:#cfdee9;
+  background:linear-gradient(145deg,rgba(255,255,255,.98),rgba(241,247,251,.98));
+  box-shadow:0 5px 18px rgba(40,81,111,.07);
+}
+html[data-theme="light"] .cockpit .metric-card span{color:#607b90}
+html[data-theme="light"] .cockpit .metric-card strong{color:#17344d}
+html[data-theme="light"] .cockpit .metric-card small{color:#71899b}
+html[data-theme="light"] .cockpit .metric-card.filter-card:hover{background:linear-gradient(145deg,#fff,#eaf3f9)}
+html[data-theme="light"] .cockpit .metric-card.progress .progress-track,
+html[data-theme="light"] .cockpit .variance-bars .progress-track{background:#d9e6ef}
+html[data-theme="light"] .cockpit .section-heading h2,
+html[data-theme="light"] .cockpit .attention-head h2,
+html[data-theme="light"] .cockpit .mini-head h2{color:#24435b}
+html[data-theme="light"] .cockpit .section-heading p{color:#71899a}
+html[data-theme="light"] .cockpit .section-index{border-color:#b8cedd;color:#367fac}
+html[data-theme="light"] .cockpit .filter-row label{color:#5c7488}
+html[data-theme="light"] .cockpit .filter-row select,
+html[data-theme="light"] .cockpit .matrix-pagination-settings input[type=number],
+html[data-theme="light"] .cockpit .matrix-pagination-settings select{
+  border-color:#c6d6e2;
+  background:#fff;
+  color:#29485f;
+}
+html[data-theme="light"] .cockpit :where(.heatmap-panel,.attention-panel,.trend-card,.variance-card,.timeline-panel){
+  border-color:#cadbe7;
+  background:rgba(255,255,255,.92);
+  box-shadow:0 8px 24px rgba(41,77,103,.07);
+}
+html[data-theme="light"] .cockpit :where(.heatmap-head,.timeline-grid-head){
+  border-color:#c5d8e5;
+  background:#dfeaf2;
+  color:#55758b;
+}
+html[data-theme="light"] .cockpit :where(.heatmap-head>div,.timeline-grid-head>div,.timeline-project-column){border-color:#c8d9e5}
+html[data-theme="light"] .cockpit .heatmap-head>div span,
+html[data-theme="light"] .cockpit .timeline-grid-head>div>span{color:#337ba8}
+html[data-theme="light"] .cockpit .heatmap-row,
+html[data-theme="light"] .cockpit .timeline-grid-row{border-color:#dce6ed}
+html[data-theme="light"] .cockpit .heatmap-row:hover,
+html[data-theme="light"] .cockpit .timeline-grid-row:hover{background:rgba(55,130,179,.07)}
+html[data-theme="light"] .cockpit .project-cell{border-color:#d5e2ea}
+html[data-theme="light"] .cockpit .project-cell strong,
+html[data-theme="light"] .cockpit .timeline-project-cell strong{color:#244158}
+html[data-theme="light"] .cockpit .project-cell small,
+html[data-theme="light"] .cockpit .timeline-project-cell small{color:#71899a}
+html[data-theme="light"] .cockpit .project-cell b,
+html[data-theme="light"] .cockpit .timeline-project-cell>b{color:#547087}
+html[data-theme="light"] .cockpit .heat-cell,
+html[data-theme="light"] .cockpit .timeline-month-cell{border-color:#dce6ed}
+html[data-theme="light"] .cockpit .heat-cell small{color:#657f92}
+html[data-theme="light"] .cockpit .matrix-footer,
+html[data-theme="light"] .cockpit .timeline-footer{border-color:#cbdce7;background:rgba(244,249,252,.98);color:#5d798d}
+html[data-theme="light"] .cockpit .matrix-footer i{color:#41647c}
+html[data-theme="light"] .cockpit .matrix-auto-switch>span{background:#c3d1db}
+html[data-theme="light"] .cockpit .matrix-auto-switch>span:after{background:#fff}
+html[data-theme="light"] .cockpit .matrix-fullscreen-button,
+html[data-theme="light"] .cockpit .matrix-pagination button{
+  border-color:#bdd1df;
+  background:#f7fbfd;
+  color:#356c91;
+}
+html[data-theme="light"] .cockpit :where(.upcoming,.governance-alerts section){
+  border-color:#d0dfe8;
+  background:#f4f8fb;
+}
+html[data-theme="light"] .cockpit :where(.alert-card,.upcoming li,.governance-alerts button){border-color:#d9e5ec}
+html[data-theme="light"] .cockpit .alert-card.primary{background:linear-gradient(90deg,rgba(219,72,83,.08),transparent)}
+html[data-theme="light"] .cockpit :where(.alert-card h3,.upcoming h3,.governance-alerts h3,.governance-alerts button strong){color:#38566d}
+html[data-theme="light"] .cockpit :where(.alert-card p,.upcoming li b,.governance-alerts button small){color:#6e8799}
+html[data-theme="light"] .cockpit .stacked-chart{border-color:#d5e2ea;background:linear-gradient(rgba(69,118,153,.1) 1px,transparent 1px);background-size:100% 23px}
+html[data-theme="light"] .cockpit .variance-numbers div{border-color:#d4e0e8}
+html[data-theme="light"] .cockpit .variance-numbers strong{color:#29465d}
+html[data-theme="light"] .cockpit .timeline-window-nav strong{color:#4e7086}
+html[data-theme="light"] .cockpit .timeline-window-nav button{
+  border-color:#bfd2df;
+  background:#f8fbfd;
+  color:#47738f;
+}
+html[data-theme="light"] .cockpit .timeline-grid-head>div>strong{color:#31536a}
+html[data-theme="light"] .cockpit .timeline-grid-head>div.current{background:linear-gradient(180deg,#d4eafa,#e8f3f9);box-shadow:inset 0 2px #3f9fd4}
+html[data-theme="light"] .cockpit .timeline-grid-head>div.current>strong{color:#174f72}
+html[data-theme="light"] .cockpit .timeline-project-cell{background:#f7fafc}
+html[data-theme="light"] .cockpit .timeline-month-cell.current{background:linear-gradient(180deg,rgba(69,157,207,.08),rgba(69,157,207,.12));box-shadow:inset 1px 0 rgba(62,143,190,.15),inset -1px 0 rgba(62,143,190,.15)}
+html[data-theme="light"] .cockpit .timeline-marker{border-color:#b8cedc;background:#eef5f9;color:#416e89}
+html[data-theme="light"] .cockpit .timeline-marker:hover{border-color:#579dc5;background:#e3f1f8}
+html[data-theme="light"] .cockpit .timeline-marker em{color:#4b7187}
+html[data-theme="light"] .cockpit .timeline-marker i{background:#d5e6f0;color:#315f7b}
+html[data-theme="light"] .cockpit .timeline-marker.role-plan{color:#2b78a5;background:#edf6fb}
+html[data-theme="light"] .cockpit .timeline-marker.role-actual.green{color:#137d59;background:#e9f7f1}
+html[data-theme="light"] .cockpit .timeline-marker.role-actual.yellow,
+html[data-theme="light"] .cockpit .timeline-marker.role-forecast.yellow{color:#98660d;background:#fff5df}
+html[data-theme="light"] .cockpit .timeline-marker.role-actual.red,
+html[data-theme="light"] .cockpit .timeline-marker.role-forecast.red,
+html[data-theme="light"] .cockpit .timeline-marker.role-overdue,
+html[data-theme="light"] .cockpit .timeline-marker.overdue{color:#bd3541;background:#fff0f1}
+html[data-theme="light"] .cockpit .timeline-more{border-color:#b9cfdd;background:#f2f7fa;color:#4f7890}
+html[data-theme="light"] .cockpit :where(.heatmap-panel:fullscreen,.timeline-panel:fullscreen){background:#eef4f9}
+html[data-theme="light"] .cockpit .heatmap-panel:fullscreen .heatmap-table{background:#fff}
+html[data-theme="light"] .cockpit .detail-drawer{color:#29465c;background:#f8fbfd;border-color:#afc9da;box-shadow:-20px 0 60px rgba(32,63,87,.2)}
+html[data-theme="light"] .cockpit .drawer-close{color:#5d7b90}
+html[data-theme="light"] .cockpit .drawer-status,
+html[data-theme="light"] .cockpit .cause-card,
+html[data-theme="light"] .cockpit .action-card{background:#edf4f8}
+html[data-theme="light"] .cockpit .drawer-grid,
+html[data-theme="light"] .cockpit .drawer-grid div,
+html[data-theme="light"] .cockpit .timeline-drawer-item{border-color:#cadbe6}
+html[data-theme="light"] .cockpit .cause-card p,
+html[data-theme="light"] .cockpit .action-card p{color:#526f83}
+html[data-theme="light"] .cockpit .timeline-drawer-item>header strong{color:#28465c}
+html[data-theme="light"] .cockpit .timeline-node-meta span{background:#e1edf4;color:#52758c}
+
+/* dark desktop workspace */
+html[data-theme="dark"] .app-shell{
+  --ink:#dce8f3;
+  --muted:#91a2b3;
+  --line:#26394b;
+  --surface:#08131e;
+  --white:#111f2c;
+  color:#dce8f3;
+  background:#08131e;
+}
+html[data-theme="dark"] .app-shell :where(.workspace,.workspace-page,.page-content){color:#dce8f3;background:#08131e}
+html[data-theme="dark"] .app-shell :where(
+  .sidebar,.workspace-header,.content-card,.summary-card,.project-hero,
+  .aside-card,.pmo-tabs,.notification-center,.notification-list>button,
+  .user-menu,.user-menu button,.toast,.create-modal,.risk-summary>div,
+  .risk-record,.action-record,.candidate-list article,.baseline-version-head,
+  .analytics-loading,.analytics-summary article,.history-loading,
+  .forecast-project-list>article,.resource-identity,.capacity-cell,
+  .resource-pool-list>button,.project-plan-row,.delivery-card
+){
+  border-color:#283c4e;
+  background:#111f2c;
+  color:#dce8f3;
+}
+html[data-theme="dark"] .app-shell .sidebar{box-shadow:8px 0 30px rgba(0,0,0,.13)}
+html[data-theme="dark"] .app-shell .brand strong,
+html[data-theme="dark"] .app-shell .workspace-header h1{color:#edf5fb}
+html[data-theme="dark"] .app-shell .brand small,
+html[data-theme="dark"] .app-shell .workspace-header p{color:#849bad}
+html[data-theme="dark"] .app-shell :where(.sidebar nav button,.subnav button){color:#91a5b7}
+html[data-theme="dark"] .app-shell :where(.sidebar nav button:hover,.subnav button:hover){background:#172838;color:#d7e7f3}
+html[data-theme="dark"] .app-shell .sidebar nav button.active{background:#132f49;color:#66aaf6}
+html[data-theme="dark"] .app-shell .system-state{background:#152533}
+html[data-theme="dark"] .app-shell .cockpit-link{border-color:#31506a;background:#132738;color:#a9c8dc}
+html[data-theme="dark"] .theme-control.theme-workspace{border-color:#31485b;background:#142432;color:#a9bfd0}
+html[data-theme="dark"] .theme-control.theme-workspace option{background:#101e2a;color:#d9e7f1}
+html[data-theme="dark"] .app-shell :where(.icon-button,.outline-button,.pagination button,.approval-queue button,.view-switch button.active,.matrix-fullscreen-button){
+  border-color:#314657;
+  background:#142431;
+  color:#9fb6c8;
+}
+html[data-theme="dark"] .app-shell .user-button{color:#dce8f3}
+html[data-theme="dark"] .app-shell .avatar{background:#173452;color:#71adf6}
+html[data-theme="dark"] .app-shell :where(
+  input:not([type=range]):not([type=checkbox]):not([type=radio]),
+  select,textarea,.readonly-input
+){
+  border-color:#314657;
+  background:#0d1a25;
+  color:#d8e5ef;
+}
+html[data-theme="dark"] .app-shell input::placeholder,
+html[data-theme="dark"] .app-shell textarea::placeholder{color:#647a8c}
+html[data-theme="dark"] .app-shell :where(.table-head,.portfolio-matrix-head,.template-grid-head,.project-milestone-head,.allocation-head,.delivery-head){
+  border-color:#283c4e;
+  background:#172634;
+  color:#8ea4b5;
+}
+html[data-theme="dark"] .app-shell :where(.table-row,.portfolio-matrix-row,.milestone-row,.template-grid-row,.project-milestone-row,.allocation-list>div,.delivery-list>div){
+  border-color:#26394a;
+  color:#aabccc;
+}
+html[data-theme="dark"] .app-shell :where(.table-row:hover,.portfolio-matrix-row:hover,.milestone-main:hover,.milestone-row.expanded .milestone-main,.delivery-list>div:hover){background:#162634}
+html[data-theme="dark"] .app-shell :where(.project-name strong,.portfolio-project-cell strong,.project-identity h2,.milestone-name strong,.card-title h2,.table-toolbar h2,.form-title h3,.node-form-head h4){color:#dce8f3}
+html[data-theme="dark"] .app-shell :where(.project-name small,.portfolio-project-cell small,.project-identity p,.card-title p,.table-toolbar>div>span,.milestone-name small){color:#8197a9}
+html[data-theme="dark"] .app-shell :where(.project-name>i,.owner i,.summary-icon.blue,.form-title>span){background:#17324b}
+html[data-theme="dark"] .app-shell :where(.milestone-main,.project-plan-row){background:#111f2c;color:#d2dfE9}
+html[data-theme="dark"] .app-shell :where(.score-explain,.progress-compare,.action-form,.change-reason,.change-impact,.template-summary,.form-hint,.weekly-progress-chart,.rule-sections>div){
+  border-color:#2a3e50;
+  background:#142330;
+}
+html[data-theme="dark"] .app-shell .score-ring{border-color:#633b46;background:#111f2c;box-shadow:inset 0 0 0 2px #111f2c}
+html[data-theme="dark"] .app-shell .completion-circle:before{background:#111f2c}
+html[data-theme="dark"] .app-shell :where(.milestone-expand,.readonly-input){background:#142431}
+html[data-theme="dark"] .app-shell :where(.tabs,.card-title,.table-toolbar,.notification-head,.notification-foot,.chart-head){border-color:#283b4c}
+html[data-theme="dark"] .app-shell :where(.notification-list>button.unread,.notification-list>button:hover){background:#14283a}
+html[data-theme="dark"] .app-shell :where(.notification-list p,.notification-list small,.audit-list p,.audit-list time){color:#8299ab}
+html[data-theme="dark"] .app-shell :where(.modal-close,.more,.back-link,.text-button){color:#83a7c0}
+html[data-theme="dark"] .app-shell :where(.rule-history,.template-grid,.project-milestone-grid,.project-plan-builder,.weekly-progress-chart){border-color:#2a3d4e}
+html[data-theme="dark"] .app-shell .weekly-progress-chart{background:#101d29}
+html[data-theme="dark"] .app-shell .modal-backdrop{background:rgba(2,8,13,.75)}
+html[data-theme="dark"] .app-shell .data-banner{background:#3b321b;color:#f0d589;border-color:#775f26}
+
+@media (max-width:1180px){
+  .cockpit-header{grid-template-columns:170px minmax(0,1fr) 140px 265px}
+  .cockpit-header-actions{grid-template-columns:98px 62px 95px}
+}
+
+@media (max-width:620px){
+  .cockpit-header{grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto auto auto}
+  .cockpit .cockpit-header-actions{
+    grid-column:1/-1;
+    grid-row:2;
+    width:100%;
+    min-width:0;
+    grid-template-columns:minmax(0,1fr) 78px 108px;
+  }
+  .cockpit .cockpit-header-actions .light-button{grid-column:auto;grid-row:auto;width:100%;min-width:0}
+  .cockpit .cockpit-header-actions .cockpit-view-switch{width:100%;min-width:0}
+  .cockpit-header .snapshot{grid-row:3}
+  .theme-control.theme-cockpit{height:42px}
+  .theme-control.theme-cockpit select{font-size:9px}
+  .theme-control.theme-workspace{width:88px}
+  html[data-theme="light"] .cockpit .cockpit-header .snapshot{border-color:#c8dae6;background:rgba(255,255,255,.72)}
+  html[data-theme="light"] .cockpit .heatmap-head .project-col,
+  html[data-theme="light"] .cockpit .project-cell,
+  html[data-theme="light"] .cockpit .timeline-grid-head .timeline-project-column,
+  html[data-theme="light"] .cockpit .timeline-project-cell{background:#f7fafc;box-shadow:4px 0 9px rgba(30,68,95,.12)}
+  html[data-theme="light"] .cockpit .heatmap-head .project-col,
+  html[data-theme="light"] .cockpit .timeline-grid-head .timeline-project-column{background:#dfeaf2}
+  html[data-theme="dark"] .app-shell .sidebar{border-color:#2b4052;background:#101e2a;box-shadow:0 -8px 24px rgba(0,0,0,.24)}
+  html[data-theme="dark"] .app-shell .cockpit-link{background:#142b3d}
+}

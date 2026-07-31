@@ -1,5 +1,7 @@
 # 数智军团统建项目进度监控平台
 
+[![CI and Deploy](https://github.com/rslywhj/shuzhi-project-monitor/actions/workflows/ci.yml/badge.svg)](https://github.com/rslywhj/shuzhi-project-monitor/actions/workflows/ci.yml)
+
 面向几十个统建项目的组合级进度监控 Web 应用。平台以统一节点模板为基础，对不同项目的计划日期、实际进度与预测完成日期进行横向比较，并通过红、黄、绿状态帮助管理层快速识别偏差。
 
 ![项目进度监控平台](public/og.png)
@@ -12,7 +14,7 @@
 
 ## 已实现能力
 
-- 深色 1920×1080 管理驾驶舱
+- 深浅色可切换的 1920×1080 管理驾驶舱，支持手动选择或跟随系统
 - 默认项目里程碑时间轴大屏，动态展示上月、当前月和未来4个月
 - 计划/实际/预测完成月双口径标记、当月指标联动、逾期欠项带入和月度节点下钻
 - 项目 × 标准节点红黄绿热力矩阵
@@ -29,7 +31,7 @@
 - 资源 × 周容量热力图、计划/确认投入拆分、85%满载预警和超配冲突排行
 - 项目级/节点级资源分配、保存前冲突预检、PMO确认及超配原因强制留痕
 - 资源冲突随周度快照固化进入管理大屏口径，并支持筛选和 CSV 报表导出
-- 浅色桌面项目组合工作台，支持项目列表/节点热力双视图
+- 深浅色可切换的桌面项目组合工作台，支持项目列表/节点热力双视图
 - 项目综合健康度及扣分解释
 - 项目详情最近12个正式周期的系统/申报进度曲线
 - 周度进度填报与申报/计算进度校验
@@ -139,6 +141,15 @@ public/             品牌与分享资源
 ## Cloudflare 部署
 
 应用完整运行于 Cloudflare Workers，业务数据存储于 D1，附件存储于 Workers KV，`itpm.dougge.top` 通过 Workers Custom Domain 管理域名和证书，不依赖外部站点源。
+
+GitHub Actions 会对 Pull Request 和 `main` 分支执行 lint、生产构建和全量测试。推送至 `main` 且所有检查通过后，流水线自动部署 Cloudflare Worker，并检查生产环境 `/api/health` 与 D1 连接状态。也可在 GitHub Actions 页面手动触发。
+
+仓库需配置以下 Actions Secrets：
+
+- `CLOUDFLARE_API_TOKEN`：具备目标账户 Workers、D1、KV、路由及邮件绑定部署权限的 Cloudflare API Token。
+- `CLOUDFLARE_ACCOUNT_ID`：Cloudflare 账户 ID。
+
+手工部署仍可使用：
 
 ```bash
 npm run db:remote:apply

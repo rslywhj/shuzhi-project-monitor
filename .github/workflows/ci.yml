@@ -1,22 +1,66 @@
-name: CI
+name: CI and Deploy
 
 on:
   push:
     branches: [main]
   pull_request:
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: production-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  build-and-test:
+  quality:
+    name: Lint, build and test
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
-      - run: npm run build
-      - run: node --test tests/*.test.mjs
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Build and run tests
+        run: npm run test
+
+  deploy-production:
+    name: Deploy Cloudflare production
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: production
+      url: https://itpm.dougge.top
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Build and deploy Worker
+        run: npm run deploy:cloudflare
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - name: Verify production health
+        shell: bash
+        run: |
+          health="$(curl --fail --silent --show-error \
+            --retry 10 --retry-delay 5 --retry-all-errors \
+            --connect-timeout 10 --max-time 20 \
+            https://itpm.dougge.top/api/health)"
+          printf '%s\n' "$health"
+          grep -q '"status":"ok"' <<<"$health"
+          grep -q '"database":"connected"' <<<"$health"

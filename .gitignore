@@ -47,6 +47,7 @@ next-env.d.ts
 *.tsbuildinfo
 /dist/
 /.wrangler/
+/wrangler.ci.jsonc
 /.playwright-cli/
 /outputs/
 /work/

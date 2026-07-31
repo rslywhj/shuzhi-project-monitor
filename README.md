@@ -142,7 +142,7 @@ public/             品牌与分享资源
 
 应用完整运行于 Cloudflare Workers，业务数据存储于 D1，附件存储于 Workers KV，`itpm.dougge.top` 通过 Workers Custom Domain 管理域名和证书，不依赖外部站点源。
 
-GitHub Actions 会对 Pull Request 和 `main` 分支执行 lint、生产构建和全量测试。推送至 `main` 且所有检查通过后，流水线自动部署 Cloudflare Worker，并检查生产环境 `/api/health` 与 D1 连接状态。也可在 GitHub Actions 页面手动触发。
+GitHub Actions 会对 Pull Request 和 `main` 分支执行 lint、生产构建和全量测试。推送至 `main` 且所有检查通过后，流水线自动更新已有 Cloudflare Worker，并检查生产环境 `/api/health` 与 D1 连接状态。自定义域名由 `wrangler.production.jsonc` 首次配置，自动部署沿用既有域名绑定，避免 CI 令牌获得不必要的域名路由修改权限。也可在 GitHub Actions 页面手动触发。
 
 仓库需配置以下 Actions Secrets：
 

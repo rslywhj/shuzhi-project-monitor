@@ -47,6 +47,7 @@ test("rebuilds and orders read-only historical rolling windows", () => {
   );
   assert.equal(weeks[0].startDate, "2025-12-22");
   assert.equal(weeks[1].startDate, "2025-12-29");
+  assert.deepEqual(weeks.map((week) => week.label), ["本周", "下周"]);
   assert.deepEqual(
     listHistoricalWeekKeys(
       ["2026-W31", "2026-W30", "2026-W31", "2026-W32", "invalid"],
@@ -91,7 +92,7 @@ test("persists, authorizes and audits biweekly plan tasks", async () => {
   assert.match(projectRoute, /export async function GET/);
   assert.match(projectRoute, /export async function POST/);
   assert.match(projectRoute, /scope === "history"/);
-  assert.match(projectRoute, /availableHistoryWeeks/);
+  assert.match(projectRoute, /availablePlanWeeks/);
   assert.match(projectRoute, /exportAllTasks/);
   assert.match(taskRoute, /export async function PATCH/);
   assert.match(taskRoute, /export async function DELETE/);
@@ -99,7 +100,8 @@ test("persists, authorizes and audits biweekly plan tasks", async () => {
   assert.match(component, /\{week\.label\}计划及完成情况/);
   assert.match(component, /"本周" \| "下周"/);
   assert.match(component, /biweekly-mobile-list/);
-  assert.match(component, /历史计划/);
+  assert.match(component, /统一按“本周＋下周”查看/);
+  assert.doesNotMatch(component, />当前双周</);
   assert.match(component, /导出全量计划/);
   assert.match(print, /paginatePrintRows\(rows, 10\)/);
   assert.match(print, /paginatePrintRows\(rows, 8\)/);

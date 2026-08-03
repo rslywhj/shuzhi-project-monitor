@@ -7,7 +7,7 @@ export type BiweeklyPlanStatus =
 
 export type RollingWeek = {
   weekKey: string;
-  label: "本周" | "下周" | "所选周" | "后一周";
+  label: "本周" | "下周";
   startDate: string;
   endDate: string;
   dateLabel: string;
@@ -102,7 +102,7 @@ export function buildRollingWeeksFromWeekKey(
   }
   const nextMonday = new Date(monday);
   nextMonday.setUTCDate(monday.getUTCDate() + 7);
-  return [buildWeek(monday, "所选周"), buildWeek(nextMonday, "后一周")];
+  return [buildWeek(monday, "本周"), buildWeek(nextMonday, "下周")];
 }
 
 export function listHistoricalWeekKeys(

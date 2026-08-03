@@ -62,6 +62,7 @@ export async function GET(
     const currentWeeks = buildRollingWeeks();
     let weeks: RollingWeek[] = currentWeeks;
     let availableHistoryWeeks: string[] = [];
+    let availablePlanWeeks: string[] = [currentWeeks[0].weekKey];
     let selectedHistoryWeek = "";
     let rows: (typeof biweeklyPlanTasks.$inferSelect)[];
 
@@ -75,11 +76,12 @@ export async function GET(
         allRows.map((row) => row.weekKey),
         currentWeeks[0].weekKey,
       );
+      availablePlanWeeks = [currentWeeks[0].weekKey, ...availableHistoryWeeks];
       const requestedWeek = url.searchParams.get("week") ?? "";
       const exportAllTasks = url.searchParams.get("export") === "all";
-      selectedHistoryWeek = availableHistoryWeeks.includes(requestedWeek)
+      selectedHistoryWeek = availablePlanWeeks.includes(requestedWeek)
         ? requestedWeek
-        : (availableHistoryWeeks[0] ?? "");
+        : currentWeeks[0].weekKey;
       weeks = selectedHistoryWeek
         ? buildRollingWeeksFromWeekKey(selectedHistoryWeek)
         : [];
@@ -113,9 +115,10 @@ export async function GET(
       tasks: rows,
       scope,
       availableHistoryWeeks,
+      availablePlanWeeks,
       selectedHistoryWeek,
       canWrite:
-        scope === "current" &&
+        (scope === "current" || selectedHistoryWeek === currentWeeks[0].weekKey) &&
         canWriteProject(identity, project.ownerEmail) &&
         !projectLifecycleLocked(project),
     });

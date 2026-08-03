@@ -9,8 +9,6 @@ type PlanStatus =
   | "delayed"
   | "cancelled";
 
-type PlanScope = "current" | "history";
-
 type PlanTask = {
   id: number;
   projectId: string;
@@ -31,7 +29,7 @@ type PlanTask = {
 
 type RollingWeek = {
   weekKey: string;
-  label: "本周" | "下周" | "所选周" | "后一周";
+  label: "本周" | "下周";
   startDate: string;
   endDate: string;
   dateLabel: string;
@@ -97,9 +95,8 @@ export default function BiweeklyPlan({
   const [editingId, setEditingId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [exportingHistory, setExportingHistory] = useState(false);
-  const [scope, setScope] = useState<PlanScope>("current");
   const [historyWeekKey, setHistoryWeekKey] = useState("");
-  const [availableHistoryWeeks, setAvailableHistoryWeeks] = useState<string[]>([]);
+  const [availablePlanWeeks, setAvailablePlanWeeks] = useState<string[]>([]);
   const loadSequence = useRef(0);
   const currentProject =
     projects.find((project) => project.id === selectedProjectId) ?? projects[0];
@@ -111,10 +108,8 @@ export default function BiweeklyPlan({
     setLoading(true);
     try {
       const response = await fetch(
-        `/api/projects/${encodeURIComponent(projectId)}/biweekly-plans${
-          scope === "history"
-            ? `?scope=history${historyWeekKey ? `&week=${encodeURIComponent(historyWeekKey)}` : ""}`
-            : ""
+        `/api/projects/${encodeURIComponent(projectId)}/biweekly-plans?scope=history${
+          historyWeekKey ? `&week=${encodeURIComponent(historyWeekKey)}` : ""
         }`,
         { cache: "no-store" },
       );
@@ -122,7 +117,7 @@ export default function BiweeklyPlan({
         weeks?: RollingWeek[];
         tasks?: PlanTask[];
         canWrite?: boolean;
-        availableHistoryWeeks?: string[];
+        availablePlanWeeks?: string[];
         selectedHistoryWeek?: string;
         error?: string;
       };
@@ -131,8 +126,8 @@ export default function BiweeklyPlan({
       setWeeks(result.weeks ?? []);
       setTasks(result.tasks ?? []);
       setCanWrite(Boolean(result.canWrite));
-      setAvailableHistoryWeeks(result.availableHistoryWeeks ?? []);
-      if (scope === "history" && !historyWeekKey && result.selectedHistoryWeek) {
+      setAvailablePlanWeeks(result.availablePlanWeeks ?? []);
+      if (!historyWeekKey && result.selectedHistoryWeek) {
         setHistoryWeekKey((current) => current || result.selectedHistoryWeek || "");
       }
       setError("");
@@ -142,7 +137,7 @@ export default function BiweeklyPlan({
     } finally {
       if (requestId === loadSequence.current) setLoading(false);
     }
-  }, [historyWeekKey, projectId, scope]);
+  }, [historyWeekKey, projectId]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);
@@ -162,17 +157,10 @@ export default function BiweeklyPlan({
   const completedCount = tasks.filter((task) => task.status === "completed").length;
   const delayedCount = tasks.filter((task) => task.status === "delayed").length;
   const currentWeek = weeks[0];
-  const historyIndex = availableHistoryWeeks.indexOf(historyWeekKey);
-
-  function changeScope(nextScope: PlanScope) {
-    setScope(nextScope);
-    setHistoryWeekKey("");
-    setMessage("");
-    setError("");
-  }
+  const historyIndex = availablePlanWeeks.indexOf(historyWeekKey);
 
   async function exportHistoryCsv() {
-    if (scope !== "history" || !currentProject) return;
+    if (!currentProject) return;
     setExportingHistory(true);
     setError("");
     try {
@@ -308,7 +296,7 @@ export default function BiweeklyPlan({
           <div>
             <span className="page-kicker">BIWEEKLY ROLLING PLAN</span>
             <h2>双周滚动计划</h2>
-            <p>{scope === "current" ? "以 UTC+8 自然周为口径，连续维护本周执行情况和下周工作安排。" : "按历史起始周还原双周窗口，历史计划只读并可导出留档。"}</p>
+            <p>选择任一滚动起始周，统一查看该周期的本周执行和下周安排。</p>
           </div>
           <label className="biweekly-project-select">
             项目
@@ -328,23 +316,18 @@ export default function BiweeklyPlan({
         </section>
 
         <section className="biweekly-toolbar" aria-label="双周计划查看范围">
-          <div className="biweekly-scope-switch">
-            <button className={scope === "current" ? "active" : ""} onClick={() => changeScope("current")}>当前双周</button>
-            <button className={scope === "history" ? "active" : ""} onClick={() => changeScope("history")}>历史计划</button>
+          <div className="biweekly-toolbar-title"><strong>滚动周期</strong><span>统一按“本周＋下周”查看</span></div>
+          <div className="biweekly-history-controls">
+            <button className="outline-button" disabled={historyIndex < 0 || historyIndex >= availablePlanWeeks.length - 1} onClick={() => setHistoryWeekKey(availablePlanWeeks[historyIndex + 1])}>← 更早</button>
+            <label>起始周<select value={historyWeekKey} disabled={!availablePlanWeeks.length} onChange={(event) => setHistoryWeekKey(event.target.value)}>{availablePlanWeeks.map((weekKey) => <option key={weekKey} value={weekKey}>{weekKey}</option>)}</select></label>
+            <button className="outline-button" disabled={historyIndex <= 0} onClick={() => setHistoryWeekKey(availablePlanWeeks[historyIndex - 1])}>更新 →</button>
+            <button className="outline-button" disabled={exportingHistory} onClick={() => void exportHistoryCsv()}>{exportingHistory ? "正在导出…" : "导出全量计划"}</button>
           </div>
-          {scope === "history" && (
-            <div className="biweekly-history-controls">
-              <button className="outline-button" disabled={historyIndex < 0 || historyIndex >= availableHistoryWeeks.length - 1} onClick={() => setHistoryWeekKey(availableHistoryWeeks[historyIndex + 1])}>← 更早</button>
-              <label>起始周<select value={historyWeekKey} disabled={!availableHistoryWeeks.length} onChange={(event) => setHistoryWeekKey(event.target.value)}>{availableHistoryWeeks.map((weekKey) => <option key={weekKey} value={weekKey}>{weekKey}</option>)}</select></label>
-              <button className="outline-button" disabled={historyIndex <= 0} onClick={() => setHistoryWeekKey(availableHistoryWeeks[historyIndex - 1])}>更新 →</button>
-              <button className="outline-button" disabled={exportingHistory} onClick={() => void exportHistoryCsv()}>{exportingHistory ? "正在导出…" : "导出全量计划"}</button>
-            </div>
-          )}
         </section>
 
         <section className="biweekly-summary">
-          <article><small>双周任务</small><strong>{tasks.length}</strong><span>{scope === "current" ? "当前滚动窗口" : historyWeekKey || "暂无历史周期"}</span></article>
-          <article><small>{scope === "current" ? "本周" : "所选周"}完成率</small><strong>{currentWeek ? Math.round((tasks.filter((task) => task.weekKey === currentWeek.weekKey && task.status === "completed").length / Math.max(1, tasks.filter((task) => task.weekKey === currentWeek.weekKey).length)) * 100) : 0}%</strong><span>按任务数统计</span></article>
+          <article><small>双周任务</small><strong>{tasks.length}</strong><span>{historyWeekKey || "当前滚动窗口"}</span></article>
+          <article><small>本周完成率</small><strong>{currentWeek ? Math.round((tasks.filter((task) => task.weekKey === currentWeek.weekKey && task.status === "completed").length / Math.max(1, tasks.filter((task) => task.weekKey === currentWeek.weekKey).length)) * 100) : 0}%</strong><span>按任务数统计</span></article>
           <article className="success"><small>已完成</small><strong>{completedCount}</strong><span>含提前完成</span></article>
           <article className="danger"><small>延期任务</small><strong>{delayedCount}</strong><span>需补充跟踪情况</span></article>
         </section>
@@ -378,7 +361,7 @@ export default function BiweeklyPlan({
             </section>
           ))
         ) : (
-          <section className="content-card"><div className="empty-state">该项目暂无历史双周计划。切换其他项目后可继续查询。</div></section>
+          <section className="content-card"><div className="empty-state">该项目暂无双周计划。切换其他项目后可继续查询。</div></section>
         )}
       </div>
 

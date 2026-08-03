@@ -9,9 +9,14 @@ import {
   type ReactNode,
 } from "react";
 import {
+  DEFAULT_FONT_SCALE,
+  FONT_SCALE_OPTIONS,
+  FONT_SCALE_STORAGE_KEY,
   normalizeThemePreference,
+  normalizeFontScale,
   resolveTheme,
   THEME_STORAGE_KEY,
+  type FontScale,
   type ResolvedTheme,
   type ThemePreference,
 } from "@/lib/theme";
@@ -19,7 +24,9 @@ import {
 type ThemeContextValue = {
   preference: ThemePreference;
   resolvedTheme: ResolvedTheme;
+  fontScale: FontScale;
   setPreference: (preference: ThemePreference) => void;
+  setFontScale: (fontScale: FontScale) => void;
 };
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
@@ -28,6 +35,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const [preference, setPreference] =
     useState<ThemePreference>("system");
   const [systemPrefersDark, setSystemPrefersDark] = useState(false);
+  const [fontScale, setFontScale] = useState<FontScale>(DEFAULT_FONT_SCALE);
   const [ready, setReady] = useState(false);
   const resolvedTheme = resolveTheme(preference, systemPrefersDark);
 
@@ -39,6 +47,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       if (event.key === THEME_STORAGE_KEY) {
         setPreference(normalizeThemePreference(event.newValue));
       }
+      if (event.key === FONT_SCALE_STORAGE_KEY) {
+        setFontScale(normalizeFontScale(event.newValue));
+      }
     };
     const timer = window.setTimeout(() => {
       syncSystemTheme();
@@ -46,6 +57,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
         setPreference(
           normalizeThemePreference(
             window.localStorage.getItem(THEME_STORAGE_KEY),
+          ),
+        );
+        setFontScale(
+          normalizeFontScale(
+            window.localStorage.getItem(FONT_SCALE_STORAGE_KEY),
           ),
         );
       } catch {
@@ -66,6 +82,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     if (!ready) return;
     document.documentElement.dataset.theme = resolvedTheme;
     document.documentElement.style.colorScheme = resolvedTheme;
+    document.documentElement.style.setProperty(
+      "--ui-font-scale",
+      String(fontScale),
+    );
     const themeMeta = document.querySelector<HTMLMetaElement>(
       'meta[name="theme-color"]',
     );
@@ -75,14 +95,15 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     );
     try {
       window.localStorage.setItem(THEME_STORAGE_KEY, preference);
+      window.localStorage.setItem(FONT_SCALE_STORAGE_KEY, String(fontScale));
     } catch {
       // The active tab still keeps the selected theme when storage is blocked.
     }
-  }, [preference, ready, resolvedTheme]);
+  }, [fontScale, preference, ready, resolvedTheme]);
 
   const value = useMemo(
-    () => ({ preference, resolvedTheme, setPreference }),
-    [preference, resolvedTheme],
+    () => ({ preference, resolvedTheme, fontScale, setPreference, setFontScale }),
+    [fontScale, preference, resolvedTheme],
   );
   return (
     <ThemeContext.Provider value={value}>
@@ -104,25 +125,48 @@ export function ThemeControl({
 }: {
   surface: "cockpit" | "workspace";
 }) {
-  const { preference, resolvedTheme, setPreference } = useTheme();
+  const { preference, resolvedTheme, fontScale, setPreference, setFontScale } = useTheme();
   const icon = resolvedTheme === "dark" ? "◐" : "◑";
   return (
-    <label
-      className={`theme-control theme-${surface}`}
-      title={`当前${resolvedTheme === "dark" ? "深色" : "浅色"}主题`}
-    >
-      <span aria-hidden="true">{icon}</span>
-      <select
-        aria-label="显示主题"
-        value={preference}
-        onChange={(event) =>
-          setPreference(event.target.value as ThemePreference)
-        }
-      >
-        <option value="system">跟随系统</option>
-        <option value="light">浅色</option>
-        <option value="dark">深色</option>
-      </select>
-    </label>
+    <details className={`theme-control display-settings theme-${surface}`}>
+      <summary title={`当前${resolvedTheme === "dark" ? "深色" : "浅色"}主题，文字${Math.round(fontScale * 100)}%`}>
+        <span aria-hidden="true">{icon}</span>
+        <span>显示</span>
+        <em>{Math.round(fontScale * 100)}%</em>
+      </summary>
+      <div className="display-settings-popover">
+        <label>
+          <span>显示主题</span>
+          <select
+            aria-label="显示主题"
+            value={preference}
+            onChange={(event) =>
+              setPreference(event.target.value as ThemePreference)
+            }
+          >
+            <option value="system">跟随系统</option>
+            <option value="light">浅色</option>
+            <option value="dark">深色</option>
+          </select>
+        </label>
+        <label>
+          <span>文字大小</span>
+          <select
+            aria-label="文字大小"
+            value={fontScale}
+            onChange={(event) =>
+              setFontScale(normalizeFontScale(event.target.value))
+            }
+          >
+            {FONT_SCALE_OPTIONS.map((scale) => (
+              <option key={scale} value={scale}>
+                {Math.round(scale * 100)}%
+              </option>
+            ))}
+          </select>
+        </label>
+        <small>设置保存在当前浏览器，并同时应用于管理大屏和工作台。</small>
+      </div>
+    </details>
   );
 }

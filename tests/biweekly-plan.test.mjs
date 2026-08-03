@@ -100,7 +100,8 @@ test("persists, authorizes and audits biweekly plan tasks", async () => {
   assert.match(component, /\{week\.label\}计划及完成情况/);
   assert.match(component, /"本周" \| "下周"/);
   assert.match(component, /biweekly-mobile-list/);
-  assert.match(component, /统一按“本周＋下周”查看/);
+  assert.match(component, /滚动周期/);
+  assert.doesNotMatch(component, /统一按“本周＋下周”查看/);
   assert.doesNotMatch(component, />当前双周</);
   assert.match(component, /导出全量计划/);
   assert.match(print, /paginatePrintRows\(rows, 10\)/);

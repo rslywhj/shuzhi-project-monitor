@@ -316,7 +316,7 @@ export default function BiweeklyPlan({
         </section>
 
         <section className="biweekly-toolbar" aria-label="双周计划查看范围">
-          <div className="biweekly-toolbar-title"><strong>滚动周期</strong><span>统一按“本周＋下周”查看</span></div>
+          <div className="biweekly-toolbar-title"><strong>滚动周期</strong></div>
           <div className="biweekly-history-controls">
             <button className="outline-button" disabled={historyIndex < 0 || historyIndex >= availablePlanWeeks.length - 1} onClick={() => setHistoryWeekKey(availablePlanWeeks[historyIndex + 1])}>← 更早</button>
             <label>起始周<select value={historyWeekKey} disabled={!availablePlanWeeks.length} onChange={(event) => setHistoryWeekKey(event.target.value)}>{availablePlanWeeks.map((weekKey) => <option key={weekKey} value={weekKey}>{weekKey}</option>)}</select></label>

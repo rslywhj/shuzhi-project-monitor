@@ -1,7 +1,8 @@
+import tailwindcss from "@tailwindcss/postcss";
+import fontScalePlugin from "./scripts/postcss-font-scale.mjs";
+
 const config = {
-  plugins: {
-    "@tailwindcss/postcss": {},
-  },
+  plugins: [tailwindcss(), fontScalePlugin()],
 };
 
 export default config;

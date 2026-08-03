@@ -6,7 +6,7 @@
     "node": ">=22.13.0 <24"
   },
   "scripts": {
-    "dev": "vinext dev",
+    "dev": "vinext dev --hostname 0.0.0.0",
     "build": "npx --yes node@22 node_modules/vinext/dist/cli.js build",
     "start": "vinext start",
     "test": "npm run build && node --test tests/*.test.mjs",

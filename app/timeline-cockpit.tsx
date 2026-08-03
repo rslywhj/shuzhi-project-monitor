@@ -26,6 +26,10 @@ import {
   shanghaiDateIso,
 } from "@/lib/date-time";
 import { ThemeControl } from "./theme-provider";
+import {
+  TimelinePrintReport,
+  triggerCockpitPrint,
+} from "./cockpit-print-report";
 
 type TimelineDestination = "cockpit" | "portfolio" | "project";
 type TimelineSnapshot = {
@@ -252,6 +256,26 @@ export default function TimelineCockpit({
     ? formatShanghaiMonthDayTime(snapshot.lockedAt)
     : "等待 PMO 锁定";
   const rangeLabel = `${months[0]?.label ?? "—"} — ${months.at(-1)?.label ?? "—"}`;
+  const printFilters = [org, owner, projectType, health]
+    .filter((value) => !value.startsWith("全部"))
+    .concat(activeKpi ? KPI_COPY[activeKpi].label : [])
+    .join(" · ") || "全部项目";
+  const printRows = rows.map(({ project, markers }) => ({
+    id: project.id,
+    name: project.name,
+    owner: project.owner,
+    org: project.org,
+    status: project.status,
+    score: project.score,
+    markers: markers.map((marker) => ({
+      key: marker.key,
+      monthKey: marker.monthKey,
+      label: `${marker.milestone.name} ${markerRoleLabel(marker)}`,
+      symbol: markerSymbol(marker),
+      status: marker.milestone.status,
+      critical: marker.milestone.critical,
+    })),
+  }));
 
   function applyPageSize(value: string) {
     const parsed = Number(value);
@@ -381,6 +405,7 @@ export default function TimelineCockpit({
   }, [currentMonthKey, viewOffset]);
 
   return (
+    <>
     <main className="cockpit timeline-cockpit">
       <header className="cockpit-header">
         <TimelineLogo />
@@ -394,6 +419,7 @@ export default function TimelineCockpit({
         </div>
         <div className="cockpit-header-actions">
           <ThemeControl surface="cockpit" />
+          <button className="cockpit-view-switch cockpit-pdf-button" onClick={triggerCockpitPrint}>导出 PDF</button>
           <button
             className="cockpit-view-switch"
             onClick={() => onNavigate("cockpit")}
@@ -722,5 +748,12 @@ export default function TimelineCockpit({
         )}
       </section>
     </main>
+    <TimelinePrintReport
+      rows={printRows}
+      months={months}
+      snapshot={`${snapshotLabel} · ${snapshotTime}`}
+      filters={printFilters}
+    />
+    </>
   );
 }

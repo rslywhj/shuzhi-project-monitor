@@ -4,6 +4,7 @@ import { getDb } from "@/db";
 import {
   baselineChanges,
   baselineVersions,
+  biweeklyPlanTasks,
   correctiveActions,
   milestoneTemplates,
   milestones,
@@ -16,6 +17,7 @@ import {
   users,
   weeklyReports,
 } from "@/db/schema";
+import { buildRollingWeeks } from "@/lib/biweekly-plan";
 import { shanghaiDateIso } from "@/lib/date-time";
 import { isoWeekKeyForDate } from "@/lib/reporting-period";
 
@@ -310,6 +312,102 @@ async function ensureDemoScenarioData(db: ReturnType<typeof getDb>) {
       milestone,
     ]),
   );
+
+  const [{ value: rollingPlanCount }] = await db
+    .select({ value: count() })
+    .from(biweeklyPlanTasks);
+  if (rollingPlanCount === 0) {
+    const weeks = buildRollingWeeks();
+    const activeProjects = projectRows.filter(
+      (project) => (project.lifecycleStatus ?? "active") === "active",
+    );
+    const dayAt = (startDate: string, offset: number) => {
+      const date = new Date(`${startDate}T00:00:00Z`);
+      date.setUTCDate(date.getUTCDate() + offset);
+      return date.toISOString().slice(0, 10);
+    };
+    const taskRows = activeProjects.flatMap((project, projectIndex) => {
+      const owner = project.ownerName;
+      const currentStatus = ([
+        "completed",
+        "in_progress",
+        "delayed",
+        "cancelled",
+      ] as const)[projectIndex % 4];
+      const current = weeks[0];
+      const next = weeks[1];
+      return [
+        {
+          projectId: project.id,
+          weekKey: current.weekKey,
+          taskDescription:
+            projectIndex % 3 === 0
+              ? "完成本阶段方案评审意见闭环"
+              : projectIndex % 3 === 1
+                ? "推进核心功能开发与联调验证"
+                : "组织业务数据核验并输出问题清单",
+          owner,
+          participants:
+            projectIndex % 2 === 0 ? "业务负责人、架构师" : "产品经理、测试经理",
+          plannedStart: dayAt(current.startDate, 0),
+          plannedFinish: dayAt(current.startDate, 3),
+          workdays: 4,
+          actualFinish:
+            currentStatus === "completed" ? dayAt(current.startDate, 2) : null,
+          status: currentStatus,
+          tracking:
+            currentStatus === "completed"
+              ? "交付物已完成复核并归档。"
+              : currentStatus === "delayed"
+                ? "依赖接口交付晚于计划，已安排每日跟踪并升级协调。"
+                : currentStatus === "cancelled"
+                  ? "需求范围调整，经专题会确认取消本项任务。"
+                  : "按日跟踪任务清单，当前整体受控。",
+          remark: projectIndex % 5 === 0 ? "管理例会重点跟踪" : "",
+          sequence: 1,
+          createdBy: "pmo.demo@projects.internal",
+        },
+        {
+          projectId: project.id,
+          weekKey: current.weekKey,
+          taskDescription: "更新项目风险、问题及纠偏措施台账",
+          owner,
+          participants: "项目核心组",
+          plannedStart: dayAt(current.startDate, 4),
+          plannedFinish: dayAt(current.startDate, 4),
+          workdays: 1,
+          actualFinish: projectIndex % 2 === 0 ? dayAt(current.startDate, 4) : null,
+          status: projectIndex % 2 === 0 ? ("completed" as const) : ("in_progress" as const),
+          tracking: projectIndex % 2 === 0 ? "本周台账已更新。" : "等待责任人补充恢复日期。",
+          remark: "",
+          sequence: 2,
+          createdBy: "pmo.demo@projects.internal",
+        },
+        {
+          projectId: project.id,
+          weekKey: next.weekKey,
+          taskDescription:
+            projectIndex % 2 === 0
+              ? "开展下一阶段用户场景验证"
+              : "完成下阶段迭代开发并准备提测",
+          owner,
+          participants: "业务代表、实施团队",
+          plannedStart: dayAt(next.startDate, 0),
+          plannedFinish: dayAt(next.startDate, 4),
+          workdays: 5,
+          actualFinish: null,
+          status: "pending" as const,
+          tracking: "已确认参与人员与会议窗口。",
+          remark: projectIndex % 4 === 0 ? "与共享测试资源计划联动" : "",
+          sequence: 1,
+          createdBy: "pmo.demo@projects.internal",
+        },
+      ];
+    });
+    for (const rowsChunk of chunks(taskRows, 4)) {
+      await db.insert(biweeklyPlanTasks).values(rowsChunk);
+    }
+  }
 
   const [{ value: reportCount }] = await db
     .select({ value: count() })

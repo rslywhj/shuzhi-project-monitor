@@ -5,6 +5,11 @@ import PortfolioAnalytics from "./portfolio-analytics";
 import NotificationChannelPanel from "./notification-channel-panel";
 import ResourcePlanning from "./resource-planning";
 import TimelineCockpit from "./timeline-cockpit";
+import BiweeklyPlan from "./biweekly-plan";
+import {
+  MatrixPrintReport,
+  triggerCockpitPrint,
+} from "./cockpit-print-report";
 import {
   ThemeControl,
   ThemeProvider,
@@ -33,6 +38,7 @@ type View =
   | "portfolio"
   | "analytics"
   | "resources"
+  | "biweekly-plan"
   | "project"
   | "report"
   | "pmo"
@@ -797,6 +803,27 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
         (milestone) => milestone.name === matrixMilestones[selected.index],
       )
     : undefined;
+  const cockpitPrintFilters = [org, owner, projectType, health]
+    .filter((value) => !value.startsWith("全部"))
+    .join(" · ") || "全部在建项目";
+  const cockpitPrintRows = matching.map((project) => ({
+    id: project.id,
+    name: project.name,
+    owner: project.owner,
+    org: project.org,
+    status: project.status,
+    score: project.score,
+    cells: matrixMilestones.map((milestoneName, index) => {
+      const milestone = project.milestones?.find(
+        (row) => row.name === milestoneName,
+      );
+      return {
+        status: project.cells[index] ?? (milestone?.status ?? "na"),
+        completion: milestone?.completion ?? null,
+        deviationDays: milestone?.deviationDays ?? null,
+      };
+    }),
+  }));
 
   function applyPageSize(value: string) {
     const parsed = Number(value);
@@ -901,7 +928,7 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
     return () => window.clearTimeout(timer);
   }, [autoPageEnabled, autoPageSeconds, currentPage, pageCount, selected]);
 
-  return <main className="cockpit">
+  return <><main className="cockpit">
     <header className="cockpit-header">
       <AppLogo dark />
       <div className="cockpit-title">
@@ -914,6 +941,7 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
       </div>
       <div className="cockpit-header-actions">
         <ThemeControl surface="cockpit" />
+        <button className="cockpit-view-switch cockpit-pdf-button" onClick={triggerCockpitPrint}>导出 PDF</button>
         <button className="cockpit-view-switch" onClick={() => onNavigate("timeline-cockpit")}>时间轴</button>
         <button className="light-button" onClick={() => onNavigate("portfolio")}>进入工作台 <span>↗</span></button>
       </div>
@@ -1130,7 +1158,7 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
       </div>
     </section>
 
-  </main>;
+  </main><MatrixPrintReport rows={cockpitPrintRows} milestones={matrixMilestones} snapshot={`${snapshotLabel} · ${snapshotTime}`} filters={cockpitPrintFilters} /></>;
 }
 
 function Sidebar({ view, onNavigate, identity }: { view: View; onNavigate: Navigate; identity: Identity | null }) {
@@ -1138,6 +1166,7 @@ function Sidebar({ view, onNavigate, identity }: { view: View; onNavigate: Navig
     { id: "portfolio", icon: "⌘", label: "项目总览" },
     { id: "analytics", icon: "▥", label: "组合分析" },
     { id: "resources", icon: "▦", label: "资源计划" },
+    { id: "biweekly-plan", icon: "↻", label: "双周计划" },
     { id: "project", icon: "▣", label: "项目台账" },
     { id: "report", icon: "✎", label: "周度填报", roles: ["manager", "pmo", "admin"] },
     { id: "pmo", icon: "◇", label: "PMO 管理", roles: ["pmo", "admin"] },
@@ -3102,7 +3131,7 @@ function ProjectDetail({
       <section className="project-hero">
         <div className="project-identity"><div className="project-code">{currentProject.name[0]}</div><div><div><StatusPill status={currentProject.status} /><span className={`lifecycle-badge ${currentLifecycle}`}>{lifecycleLabel[currentLifecycle]}</span><span className="project-tag">{currentProject.type}</span>{currentProject.cells.some((cell) => cell === "red") && <span className="project-tag">重点关注</span>}</div><h2>{currentProject.name}</h2><p>项目经理 {currentProject.owner}　·　{currentProject.org}　·　当前批准基线口径</p></div></div>
         <div className="hero-metrics"><div><small>健康度</small><strong className={currentProject.status === "red" ? "red-text" : ""}>{currentProject.score}</strong><span>/100</span></div><div><small>计划进度</small><strong>{currentProject.plan}%</strong></div><div><small>实际进度</small><strong>{currentProject.actual}%</strong></div><div><small>进度偏差</small><strong className={variance < -5 ? "red-text" : ""}>{variance > 0 ? "+" : ""}{variance}pp</strong></div></div>
-        <div className="hero-actions"><button className="outline-button" onClick={() => window.print()}>导出报告</button>{canChangeLifecycle && <button className="outline-button" onClick={openLifecyclePanel}>项目状态</button>}{canUpdate && <><button className="outline-button" onClick={() => { setProjectError(""); setShowProjectEdit(true); }}>编辑信息</button><button className="primary-button" onClick={() => onNavigate("report", currentProject.id)}>更新本周进度</button></>}</div>
+        <div className="hero-actions"><button className="outline-button" onClick={() => window.print()}>导出报告</button><button className="outline-button" onClick={() => onNavigate("biweekly-plan", currentProject.id)}>双周计划</button>{canChangeLifecycle && <button className="outline-button" onClick={openLifecyclePanel}>项目状态</button>}{canUpdate && <><button className="outline-button" onClick={() => { setProjectError(""); setShowProjectEdit(true); }}>编辑信息</button><button className="primary-button" onClick={() => onNavigate("report", currentProject.id)}>更新本周进度</button></>}</div>
       </section>
       {lifecycleLocked && <div className="lifecycle-readonly-banner"><span>▣</span><div><strong>项目{lifecycleLabel[currentLifecycle]}，当前为只读状态</strong><p>已停止周报、催报、健康度重算和快照统计；如需继续处理未闭环事项，请由 PMO 或管理员先恢复为在建。</p></div>{currentProject.lifecycleReason && <small>最近变更原因：{currentProject.lifecycleReason}</small>}</div>}
       <section className="score-explain">
@@ -5183,7 +5212,7 @@ function HomeContent() {
   if (dataState === "unauthenticated") return <LoginScreen />;
   if (view === "timeline-cockpit") return <><TimelineCockpit onNavigate={navigate} projectData={dashboardData} snapshot={dashboardSnapshot} />{dataState === "fallback" && <div className="data-banner">当前数据服务不可用，管理大屏不展示未核实的演示数据。</div>}</>;
   if (view === "cockpit") return <><Cockpit onNavigate={navigate} projectData={dashboardData} snapshot={dashboardSnapshot} templateData={templateData} trends={trendData} alerts={dashboardAlerts} />{dataState === "fallback" && <div className="data-banner">当前数据服务不可用，管理大屏不展示未核实的演示数据。</div>}</>;
-  return <div className="app-shell" data-theme={resolvedTheme}><Sidebar view={view} onNavigate={navigate} identity={identity} /><div className="workspace">{view === "portfolio" && <Portfolio onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} identity={identity} templateData={templateData} projectManagers={projectManagers} weeklyReports={weeklyReportData} />}{view === "analytics" && <PortfolioAnalytics onNavigate={(next, projectId) => navigate(next, projectId)} identity={identity} header={<WorkspaceHeader title="项目组合分析" subtitle="从组织、类型、负责人和标准节点维度识别共性瓶颈与基线漂移" onNavigate={navigate} identity={identity} />} />}{view === "resources" && <ResourcePlanning identity={identity} onOpenProject={(projectId) => navigate("project", projectId)} header={<WorkspaceHeader title="跨项目资源计划" subtitle="统一资源池、周容量、项目分配与超配治理" onNavigate={navigate} identity={identity} />} />}{view === "project" && (projectData.length ? <ProjectDetail onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} projectId={selectedProjectId} identity={identity} projectManagers={projectManagers} /> : <EmptyProjectWorkspace onNavigate={navigate} identity={identity} />)}{view === "report" && (projectData.length ? <WeeklyReport onNavigate={navigate} onDataChanged={refreshData} projectId={selectedProjectId} projectData={projectData} identity={identity} snapshot={dashboardSnapshot} /> : <EmptyProjectWorkspace onNavigate={navigate} identity={identity} />)}{view === "pmo" && <PmoPage onNavigate={navigate} onDataChanged={refreshData} identity={identity} projectData={projectData} />}{view === "admin" && <AdminPage onNavigate={navigate} identity={identity} />}</div></div>;
+  return <div className="app-shell" data-theme={resolvedTheme}><Sidebar view={view} onNavigate={navigate} identity={identity} /><div className="workspace">{view === "portfolio" && <Portfolio onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} identity={identity} templateData={templateData} projectManagers={projectManagers} weeklyReports={weeklyReportData} />}{view === "analytics" && <PortfolioAnalytics onNavigate={(next, projectId) => navigate(next, projectId)} identity={identity} header={<WorkspaceHeader title="项目组合分析" subtitle="从组织、类型、负责人和标准节点维度识别共性瓶颈与基线漂移" onNavigate={navigate} identity={identity} />} />}{view === "resources" && <ResourcePlanning identity={identity} onOpenProject={(projectId) => navigate("project", projectId)} header={<WorkspaceHeader title="跨项目资源计划" subtitle="统一资源池、周容量、项目分配与超配治理" onNavigate={navigate} identity={identity} />} />}{view === "biweekly-plan" && (projectData.length ? <BiweeklyPlan header={<WorkspaceHeader title="双周滚动计划" subtitle="滚动维护本周执行与下周安排，持续跟踪完成状况" onNavigate={navigate} identity={identity} />} projects={projectData} selectedProjectId={selectedProjectId} onSelectProject={(projectId) => navigate("biweekly-plan", projectId)} onOpenProject={(projectId) => navigate("project", projectId)} /> : <EmptyProjectWorkspace onNavigate={navigate} identity={identity} />)}{view === "project" && (projectData.length ? <ProjectDetail onNavigate={navigate} onDataChanged={refreshData} projectData={projectData} projectId={selectedProjectId} identity={identity} projectManagers={projectManagers} /> : <EmptyProjectWorkspace onNavigate={navigate} identity={identity} />)}{view === "report" && (projectData.length ? <WeeklyReport onNavigate={navigate} onDataChanged={refreshData} projectId={selectedProjectId} projectData={projectData} identity={identity} snapshot={dashboardSnapshot} /> : <EmptyProjectWorkspace onNavigate={navigate} identity={identity} />)}{view === "pmo" && <PmoPage onNavigate={navigate} onDataChanged={refreshData} identity={identity} projectData={projectData} />}{view === "admin" && <AdminPage onNavigate={navigate} identity={identity} />}</div></div>;
 }
 
 export default function Home() {

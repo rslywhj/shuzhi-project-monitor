@@ -389,6 +389,43 @@ export const weeklyReports = sqliteTable(
   ],
 );
 
+export const biweeklyPlanTasks = sqliteTable(
+  "biweekly_plan_tasks",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    weekKey: text("week_key").notNull(),
+    taskDescription: text("task_description").notNull(),
+    owner: text("owner").notNull(),
+    participants: text("participants").notNull().default(""),
+    plannedStart: text("planned_start").notNull(),
+    plannedFinish: text("planned_finish").notNull(),
+    workdays: real("workdays").notNull().default(1),
+    actualFinish: text("actual_finish"),
+    status: text("status", {
+      enum: ["pending", "in_progress", "completed", "delayed", "cancelled"],
+    })
+      .notNull()
+      .default("pending"),
+    tracking: text("tracking").notNull().default(""),
+    remark: text("remark").notNull().default(""),
+    sequence: integer("sequence").notNull().default(1),
+    createdBy: text("created_by").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("biweekly_plan_tasks_project_week_idx").on(
+      table.projectId,
+      table.weekKey,
+      table.sequence,
+    ),
+    index("biweekly_plan_tasks_status_idx").on(table.status),
+  ],
+);
+
 export const attachments = sqliteTable(
   "attachments",
   {

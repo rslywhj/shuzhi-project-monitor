@@ -7,7 +7,7 @@ export type BiweeklyPlanStatus =
 
 export type RollingWeek = {
   weekKey: string;
-  label: "本周" | "下周";
+  label: "本周" | "下周" | "所选周" | "后一周";
   startDate: string;
   endDate: string;
   dateLabel: string;
@@ -74,6 +74,44 @@ export function buildRollingWeeks(value = new Date()): [RollingWeek, RollingWeek
   const nextMonday = new Date(currentMonday);
   nextMonday.setUTCDate(currentMonday.getUTCDate() + 7);
   return [buildWeek(currentMonday, "本周"), buildWeek(nextMonday, "下周")];
+}
+
+export function buildRollingWeeksFromWeekKey(
+  weekKey: string,
+): [RollingWeek, RollingWeek] {
+  const match = /^(\d{4})-W(\d{2})$/.exec(weekKey);
+  if (!match) throw new Error("历史周期格式无效。");
+  const isoYear = Number(match[1]);
+  const isoWeek = Number(match[2]);
+  if (isoWeek < 1 || isoWeek > 53) throw new Error("历史周期格式无效。");
+
+  const januaryFourth = new Date(Date.UTC(isoYear, 0, 4));
+  const januaryFourthWeekday = januaryFourth.getUTCDay() || 7;
+  const monday = new Date(januaryFourth);
+  monday.setUTCDate(
+    januaryFourth.getUTCDate() - januaryFourthWeekday + 1 + (isoWeek - 1) * 7,
+  );
+  if (
+    isoWeekKeyForDate(
+      monday.getUTCFullYear(),
+      monday.getUTCMonth() + 1,
+      monday.getUTCDate(),
+    ) !== weekKey
+  ) {
+    throw new Error("历史周期不存在。");
+  }
+  const nextMonday = new Date(monday);
+  nextMonday.setUTCDate(monday.getUTCDate() + 7);
+  return [buildWeek(monday, "所选周"), buildWeek(nextMonday, "后一周")];
+}
+
+export function listHistoricalWeekKeys(
+  weekKeys: string[],
+  currentWeekKey: string,
+) {
+  return [...new Set(weekKeys)]
+    .filter((weekKey) => /^\d{4}-W\d{2}$/.test(weekKey) && weekKey < currentWeekKey)
+    .sort((left, right) => right.localeCompare(left));
 }
 
 export function validateTaskDates(

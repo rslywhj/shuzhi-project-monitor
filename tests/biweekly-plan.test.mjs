@@ -3,6 +3,8 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   buildRollingWeeks,
+  buildRollingWeeksFromWeekKey,
+  listHistoricalWeekKeys,
   paginatePrintRows,
   validateTaskDates,
 } from "../lib/biweekly-plan.ts";
@@ -35,6 +37,24 @@ test("validates dates against the selected rolling week", () => {
     () => validateTaskDates("2026-W32", "2026-08-07", "2026-08-03", weeks),
     /不能早于/,
   );
+});
+
+test("rebuilds and orders read-only historical rolling windows", () => {
+  const weeks = buildRollingWeeksFromWeekKey("2025-W52");
+  assert.deepEqual(
+    weeks.map((week) => week.weekKey),
+    ["2025-W52", "2026-W01"],
+  );
+  assert.equal(weeks[0].startDate, "2025-12-22");
+  assert.equal(weeks[1].startDate, "2025-12-29");
+  assert.deepEqual(
+    listHistoricalWeekKeys(
+      ["2026-W31", "2026-W30", "2026-W31", "2026-W32", "invalid"],
+      "2026-W32",
+    ),
+    ["2026-W31", "2026-W30"],
+  );
+  assert.throws(() => buildRollingWeeksFromWeekKey("2021-W53"), /不存在/);
 });
 
 test("paginates all filtered rows for A4 landscape reports", () => {
@@ -70,12 +90,16 @@ test("persists, authorizes and audits biweekly plan tasks", async () => {
   }
   assert.match(projectRoute, /export async function GET/);
   assert.match(projectRoute, /export async function POST/);
+  assert.match(projectRoute, /scope === "history"/);
+  assert.match(projectRoute, /availableHistoryWeeks/);
   assert.match(taskRoute, /export async function PATCH/);
   assert.match(taskRoute, /export async function DELETE/);
   assert.match(page, /"biweekly-plan"/);
   assert.match(component, /\{week\.label\}计划及完成情况/);
   assert.match(component, /"本周" \| "下周"/);
   assert.match(component, /biweekly-mobile-list/);
+  assert.match(component, /历史计划/);
+  assert.match(component, /导出CSV/);
   assert.match(print, /paginatePrintRows\(rows, 10\)/);
   assert.match(print, /paginatePrintRows\(rows, 8\)/);
   assert.match(css, /@page\{size:A4 landscape;margin:8mm\}/);

@@ -8,7 +8,13 @@ import {
   requiredString,
   safeNumber,
 } from "@/lib/api-utils";
-import { buildRollingWeeks, validateTaskDates } from "@/lib/biweekly-plan";
+import {
+  buildRollingWeeks,
+  buildRollingWeeksFromWeekKey,
+  listHistoricalWeekKeys,
+  type RollingWeek,
+  validateTaskDates,
+} from "@/lib/biweekly-plan";
 import {
   lifecycleLockedResponse,
   projectLifecycleLocked,
@@ -51,20 +57,48 @@ export async function GET(
     const { id } = await context.params;
     const project = await loadProject(id);
     if (!project) return Response.json({ error: "未找到指定项目。" }, { status: 404 });
-    const weeks = buildRollingWeeks();
-    const rows = await getDb()
-      .select()
-      .from(biweeklyPlanTasks)
-      .where(
-        and(
-          eq(biweeklyPlanTasks.projectId, id),
-          inArray(
-            biweeklyPlanTasks.weekKey,
-            weeks.map((week) => week.weekKey),
+    const url = new URL(request.url);
+    const scope = url.searchParams.get("scope") === "history" ? "history" : "current";
+    const currentWeeks = buildRollingWeeks();
+    let weeks: RollingWeek[] = currentWeeks;
+    let availableHistoryWeeks: string[] = [];
+    let selectedHistoryWeek = "";
+    let rows: (typeof biweeklyPlanTasks.$inferSelect)[];
+
+    if (scope === "history") {
+      const allRows = await getDb()
+        .select()
+        .from(biweeklyPlanTasks)
+        .where(eq(biweeklyPlanTasks.projectId, id))
+        .orderBy(asc(biweeklyPlanTasks.weekKey), asc(biweeklyPlanTasks.sequence));
+      availableHistoryWeeks = listHistoricalWeekKeys(
+        allRows.map((row) => row.weekKey),
+        currentWeeks[0].weekKey,
+      );
+      const requestedWeek = url.searchParams.get("week") ?? "";
+      selectedHistoryWeek = availableHistoryWeeks.includes(requestedWeek)
+        ? requestedWeek
+        : (availableHistoryWeeks[0] ?? "");
+      weeks = selectedHistoryWeek
+        ? buildRollingWeeksFromWeekKey(selectedHistoryWeek)
+        : [];
+      const selectedKeys = new Set(weeks.map((week) => week.weekKey));
+      rows = allRows.filter((row) => selectedKeys.has(row.weekKey));
+    } else {
+      rows = await getDb()
+        .select()
+        .from(biweeklyPlanTasks)
+        .where(
+          and(
+            eq(biweeklyPlanTasks.projectId, id),
+            inArray(
+              biweeklyPlanTasks.weekKey,
+              weeks.map((week) => week.weekKey),
+            ),
           ),
-        ),
-      )
-      .orderBy(asc(biweeklyPlanTasks.weekKey), asc(biweeklyPlanTasks.sequence));
+        )
+        .orderBy(asc(biweeklyPlanTasks.weekKey), asc(biweeklyPlanTasks.sequence));
+    }
     return Response.json({
       project: {
         id: project.id,
@@ -74,7 +108,11 @@ export async function GET(
       },
       weeks,
       tasks: rows,
+      scope,
+      availableHistoryWeeks,
+      selectedHistoryWeek,
       canWrite:
+        scope === "current" &&
         canWriteProject(identity, project.ownerEmail) &&
         !projectLifecycleLocked(project),
     });

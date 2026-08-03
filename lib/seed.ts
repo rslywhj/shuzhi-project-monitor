@@ -409,6 +409,66 @@ async function ensureDemoScenarioData(db: ReturnType<typeof getDb>) {
     }
   }
 
+  const existingPlanWeeks = await db
+    .select({ projectId: biweeklyPlanTasks.projectId, weekKey: biweeklyPlanTasks.weekKey })
+    .from(biweeklyPlanTasks);
+  const existingPlanWindows = new Set(
+    existingPlanWeeks.map((row) => `${row.projectId}:${row.weekKey}`),
+  );
+  {
+    const historicalProjects = projectRows.filter(
+      (project) => (project.lifecycleStatus ?? "active") !== "archived",
+    );
+    const dayAt = (startDate: string, offset: number) => {
+      const date = new Date(`${startDate}T00:00:00Z`);
+      date.setUTCDate(date.getUTCDate() + offset);
+      return date.toISOString().slice(0, 10);
+    };
+    const historicalWeeks = [-28, -21, -14, -7].map(
+      (dayOffset) =>
+        buildRollingWeeks(new Date(Date.now() + dayOffset * 86_400_000))[0],
+    );
+    const historicalRows = historicalProjects.flatMap((project, projectIndex) =>
+      historicalWeeks.flatMap((week, weekIndex) => {
+        if (existingPlanWindows.has(`${project.id}:${week.weekKey}`)) return [];
+        const status = (["completed", "completed", "delayed", "cancelled"] as const)[
+          (projectIndex + weekIndex) % 4
+        ];
+        return [{
+          projectId: project.id,
+          weekKey: week.weekKey,
+          taskDescription: [
+            "完成阶段成果评审与意见闭环",
+            "推进核心模块开发及接口联调",
+            "开展业务数据核验并关闭遗留问题",
+            "组织用户验证并形成复盘清单",
+          ][weekIndex],
+          owner: project.ownerName,
+          participants:
+            projectIndex % 2 === 0 ? "业务负责人、产品经理" : "架构师、测试经理",
+          plannedStart: week.startDate,
+          plannedFinish: dayAt(week.startDate, 4),
+          workdays: 5,
+          actualFinish:
+            status === "completed" ? dayAt(week.startDate, projectIndex % 3 + 2) : null,
+          status,
+          tracking:
+            status === "completed"
+              ? "任务已按计划完成，成果已归档。"
+              : status === "delayed"
+                ? "受跨部门依赖影响未按期完成，已纳入后续周期持续跟踪。"
+                : "因范围调整取消，已完成变更确认。",
+          remark: weekIndex === 2 && projectIndex % 3 === 0 ? "历史延期样例" : "",
+          sequence: 1,
+          createdBy: "pmo.demo@projects.internal",
+        }];
+      }),
+    );
+    for (const rowsChunk of chunks(historicalRows, 4)) {
+      await db.insert(biweeklyPlanTasks).values(rowsChunk);
+    }
+  }
+
   const [{ value: reportCount }] = await db
     .select({ value: count() })
     .from(weeklyReports);

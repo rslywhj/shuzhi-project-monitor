@@ -92,7 +92,7 @@ test("persists, authorizes and audits biweekly plan tasks", async () => {
   assert.match(projectRoute, /export async function POST/);
   assert.match(projectRoute, /scope === "history"/);
   assert.match(projectRoute, /availableHistoryWeeks/);
-  assert.match(projectRoute, /exportAllHistory/);
+  assert.match(projectRoute, /exportAllTasks/);
   assert.match(taskRoute, /export async function PATCH/);
   assert.match(taskRoute, /export async function DELETE/);
   assert.match(page, /"biweekly-plan"/);
@@ -100,7 +100,7 @@ test("persists, authorizes and audits biweekly plan tasks", async () => {
   assert.match(component, /"本周" \| "下周"/);
   assert.match(component, /biweekly-mobile-list/);
   assert.match(component, /历史计划/);
-  assert.match(component, /导出全量历史/);
+  assert.match(component, /导出全量计划/);
   assert.match(print, /paginatePrintRows\(rows, 10\)/);
   assert.match(print, /paginatePrintRows\(rows, 8\)/);
   assert.match(css, /@page\{size:A4 landscape;margin:8mm\}/);

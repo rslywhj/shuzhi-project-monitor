@@ -172,7 +172,7 @@ export default function BiweeklyPlan({
   }
 
   async function exportHistoryCsv() {
-    if (scope !== "history" || !availableHistoryWeeks.length || !currentProject) return;
+    if (scope !== "history" || !currentProject) return;
     setExportingHistory(true);
     setError("");
     try {
@@ -183,7 +183,7 @@ export default function BiweeklyPlan({
       const result = (await response.json()) as { tasks?: PlanTask[]; error?: string };
       if (!response.ok) throw new Error(result.error || "历史计划导出失败");
       const exportTasks = result.tasks ?? [];
-      if (!exportTasks.length) throw new Error("该项目暂无可导出的历史计划。");
+      if (!exportTasks.length) throw new Error("该项目暂无可导出的双周计划。");
       const escape = (value: unknown) => {
         const text = String(value ?? "");
         return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
@@ -213,10 +213,10 @@ export default function BiweeklyPlan({
       );
       const link = document.createElement("a");
       link.href = URL.createObjectURL(blob);
-      link.download = `${currentProject.id}-历史双周计划-全量.csv`;
+      link.download = `${currentProject.id}-双周计划-全量.csv`;
       link.click();
       URL.revokeObjectURL(link.href);
-      setMessage(`已导出 ${exportTasks.length} 条历史计划任务。`);
+      setMessage(`已导出 ${exportTasks.length} 条双周计划任务，包含历史、当前及未来周期。`);
     } catch (exportError) {
       setError(exportError instanceof Error ? exportError.message : "历史计划导出失败");
     } finally {
@@ -337,7 +337,7 @@ export default function BiweeklyPlan({
               <button className="outline-button" disabled={historyIndex < 0 || historyIndex >= availableHistoryWeeks.length - 1} onClick={() => setHistoryWeekKey(availableHistoryWeeks[historyIndex + 1])}>← 更早</button>
               <label>起始周<select value={historyWeekKey} disabled={!availableHistoryWeeks.length} onChange={(event) => setHistoryWeekKey(event.target.value)}>{availableHistoryWeeks.map((weekKey) => <option key={weekKey} value={weekKey}>{weekKey}</option>)}</select></label>
               <button className="outline-button" disabled={historyIndex <= 0} onClick={() => setHistoryWeekKey(availableHistoryWeeks[historyIndex - 1])}>更新 →</button>
-              <button className="outline-button" disabled={!availableHistoryWeeks.length || exportingHistory} onClick={() => void exportHistoryCsv()}>{exportingHistory ? "正在导出…" : "导出全量历史"}</button>
+              <button className="outline-button" disabled={exportingHistory} onClick={() => void exportHistoryCsv()}>{exportingHistory ? "正在导出…" : "导出全量计划"}</button>
             </div>
           )}
         </section>

@@ -6,12 +6,15 @@ import {
   useEffect,
   useMemo,
   useState,
+  type CSSProperties,
   type ReactNode,
 } from "react";
 import {
   DEFAULT_FONT_SCALE,
-  FONT_SCALE_OPTIONS,
   FONT_SCALE_STORAGE_KEY,
+  FONT_SCALE_STEP,
+  MAX_FONT_SCALE,
+  MIN_FONT_SCALE,
   normalizeThemePreference,
   normalizeFontScale,
   resolveTheme,
@@ -127,12 +130,15 @@ export function ThemeControl({
 }) {
   const { preference, resolvedTheme, fontScale, setPreference, setFontScale } = useTheme();
   const icon = resolvedTheme === "dark" ? "◐" : "◑";
+  const scaleLabel = `${fontScale.toFixed(1)}×`;
+  const scaleProgress =
+    ((fontScale - MIN_FONT_SCALE) / (MAX_FONT_SCALE - MIN_FONT_SCALE)) * 100;
   return (
     <details className={`theme-control display-settings theme-${surface}`}>
-      <summary title={`当前${resolvedTheme === "dark" ? "深色" : "浅色"}主题，文字${Math.round(fontScale * 100)}%`}>
+      <summary title={`当前${resolvedTheme === "dark" ? "深色" : "浅色"}主题，文字${scaleLabel}`}>
         <span aria-hidden="true">{icon}</span>
         <span>显示</span>
-        <em>{Math.round(fontScale * 100)}%</em>
+        <em>{scaleLabel}</em>
       </summary>
       <div className="display-settings-popover">
         <label>
@@ -149,23 +155,25 @@ export function ThemeControl({
             <option value="dark">深色</option>
           </select>
         </label>
-        <label>
-          <span>文字大小</span>
-          <select
+        <label className="display-font-scale-field">
+          <span>文字大小 <b>{scaleLabel}</b></span>
+          <input
+            type="range"
             aria-label="文字大小"
+            min={MIN_FONT_SCALE}
+            max={MAX_FONT_SCALE}
+            step={FONT_SCALE_STEP}
             value={fontScale}
-            onChange={(event) =>
-              setFontScale(normalizeFontScale(event.target.value))
+            style={{ "--font-scale-progress": `${scaleProgress}%` } as CSSProperties}
+            onInput={(event) =>
+              setFontScale(normalizeFontScale(event.currentTarget.value))
             }
-          >
-            {FONT_SCALE_OPTIONS.map((scale) => (
-              <option key={scale} value={scale}>
-                {Math.round(scale * 100)}%
-              </option>
-            ))}
-          </select>
+          />
+          <span className="font-scale-range-labels" aria-hidden="true">
+            <i>1×</i><i>1.5×</i><i>2×</i>
+          </span>
         </label>
-        <small>设置保存在当前浏览器，并同时应用于管理大屏和工作台。</small>
+        <small>拖动进度条即可实时缩放文字，设置会同时应用于管理大屏和工作台。</small>
       </div>
     </details>
   );

@@ -941,9 +941,9 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
       </div>
       <div className="cockpit-header-actions">
         <ThemeControl surface="cockpit" />
-        <button className="cockpit-view-switch cockpit-pdf-button" onClick={triggerCockpitPrint}>导出 PDF</button>
-        <button className="cockpit-view-switch" onClick={() => onNavigate("timeline-cockpit")}>时间轴</button>
-        <button className="light-button" onClick={() => onNavigate("portfolio")}>进入工作台 <span>↗</span></button>
+        <button className="cockpit-view-switch cockpit-pdf-button" onClick={triggerCockpitPrint}><span aria-hidden="true">⇩</span> 导出PDF</button>
+        <button className="cockpit-view-switch" onClick={() => onNavigate("timeline-cockpit")}><span aria-hidden="true">⌁</span> 时间轴</button>
+        <button className="light-button" onClick={() => onNavigate("portfolio")}>工作台 <span>↗</span></button>
       </div>
     </header>
 

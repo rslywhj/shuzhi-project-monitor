@@ -419,18 +419,18 @@ export default function TimelineCockpit({
         </div>
         <div className="cockpit-header-actions">
           <ThemeControl surface="cockpit" />
-          <button className="cockpit-view-switch cockpit-pdf-button" onClick={triggerCockpitPrint}>导出 PDF</button>
+          <button className="cockpit-view-switch cockpit-pdf-button" onClick={triggerCockpitPrint}><span aria-hidden="true">⇩</span> 导出PDF</button>
           <button
             className="cockpit-view-switch"
             onClick={() => onNavigate("cockpit")}
           >
-            节点矩阵
+            <span aria-hidden="true">▦</span> 节点矩阵
           </button>
           <button
             className="light-button"
             onClick={() => onNavigate("portfolio")}
           >
-            进入工作台 <span>↗</span>
+            工作台 <span>↗</span>
           </button>
         </div>
       </header>

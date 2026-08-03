@@ -13,12 +13,14 @@ export type RequestIdentity = {
 };
 
 export async function getRequestIdentity(request: Request): Promise<RequestIdentity | null> {
-  const url = new URL(request.url);
   const session = await sessionIdentity(request);
   const cookieEmail = session?.email ?? "";
-  const isLocal = url.hostname === "localhost" || url.hostname === "127.0.0.1";
-  const isLocalDemo = isLocal && !cookieEmail;
-  const email = cookieEmail || (isLocalDemo ? "demo@local" : "");
+  const demoDataEnabled =
+    String(
+      (env as unknown as Record<string, unknown>).SEED_DEMO_DATA ?? "",
+    ).toLowerCase() === "true";
+  const useDemoIdentity = demoDataEnabled && !cookieEmail;
+  const email = cookieEmail || (useDemoIdentity ? "demo@local" : "");
   if (!email) return null;
 
   const db = getDb();
@@ -32,7 +34,7 @@ export async function getRequestIdentity(request: Request): Promise<RequestIdent
   if (existing && !existing.active) return null;
   if (existing) {
     if (
-      !isLocalDemo &&
+      !useDemoIdentity &&
       session?.credentialVersion !== (existing.passwordChangedAt ?? "")
     ) {
       return null;
@@ -51,7 +53,7 @@ export async function getRequestIdentity(request: Request): Promise<RequestIdent
     };
   }
 
-  if (!isLocalDemo) return null;
+  if (!useDemoIdentity) return null;
   const displayName = "本地演示用户";
   await db
     .insert(users)

@@ -223,7 +223,44 @@ html[data-theme="dark"] .app-shell :where(.biweekly-summary article,.biweekly-se
 @media(max-width:520px){.biweekly-summary{grid-template-columns:1fr 1fr}.biweekly-section>header{align-items:flex-start;gap:10px}.biweekly-section>header .primary-button{padding:0 9px}.biweekly-modal .modal-form-grid{grid-template-columns:1fr}}
 
 /* 大屏 A4 横版 PDF / 打印报表 */
-.cockpit-print-root{display:none}.cockpit-pdf-button{border-color:#2f668a;color:#68c7ea}.cockpit-print-page{position:relative;box-sizing:border-box;width:100%;height:190mm;padding:0 0 9mm;color:#142236;background:#fff;font-family:"Microsoft YaHei","PingFang SC",Arial,sans-serif}.cockpit-print-page>header{display:flex;align-items:flex-start;justify-content:space-between;padding:0 0 4mm;border-bottom:1.2pt solid #1f5e94}.cockpit-print-page>header span{font-size:6.5pt;letter-spacing:.6pt;color:#3878a7}.cockpit-print-page>header h1{margin:1.5mm 0 1mm;font-size:15pt}.cockpit-print-page>header p{margin:0;color:#637488;font-size:7pt}.cockpit-print-page>header aside{max-width:90mm;text-align:right}.cockpit-print-page>header aside strong,.cockpit-print-page>header aside small{display:block}.cockpit-print-page>header aside strong{font-size:8pt}.cockpit-print-page>header aside small{margin-top:1.5mm;color:#6c7d90;font-size:6.5pt}.cockpit-print-page>footer{position:absolute;left:0;right:0;bottom:1mm;display:flex;justify-content:space-between;border-top:.6pt solid #b9c5d0;padding-top:2mm;color:#68798a;font-size:6.5pt}.cockpit-print-page>footer b{color:#203d5b}.cockpit-print-table{width:100%;margin-top:4mm;border-collapse:collapse;table-layout:fixed;font-size:6.5pt}.cockpit-print-table th,.cockpit-print-table td{border:.6pt solid #aebbc7;padding:1.4mm;text-align:center;vertical-align:middle;overflow-wrap:anywhere}.cockpit-print-table thead th{height:10mm;background:#e9eff5;color:#2c455c}.cockpit-print-table thead th:first-child{width:45mm}.cockpit-print-table tbody th{text-align:left;background:#f5f8fa}.cockpit-print-table tbody th strong,.cockpit-print-table tbody th small{display:block}.cockpit-print-table tbody th strong{font-size:7pt}.cockpit-print-table tbody th small{margin-top:1mm;color:#657588;font-size:5.8pt;font-weight:400}.cockpit-print-table.timeline tbody tr{height:13.5mm}.cockpit-print-table.timeline td{padding:1mm}.cockpit-print-table.timeline .current{background:#edf6ff}.cockpit-print-table.timeline td i{color:#aeb8c2;font-style:normal}.print-marker{display:block;margin:.7mm 0;padding:.6mm 1mm;border-radius:1mm;border-left:2.2pt solid #789;background:#f5f7f9;text-align:left;font-size:5.5pt;line-height:1.25}.print-marker.green{border-color:#1d9a70;color:#117553}.print-marker.yellow{border-color:#d99a19;color:#8a610a}.print-marker.red{border-color:#d34b55;color:#a5242e}.cockpit-print-table.matrix{font-size:5.5pt}.cockpit-print-table.matrix thead th:first-child{width:40mm}.cockpit-print-table.matrix thead th{height:16mm;padding:.8mm}.cockpit-print-table.matrix tbody tr{height:16mm}.cockpit-print-table.matrix td{padding:.6mm}.cockpit-print-table.matrix td b,.cockpit-print-table.matrix td small{display:block}.cockpit-print-table.matrix td b{font-size:8pt}.cockpit-print-table.matrix td small{margin-top:.8mm;font-size:5.2pt}.cockpit-print-table.matrix td.green{background:#e3f5ee;color:#137857}.cockpit-print-table.matrix td.yellow{background:#fff1cf;color:#96670b}.cockpit-print-table.matrix td.red{background:#ffe1e4;color:#a92834}.cockpit-print-table.matrix td.na{background:#eef1f3;color:#7f8c99}
+.cockpit-print-root{display:none}.cockpit-pdf-button{border-color:#2f668a;color:#68c7ea}
+.cockpit-print-page{box-sizing:border-box;width:100%;height:190mm;display:flex;flex-direction:column;color:#142236;background:#fff;font-family:"Microsoft YaHei","PingFang SC",Arial,sans-serif}
+.cockpit-print-page>header{display:flex;flex:0 0 auto;align-items:flex-start;justify-content:space-between;gap:6mm;padding:0 0 2mm;border-bottom:1.2pt solid #1f5e94}
+.cockpit-print-page>header span{font-size:calc(6pt * var(--print-font-scale,1));letter-spacing:.5pt;color:#3878a7}
+.cockpit-print-page>header h1{margin:.5mm 0 .3mm;font-size:calc(14pt * var(--print-font-scale,1));line-height:1.12}
+.cockpit-print-page>header p{margin:0;color:#637488;font-size:calc(6.5pt * var(--print-font-scale,1));line-height:1.25}
+.cockpit-print-page>header aside{max-width:105mm;text-align:right}
+.cockpit-print-page>header aside strong,.cockpit-print-page>header aside small{display:block}
+.cockpit-print-page>header aside strong{font-size:calc(7.5pt * var(--print-font-scale,1));line-height:1.2}
+.cockpit-print-page>header aside small{margin-top:.6mm;color:#6c7d90;font-size:calc(6pt * var(--print-font-scale,1));line-height:1.2}
+.cockpit-print-page>footer{display:flex;flex:0 0 auto;align-items:flex-end;justify-content:space-between;gap:5mm;margin-top:auto;border-top:.6pt solid #b9c5d0;padding-top:1.5mm;color:#68798a;font-size:calc(6pt * var(--print-font-scale,1));line-height:1.2}
+.cockpit-print-page>footer b{flex:0 0 auto;color:#203d5b}
+.cockpit-print-legend{display:flex;align-items:center;gap:5mm;letter-spacing:0!important}
+.cockpit-print-legend i{font-style:normal;white-space:nowrap}
+.cockpit-print-legend .plan{color:#2b78a5}.cockpit-print-legend .actual{color:#137d59}.cockpit-print-legend .forecast{color:#98660d}.cockpit-print-legend .overdue{color:#bd3541}
+.cockpit-print-table{width:100%;margin-top:2mm;border-collapse:collapse;table-layout:fixed;font-size:calc(6.5pt * var(--print-font-scale,1))}
+.cockpit-print-table th,.cockpit-print-table td{border:.6pt solid #aebbc7;padding:1.1mm;text-align:center;vertical-align:middle;overflow-wrap:anywhere}
+.cockpit-print-table thead th{height:var(--print-head-height,10mm);background:#e9eff5;color:#2c455c}
+.cockpit-print-table thead th:first-child{width:45mm}
+.cockpit-print-table tbody th{text-align:left;background:#f5f8fa}
+.cockpit-print-table tbody th strong,.cockpit-print-table tbody th small{display:block}
+.cockpit-print-table tbody th strong{font-size:calc(7pt * var(--print-font-scale,1));line-height:1.2}
+.cockpit-print-table tbody th small{margin-top:.6mm;color:#657588;font-size:calc(5.8pt * var(--print-font-scale,1));font-weight:400;line-height:1.2}
+.cockpit-print-table.timeline tbody tr{height:var(--print-row-height,13.5mm)}
+.cockpit-print-table.timeline td{padding:.8mm}
+.cockpit-print-table.timeline .current{background:#edf6ff}
+.cockpit-print-table.timeline td i{color:#aeb8c2;font-style:normal}
+.print-marker{display:block;margin:.45mm 0;padding:.45mm .8mm;border-radius:1mm;border-left:2.2pt solid #789;background:#f5f7f9;text-align:left;font-size:calc(5.5pt * var(--print-font-scale,1));line-height:1.2}
+.print-marker.green{border-color:#1d9a70;color:#117553}.print-marker.yellow{border-color:#d99a19;color:#8a610a}.print-marker.red{border-color:#d34b55;color:#a5242e}
+.cockpit-print-table.matrix{font-size:calc(5.5pt * var(--print-font-scale,1))}
+.cockpit-print-table.matrix thead th:first-child{width:40mm}
+.cockpit-print-table.matrix thead th{height:calc(var(--print-head-height,10mm) + 5mm);padding:.7mm}
+.cockpit-print-table.matrix tbody tr{height:var(--print-row-height,16mm)}
+.cockpit-print-table.matrix td{padding:.5mm}
+.cockpit-print-table.matrix td b,.cockpit-print-table.matrix td small{display:block}
+.cockpit-print-table.matrix td b{font-size:calc(8pt * var(--print-font-scale,1))}
+.cockpit-print-table.matrix td small{margin-top:.5mm;font-size:calc(5.2pt * var(--print-font-scale,1))}
+.cockpit-print-table.matrix td.green{background:#e3f5ee;color:#137857}.cockpit-print-table.matrix td.yellow{background:#fff1cf;color:#96670b}.cockpit-print-table.matrix td.red{background:#ffe1e4;color:#a92834}.cockpit-print-table.matrix td.na{background:#eef1f3;color:#7f8c99}
 
 @page{size:A4 landscape;margin:8mm}@media print{html,body{width:auto!important;min-width:0!important;height:auto!important;overflow:visible!important;background:#fff!important;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}.cockpit{display:none!important}.cockpit-print-root{display:block!important}.cockpit-print-page{break-after:page;page-break-after:always}.cockpit-print-page:last-child{break-after:auto;page-break-after:auto}}
 

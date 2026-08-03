@@ -96,6 +96,7 @@ export default function BiweeklyPlan({
   const [draft, setDraft] = useState<TaskDraft | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
+  const [exportingHistory, setExportingHistory] = useState(false);
   const [scope, setScope] = useState<PlanScope>("current");
   const [historyWeekKey, setHistoryWeekKey] = useState("");
   const [availableHistoryWeeks, setAvailableHistoryWeeks] = useState<string[]>([]);
@@ -170,40 +171,57 @@ export default function BiweeklyPlan({
     setError("");
   }
 
-  function exportHistoryCsv() {
-    if (scope !== "history" || !tasks.length || !currentProject) return;
-    const escape = (value: unknown) => {
-      const text = String(value ?? "");
-      return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
-    };
-    const rows = [
-      ["项目编号", "项目名称", "周期", "序号", "任务描述", "负责人", "参加人员", "计划开始", "计划结束", "工作日", "实际结束", "完成状况", "跟踪情况", "备注"],
-      ...tasks.map((task) => [
-        currentProject.id,
-        currentProject.name,
-        task.weekKey,
-        task.sequence,
-        task.taskDescription,
-        task.owner,
-        task.participants,
-        task.plannedStart,
-        task.plannedFinish,
-        task.workdays,
-        task.actualFinish ?? "",
-        statusCopy[task.status],
-        task.tracking,
-        task.remark,
-      ]),
-    ];
-    const blob = new Blob(
-      [`\uFEFF${rows.map((row) => row.map(escape).join(",")).join("\r\n")}`],
-      { type: "text/csv;charset=utf-8" },
-    );
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = `${currentProject.id}-${historyWeekKey}-双周计划.csv`;
-    link.click();
-    URL.revokeObjectURL(link.href);
+  async function exportHistoryCsv() {
+    if (scope !== "history" || !availableHistoryWeeks.length || !currentProject) return;
+    setExportingHistory(true);
+    setError("");
+    try {
+      const response = await fetch(
+        `/api/projects/${encodeURIComponent(currentProject.id)}/biweekly-plans?scope=history&export=all`,
+        { cache: "no-store" },
+      );
+      const result = (await response.json()) as { tasks?: PlanTask[]; error?: string };
+      if (!response.ok) throw new Error(result.error || "历史计划导出失败");
+      const exportTasks = result.tasks ?? [];
+      if (!exportTasks.length) throw new Error("该项目暂无可导出的历史计划。");
+      const escape = (value: unknown) => {
+        const text = String(value ?? "");
+        return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+      };
+      const rows = [
+        ["项目编号", "项目名称", "周期", "序号", "任务描述", "负责人", "参加人员", "计划开始", "计划结束", "工作日", "实际结束", "完成状况", "跟踪情况", "备注"],
+        ...exportTasks.map((task) => [
+          currentProject.id,
+          currentProject.name,
+          task.weekKey,
+          task.sequence,
+          task.taskDescription,
+          task.owner,
+          task.participants,
+          task.plannedStart,
+          task.plannedFinish,
+          task.workdays,
+          task.actualFinish ?? "",
+          statusCopy[task.status],
+          task.tracking,
+          task.remark,
+        ]),
+      ];
+      const blob = new Blob(
+        [`\uFEFF${rows.map((row) => row.map(escape).join(",")).join("\r\n")}`],
+        { type: "text/csv;charset=utf-8" },
+      );
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = `${currentProject.id}-历史双周计划-全量.csv`;
+      link.click();
+      URL.revokeObjectURL(link.href);
+      setMessage(`已导出 ${exportTasks.length} 条历史计划任务。`);
+    } catch (exportError) {
+      setError(exportError instanceof Error ? exportError.message : "历史计划导出失败");
+    } finally {
+      setExportingHistory(false);
+    }
   }
 
   function openCreate(week: RollingWeek) {
@@ -319,7 +337,7 @@ export default function BiweeklyPlan({
               <button className="outline-button" disabled={historyIndex < 0 || historyIndex >= availableHistoryWeeks.length - 1} onClick={() => setHistoryWeekKey(availableHistoryWeeks[historyIndex + 1])}>← 更早</button>
               <label>起始周<select value={historyWeekKey} disabled={!availableHistoryWeeks.length} onChange={(event) => setHistoryWeekKey(event.target.value)}>{availableHistoryWeeks.map((weekKey) => <option key={weekKey} value={weekKey}>{weekKey}</option>)}</select></label>
               <button className="outline-button" disabled={historyIndex <= 0} onClick={() => setHistoryWeekKey(availableHistoryWeeks[historyIndex - 1])}>更新 →</button>
-              <button className="outline-button" disabled={!tasks.length} onClick={exportHistoryCsv}>导出CSV</button>
+              <button className="outline-button" disabled={!availableHistoryWeeks.length || exportingHistory} onClick={() => void exportHistoryCsv()}>{exportingHistory ? "正在导出…" : "导出全量历史"}</button>
             </div>
           )}
         </section>

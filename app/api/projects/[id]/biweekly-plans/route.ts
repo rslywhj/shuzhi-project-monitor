@@ -76,6 +76,7 @@ export async function GET(
         currentWeeks[0].weekKey,
       );
       const requestedWeek = url.searchParams.get("week") ?? "";
+      const exportAllHistory = url.searchParams.get("export") === "all";
       selectedHistoryWeek = availableHistoryWeeks.includes(requestedWeek)
         ? requestedWeek
         : (availableHistoryWeeks[0] ?? "");
@@ -83,7 +84,9 @@ export async function GET(
         ? buildRollingWeeksFromWeekKey(selectedHistoryWeek)
         : [];
       const selectedKeys = new Set(weeks.map((week) => week.weekKey));
-      rows = allRows.filter((row) => selectedKeys.has(row.weekKey));
+      rows = exportAllHistory
+        ? allRows.filter((row) => availableHistoryWeeks.includes(row.weekKey))
+        : allRows.filter((row) => selectedKeys.has(row.weekKey));
     } else {
       rows = await getDb()
         .select()

@@ -743,6 +743,24 @@ test("offers a filterable list and milestone heatmap in the desktop workspace", 
   assert.match(css, /portfolio-heat-cell\.na/);
 });
 
+test("renders unstarted matrix milestones in gray without a primary badge", async () => {
+  const [page, css, printReport] = await Promise.all([
+    readFile(new URL("app/page.tsx", templateRoot), "utf8"),
+    readFile(new URL("app/globals.css", templateRoot), "utf8"),
+    readFile(new URL("app/cockpit-print-report.tsx", templateRoot), "utf8"),
+  ]);
+
+  assert.match(page, /function milestoneIsNotStarted/);
+  assert.match(page, /heat-cell \$\{notStarted \? "not-started" : status\}/);
+  assert.match(page, /portfolio-heat-cell \$\{notStarted \? "not-started" : cellStatus\}/);
+  assert.doesNotMatch(page, /stageRole === "primary-stage" \? "主"/);
+  assert.doesNotMatch(page, /主 当前主节点/);
+  assert.match(css, /heat-cell\.not-started:after/);
+  assert.match(css, /portfolio-heat-cell\.not-started>span/);
+  assert.match(css, /matrix td\.not-started/);
+  assert.match(printReport, /cell\.notStarted \? "未开始"/);
+});
+
 test("supports atomic Excel project import with template download and row-level preview", async () => {
   const [route, page, css, packageJson] = await Promise.all([
     readFile(new URL("app/api/projects/import/route.ts", templateRoot), "utf8"),

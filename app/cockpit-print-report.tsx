@@ -51,6 +51,7 @@ export type MatrixPrintRow = {
   stageLabel?: string;
   cells: Array<{
     status: PrintStatus;
+    notStarted?: boolean;
     completion: number | null;
     deviationDays: number | null;
   }>;
@@ -114,7 +115,7 @@ function TimelinePrintLegend() {
 }
 
 function MatrixPrintLegend() {
-  return <span className="cockpit-print-legend matrix">灯色同时使用颜色、文字和形状：● 正常　▲ 预警　■ 严重　— 不适用</span>;
+  return <span className="cockpit-print-legend matrix">灯色同时使用颜色、文字和形状：● 正常　▲ 预警　■ 严重　○ 未开始　— 不适用</span>;
 }
 
 function printRootStyle(fontScale: number): CSSProperties {
@@ -171,7 +172,7 @@ export function MatrixPrintReport({
         <ReportPage key={pageIndex} title="项目 × 标准节点态势矩阵" subtitle={`当前筛选共 ${rows.length} 个项目 · ${milestones.length} 个标准节点`} snapshot={snapshot} filters={filters} page={pageIndex + 1} pageCount={pages.length} legend={<MatrixPrintLegend />}>
           <table className="cockpit-print-table matrix">
             <thead><tr><th>项目 / 健康度</th>{milestones.map((milestone, index) => <th key={`${milestone}-${index}`}><span>{String(index + 1).padStart(2, "0")}</span><br/>{milestone}</th>)}</tr></thead>
-            <tbody>{pageRows.length ? pageRows.map((row) => <tr key={row.id} style={{ "--print-row-height": `${rowHeight}mm` } as CSSProperties}><th><strong>{statusSymbol[row.status]} {row.name}</strong><small>{statusLabel[row.status]} · {row.score}分<br/>{row.owner} · {row.org}{row.stageLabel ? <><br/>{row.stageLabel}</> : null}</small></th>{row.cells.map((cell, index) => <td className={cell.status} key={index}><b>{statusSymbol[cell.status]}</b><small>{cell.status === "na" ? "N/A" : cell.deviationDays && cell.deviationDays > 0 ? `+${cell.deviationDays}天` : `${cell.completion ?? 0}%`}</small></td>)}</tr>) : <tr><td colSpan={milestones.length + 1}>当前筛选条件下暂无项目</td></tr>}</tbody>
+            <tbody>{pageRows.length ? pageRows.map((row) => <tr key={row.id} style={{ "--print-row-height": `${rowHeight}mm` } as CSSProperties}><th><strong>{statusSymbol[row.status]} {row.name}</strong><small>{statusLabel[row.status]} · {row.score}分<br/>{row.owner} · {row.org}{row.stageLabel ? <><br/>{row.stageLabel}</> : null}</small></th>{row.cells.map((cell, index) => <td className={cell.notStarted ? "not-started" : cell.status} key={index}><b>{cell.notStarted ? "○" : statusSymbol[cell.status]}</b><small>{cell.status === "na" ? "N/A" : cell.notStarted ? "未开始" : cell.deviationDays && cell.deviationDays > 0 ? `+${cell.deviationDays}天` : `${cell.completion ?? 0}%`}</small></td>)}</tr>) : <tr><td colSpan={milestones.length + 1}>当前筛选条件下暂无项目</td></tr>}</tbody>
           </table>
         </ReportPage>
       ))}

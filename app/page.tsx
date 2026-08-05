@@ -457,6 +457,13 @@ const executionStatusSymbol: Record<MilestoneExecutionStatus, string> = {
   paused: "Ⅱ",
   completed: "✓",
 };
+function milestoneIsNotStarted(milestone?: MilestoneData) {
+  return Boolean(
+    milestone?.applicable &&
+      (milestone.executionStatus === "not_started" ||
+        (!milestone.executionStatus && milestone.completion === 0)),
+  );
+}
 const lifecycleLabel: Record<ProjectLifecycleStatus, string> = {
   active: "在建",
   completed: "已结项",
@@ -917,6 +924,7 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
       );
       return {
         status: project.cells[index] ?? (milestone?.status ?? "na"),
+        notStarted: milestoneIsNotStarted(milestone),
         completion: milestone?.completion ?? null,
         deviationDays: milestone?.deviationDays ?? null,
       };
@@ -1077,7 +1085,7 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
             <option>全部状态</option><option>正常</option><option>预警</option><option>严重</option>
           </select>
         </label>
-        <div className="legend"><span className="green">● 正常</span><span className="yellow">▲ 预警</span><span className="red">■ 严重</span><span className="na">— 不适用</span><span>主 当前主节点</span><span>并 并行节点</span><span>遗 前序遗留</span></div>
+        <div className="legend"><span className="green">● 正常</span><span className="yellow">▲ 预警</span><span className="red">■ 严重</span><span className="not-started">○ 未开始</span><span className="na">— 不适用</span><span>并 并行节点</span><span>遗 前序遗留</span></div>
       </div>
     </section>
 
@@ -1093,10 +1101,11 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
               const status = p.cells[index] ?? "na";
               const milestone = p.milestones?.find((row) => row.name === milestoneName);
               const deviation = milestone?.deviationDays ?? 0;
-              const stageRole = !milestone ? "" : p.stageSummary?.primaryMilestoneId === milestone.id ? "primary-stage" : p.stageSummary?.parallelMilestoneIds.includes(milestone.id) ? "parallel-stage" : p.stageSummary?.carryoverMilestoneIds.includes(milestone.id) ? "carryover-stage" : "";
-              return <button key={`${milestoneName}-${index}`} className={`heat-cell ${status} ${stageRole}`} onClick={() => setSelected({ project: p, index })} aria-label={`${p.name} ${milestoneName} ${statusLabel[status]}`}>
-                <span className="cell-symbol">{stageRole === "primary-stage" ? "主" : stageRole === "parallel-stage" ? "并" : stageRole === "carryover-stage" ? "遗" : statusSymbol[status]}</span>
-                <small>{status === "na" ? "N/A" : deviation > 0 ? `+${deviation}天` : `${milestone?.completion ?? 0}%`}</small>
+              const notStarted = milestoneIsNotStarted(milestone) && status !== "na";
+              const stageRole = !milestone || notStarted ? "" : p.stageSummary?.parallelMilestoneIds.includes(milestone.id) ? "parallel-stage" : p.stageSummary?.carryoverMilestoneIds.includes(milestone.id) ? "carryover-stage" : "";
+              return <button key={`${milestoneName}-${index}`} className={`heat-cell ${notStarted ? "not-started" : status} ${stageRole}`} onClick={() => setSelected({ project: p, index })} aria-label={`${p.name} ${milestoneName} ${notStarted ? `未开始 ${statusLabel[status]}` : statusLabel[status]}`}>
+                <span className="cell-symbol">{stageRole === "parallel-stage" ? "并" : stageRole === "carryover-stage" ? "遗" : notStarted ? executionStatusSymbol.not_started : statusSymbol[status]}</span>
+                <small>{status === "na" ? "N/A" : notStarted ? "未开始" : deviation > 0 ? `+${deviation}天` : `${milestone?.completion ?? 0}%`}</small>
               </button>;
             })}
           </div>)}
@@ -2349,7 +2358,7 @@ function Portfolio({
             <span className={p.actual - p.plan < -5 ? "negative" : "positive"}>{p.actual - p.plan > 0 ? "+" : ""}{(p.actual - p.plan).toFixed(1)} pp</span>
             <span className={`risk ${p.risk === "高" ? "high" : p.risk === "中" ? "medium" : "low"}`}>{p.risk}风险</span><span title={p.updatedAt ? SHANGHAI_TIME_ZONE_LABEL : undefined}>{p.updatedAt ? formatShanghaiMonthDayTime(p.updatedAt) : "数据未同步"}</span><button className="more" aria-label={`查看${p.name}`} onClick={() => onNavigate("project", p.id)}>•••</button>
           </div>)}
-        </div> : <div className="portfolio-matrix"><div className="portfolio-matrix-grid" style={{ "--portfolio-milestone-count": matrixTemplates.length } as React.CSSProperties}><div className="portfolio-matrix-head"><div>项目 / 健康度</div>{matrixTemplates.map((template) => <div key={template.id}><span>{template.code}</span>{template.name}</div>)}</div>{filtered.map((project) => <div className="portfolio-matrix-row" key={project.id}><button className="portfolio-project-cell" onClick={() => onNavigate("project", project.id)}><StatusPill status={project.status} compact /><span><strong>{project.name} <em className={`lifecycle-badge ${projectLifecycle(project)}`}>{lifecycleLabel[projectLifecycle(project)]}</em></strong><small>{projectPrimaryMilestone(project) ? `主：${projectPrimaryMilestone(project)?.name}` : `${project.owner} · ${project.org}`}</small></span><b>{project.score}</b></button>{matrixTemplates.map((template) => { const milestone = project.milestones?.find((row) => row.templateId === template.id || row.name === template.name); const cellStatus = milestone?.status ?? "na"; const stageRole = !milestone ? "" : project.stageSummary?.primaryMilestoneId === milestone.id ? "primary-stage" : project.stageSummary?.parallelMilestoneIds.includes(milestone.id) ? "parallel-stage" : project.stageSummary?.carryoverMilestoneIds.includes(milestone.id) ? "carryover-stage" : ""; return <button key={template.id} className={`portfolio-heat-cell ${cellStatus} ${stageRole}`} aria-label={`${project.name} ${template.name} ${statusLabel[cellStatus]}`} onClick={() => onNavigate("project", project.id)}><span>{stageRole === "primary-stage" ? "主" : stageRole === "parallel-stage" ? "并" : stageRole === "carryover-stage" ? "遗" : statusSymbol[cellStatus]}</span><small>{cellStatus === "na" ? "N/A" : milestone && milestone.deviationDays > 0 ? `+${milestone.deviationDays}天` : `${milestone?.completion ?? 0}%`}</small></button>; })}</div>)}</div></div>}
+        </div> : <div className="portfolio-matrix"><div className="portfolio-matrix-grid" style={{ "--portfolio-milestone-count": matrixTemplates.length } as React.CSSProperties}><div className="portfolio-matrix-head"><div>项目 / 健康度</div>{matrixTemplates.map((template) => <div key={template.id}><span>{template.code}</span>{template.name}</div>)}</div>{filtered.map((project) => <div className="portfolio-matrix-row" key={project.id}><button className="portfolio-project-cell" onClick={() => onNavigate("project", project.id)}><StatusPill status={project.status} compact /><span><strong>{project.name} <em className={`lifecycle-badge ${projectLifecycle(project)}`}>{lifecycleLabel[projectLifecycle(project)]}</em></strong><small>{projectPrimaryMilestone(project) ? `主：${projectPrimaryMilestone(project)?.name}` : `${project.owner} · ${project.org}`}</small></span><b>{project.score}</b></button>{matrixTemplates.map((template) => { const milestone = project.milestones?.find((row) => row.templateId === template.id || row.name === template.name); const cellStatus = milestone?.status ?? "na"; const notStarted = milestoneIsNotStarted(milestone) && cellStatus !== "na"; const stageRole = !milestone || notStarted ? "" : project.stageSummary?.parallelMilestoneIds.includes(milestone.id) ? "parallel-stage" : project.stageSummary?.carryoverMilestoneIds.includes(milestone.id) ? "carryover-stage" : ""; return <button key={template.id} className={`portfolio-heat-cell ${notStarted ? "not-started" : cellStatus} ${stageRole}`} aria-label={`${project.name} ${template.name} ${notStarted ? `未开始 ${statusLabel[cellStatus]}` : statusLabel[cellStatus]}`} onClick={() => onNavigate("project", project.id)}><span>{stageRole === "parallel-stage" ? "并" : stageRole === "carryover-stage" ? "遗" : notStarted ? executionStatusSymbol.not_started : statusSymbol[cellStatus]}</span><small>{cellStatus === "na" ? "N/A" : notStarted ? "未开始" : milestone && milestone.deviationDays > 0 ? `+${milestone.deviationDays}天` : `${milestone?.completion ?? 0}%`}</small></button>; })}</div>)}</div></div>}
         <div className="pagination"><span>共 {matching.length} 条，每页 10 条</span><div><button disabled={safePage === 0} onClick={() => setPage((current) => Math.max(0, current - 1))}>‹</button>{Array.from({ length: pageCount }, (_, index) => <button key={index} className={safePage === index ? "active" : ""} onClick={() => setPage(index)}>{index + 1}</button>)}<button disabled={safePage === pageCount - 1} onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))}>›</button></div></div>
       </section>
     </div>

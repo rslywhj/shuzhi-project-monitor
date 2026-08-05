@@ -20,6 +20,10 @@ import {
 import { buildRollingWeeks } from "@/lib/biweekly-plan";
 import { shanghaiDateIso } from "@/lib/date-time";
 import { isoWeekKeyForDate } from "@/lib/reporting-period";
+import {
+  DEMO_MILESTONE_CADENCE_DAYS,
+  seedProjects,
+} from "@/lib/demo-seed-data";
 
 async function ensureBaselineVersionRows(db: ReturnType<typeof getDb>) {
   const [projectRows, versionRows] = await Promise.all([
@@ -95,42 +99,6 @@ const standardMilestoneTemplates = [
   ["M11", "上线切换", 10, true, "完成生产上线、切换和运行观察"],
   ["M12", "结项移交", 5, false, "完成项目结项、资料归档和运维移交"],
 ] as const;
-
-type DemoProjectSeed = {
-  id: string;
-  name: string;
-  owner: string;
-  org: string;
-  type: string;
-  startOffset: number;
-  completeThrough: number;
-  partialCompletion: number;
-  forecastDelay: number;
-  actualDelay: number;
-  riskLevel: "low" | "medium" | "high";
-  lifecycleStatus?: "active" | "completed" | "archived";
-  naSequences?: number[];
-  currentBaselineVersion?: number;
-};
-
-const seedProjects: DemoProjectSeed[] = [
-  { id: "P01", name: "司库管理系统", owner: "王嘉", org: "财务数智组", type: "核心系统", startOffset: -310, completeThrough: 12, partialCompletion: 100, forecastDelay: 0, actualDelay: 0, riskLevel: "low", lifecycleStatus: "completed" },
-  { id: "P02", name: "智慧采购平台", owner: "李程", org: "供应链组", type: "业务平台", startOffset: -130, completeThrough: 5, partialCompletion: 62, forecastDelay: 14, actualDelay: 1, riskLevel: "high", currentBaselineVersion: 2 },
-  { id: "P03", name: "人力资源共享平台", owner: "陈路", org: "人力数智组", type: "业务平台", startOffset: -100, completeThrough: 5, partialCompletion: 58, forecastDelay: 0, actualDelay: 0, riskLevel: "high" },
-  { id: "P04", name: "合同全生命周期管理", owner: "周航", org: "法务数智组", type: "核心系统", startOffset: -70, completeThrough: 3, partialCompletion: 82, forecastDelay: 0, actualDelay: 0, riskLevel: "low", naSequences: [8] },
-  { id: "P05", name: "财务共享中心二期", owner: "赵敏", org: "财务数智组", type: "核心系统", startOffset: -160, completeThrough: 4, partialCompletion: 45, forecastDelay: 18, actualDelay: 3, riskLevel: "high" },
-  { id: "P06", name: "数据资产管理平台", owner: "孙悦", org: "数据治理组", type: "数据平台", startOffset: -90, completeThrough: 4, partialCompletion: 70, forecastDelay: 5, actualDelay: -1, riskLevel: "medium", naSequences: [8, 9] },
-  { id: "P07", name: "经营分析驾驶舱", owner: "何清", org: "数据治理组", type: "数据平台", startOffset: -200, completeThrough: 11, partialCompletion: 45, forecastDelay: -2, actualDelay: -4, riskLevel: "low" },
-  { id: "P08", name: "审计数字化平台", owner: "刘可", org: "监督数智组", type: "业务平台", startOffset: -70, completeThrough: 3, partialCompletion: 78, forecastDelay: 0, actualDelay: 0, riskLevel: "low" },
-  { id: "P09", name: "主数据治理一期", owner: "林亦", org: "数据治理组", type: "数据平台", startOffset: -95, completeThrough: 5, partialCompletion: 22, forecastDelay: 2, actualDelay: 2, riskLevel: "medium", currentBaselineVersion: 2 },
-  { id: "P10", name: "统一门户升级项目", owner: "高远", org: "技术平台组", type: "技术底座", startOffset: -400, completeThrough: 12, partialCompletion: 100, forecastDelay: 0, actualDelay: 4, riskLevel: "low", lifecycleStatus: "archived" },
-  { id: "P11", name: "投资管理一体化平台", owner: "宋妍", org: "投资数智组", type: "业务平台", startOffset: -5, completeThrough: 0, partialCompletion: 15, forecastDelay: 0, actualDelay: 0, riskLevel: "low" },
-  { id: "P12", name: "审计整改闭环平台", owner: "郑睿", org: "监督数智组", type: "业务平台", startOffset: -230, completeThrough: 12, partialCompletion: 100, forecastDelay: 0, actualDelay: 2, riskLevel: "low", lifecycleStatus: "completed" },
-  { id: "P13", name: "供应商协同门户", owner: "徐宁", org: "供应链组", type: "业务平台", startOffset: -80, completeThrough: 4, partialCompletion: 75, forecastDelay: 0, actualDelay: 0, riskLevel: "low" },
-  { id: "P14", name: "数据中台能力升级", owner: "叶川", org: "技术平台组", type: "技术底座", startOffset: -110, completeThrough: 5, partialCompletion: 52, forecastDelay: 6, actualDelay: 1, riskLevel: "medium" },
-  { id: "P15", name: "费用报销智能审核", owner: "沈佳", org: "财务数智组", type: "核心系统", startOffset: -55, completeThrough: 2, partialCompletion: 68, forecastDelay: 0, actualDelay: 0, riskLevel: "low" },
-  { id: "P16", name: "统一身份权限治理", owner: "唐宇", org: "技术平台组", type: "技术底座", startOffset: -145, completeThrough: 7, partialCompletion: 65, forecastDelay: 4, actualDelay: 0, riskLevel: "medium" },
-];
 
 function demoDateAt(days: number) {
   const value = new Date(`${shanghaiDateIso()}T00:00:00Z`);
@@ -525,7 +493,9 @@ async function ensureDemoScenarioData(db: ReturnType<typeof getDb>) {
                   ? "关键分析模型提前交付，本周进展好于计划。"
                   : "本周按批准基线推进，节点状态已完成核验。",
           forecastFinish: demoDateAt(
-            seed.startOffset + 12 * 18 + seed.forecastDelay,
+            seed.startOffset +
+              12 * DEMO_MILESTONE_CADENCE_DAYS +
+              seed.forecastDelay,
           ),
           primaryMilestoneId:
             !isDraft &&
@@ -566,7 +536,9 @@ async function ensureDemoScenarioData(db: ReturnType<typeof getDb>) {
         };
       });
     });
-    for (const rowsChunk of chunks(reportRows, 8)) {
+    // Keep below D1's local/production bind-variable ceiling. Each report has
+    // enough columns that eight rows can exceed the SQLite parameter limit.
+    for (const rowsChunk of chunks(reportRows, 4)) {
       await db.insert(weeklyReports).values(rowsChunk).onConflictDoNothing();
     }
   }
@@ -849,8 +821,10 @@ export async function ensureSeeded() {
         : archived
           ? "历史项目已完成资料归档，仅保留只读记录。"
           : "",
-      completedAt: completed ? `${demoDateAt(project.id === "P12" ? -5 : -70)}T09:00:00.000Z` : null,
-      archivedAt: archived ? `${demoDateAt(-100)}T09:00:00.000Z` : null,
+      completedAt: completed
+        ? `${demoDateAt(project.id === "P12" ? -2 : -55)}T09:00:00.000Z`
+        : null,
+      archivedAt: archived ? `${demoDateAt(-90)}T09:00:00.000Z` : null,
       currentBaselineVersion: project.currentBaselineVersion ?? 1,
     };
   });
@@ -873,7 +847,8 @@ export async function ensureSeeded() {
           applicable && sequence <= project.completeThrough && !carryover;
         const current =
           applicable && sequence === project.completeThrough + 1;
-        const plannedFinishOffset = project.startOffset + sequence * 18;
+        const plannedFinishOffset =
+          project.startOffset + sequence * DEMO_MILESTONE_CADENCE_DAYS;
         const deviationDays = completed
           ? project.actualDelay
           : current || sequence > project.completeThrough
@@ -900,7 +875,9 @@ export async function ensureSeeded() {
           critical,
           applicable,
           custom: false,
-          plannedStart: demoDateAt(project.startOffset + index * 18),
+          plannedStart: demoDateAt(
+            project.startOffset + index * DEMO_MILESTONE_CADENCE_DAYS,
+          ),
           plannedFinish: demoDateAt(plannedFinishOffset),
           forecastFinish:
             applicable && !completed
@@ -921,7 +898,11 @@ export async function ensureSeeded() {
               : ("not_started" as const),
           actualStart:
             completed || (current && project.id !== "P04")
-              ? demoDateAt(project.startOffset + index * 18 + 1)
+              ? demoDateAt(
+                  project.startOffset +
+                    index * DEMO_MILESTONE_CADENCE_DAYS +
+                    1,
+                )
               : null,
           pausedReason:
             current && project.id === "P03"

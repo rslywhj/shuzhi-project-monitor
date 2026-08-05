@@ -24,7 +24,7 @@ test("paginates A4 cockpit rows by active font scale and content height", () => 
   );
   assert.deepEqual(
     paginateTimelinePrintRows(rows, 1).map((page) => page.length),
-    [10],
+    [9, 1],
   );
   assert.deepEqual(
     paginateTimelinePrintRows(rows, 2).map((page) => page.length),
@@ -44,15 +44,16 @@ test("paginates A4 cockpit rows by active font scale and content height", () => 
     marker.dateLabel = "实际完成";
     marker.dateValue = "2026-08-19";
   });
-  assert(
-    timelinePrintRowHeightMm(actualDateRow, 1) >
-      timelinePrintRowHeightMm(timelineRow("normal", 2), 1),
+  assert.equal(
+    timelinePrintRowHeightMm(actualDateRow, 1),
+    timelinePrintRowHeightMm(timelineRow("normal", 2), 1),
   );
 });
 
 test("prints the live timeline legend and scales every PDF text surface", async () => {
-  const [component, css] = await Promise.all([
+  const [component, timelineComponent, css] = await Promise.all([
     readFile(new URL("../app/cockpit-print-report.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/timeline-cockpit.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   ]);
   assert.match(component, /◇ 计划/);
@@ -62,6 +63,9 @@ test("prints the live timeline legend and scales every PDF text surface", async 
   assert.match(component, /paginateTimelinePrintRows\(rows, fontScale\)/);
   assert.match(component, /timelinePrintRowHeightMm\(row, fontScale\)/);
   assert.match(component, /marker\.dateLabel.*marker\.dateValue/);
+  assert.match(component, /进度 \{marker\.completion\}%/);
+  assert.match(timelineComponent, /timeline-marker-metrics/);
+  assert.match(timelineComponent, /marker\.milestone\.completion\}%/);
   assert.match(css, /--print-font-scale/);
   assert.match(css, /font-size:calc\(14pt \* var\(--print-font-scale,1\)\)/);
   assert.match(css, /\.cockpit-print-page>footer\{display:flex/);

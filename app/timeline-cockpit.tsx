@@ -298,6 +298,7 @@ export default function TimelineCockpit({
         symbol: markerSymbol(marker),
         status: marker.milestone.status,
         critical: marker.milestone.critical,
+        completion: marker.milestone.completion,
         dateLabel: displayDate?.label,
         dateValue: displayDate?.value,
       };
@@ -617,7 +618,7 @@ export default function TimelineCockpit({
                               markers: [marker],
                             })
                           }
-                          aria-label={`${project.name} ${marker.milestone.name} ${markerRoleLabel(marker)} ${STATUS_LABEL[marker.milestone.status]}${displayDate ? ` ${displayDate.label} ${displayDate.value}` : ""}`}
+                          aria-label={`${project.name} ${marker.milestone.name} ${markerRoleLabel(marker)} ${STATUS_LABEL[marker.milestone.status]} 节点进度 ${marker.milestone.completion}%${displayDate ? ` ${displayDate.label} ${displayDate.value}` : ""}`}
                         >
                           <span className="timeline-marker-symbol">{markerSymbol(marker)}</span>
                           <span className="timeline-marker-title">
@@ -628,7 +629,10 @@ export default function TimelineCockpit({
                               </small>
                             )}
                           </span>
-                          <em>{markerRoleLabel(marker)}</em>
+                          <span className="timeline-marker-metrics">
+                            <em>{markerRoleLabel(marker)}</em>
+                            <small>{marker.milestone.completion}%</small>
+                          </span>
                           {showPrimaryStageIndicator && <i title="当前主节点">主</i>}
                           {marker.milestone.critical && <i title="关键节点">关</i>}
                         </button>

@@ -1,14 +1,14 @@
 import { normalizeFontScale } from "./theme.ts";
 
 export type TimelinePrintHeightRow = {
-  markers: Array<{ monthKey: string; plannedFinish?: string | null }>;
+  markers: Array<{ monthKey: string; dateValue?: string | null }>;
 };
 
 const PRINT_BODY_BASE_HEIGHT_MM = 142;
 const PRINT_SCALE_HEIGHT_PENALTY_MM = 10;
 const TIMELINE_BASE_ROW_HEIGHT_MM = 13.5;
 const TIMELINE_MARKER_HEIGHT_MM = 5.8;
-const TIMELINE_MARKER_WITH_PLAN_HEIGHT_MM = 7.4;
+const TIMELINE_MARKER_WITH_DATE_HEIGHT_MM = 7.4;
 const MATRIX_BASE_ROW_HEIGHT_MM = 16;
 
 export function printBodyHeightMm(fontScale: number) {
@@ -27,8 +27,8 @@ export function timelinePrintRowHeightMm(
     markerHeightByMonth.set(
       marker.monthKey,
       (markerHeightByMonth.get(marker.monthKey) ?? 0) +
-        (marker.plannedFinish
-          ? TIMELINE_MARKER_WITH_PLAN_HEIGHT_MM
+        (marker.dateValue
+          ? TIMELINE_MARKER_WITH_DATE_HEIGHT_MM
           : TIMELINE_MARKER_HEIGHT_MM),
     );
   }

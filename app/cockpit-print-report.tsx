@@ -26,7 +26,8 @@ export type TimelinePrintMarker = {
   symbol: string;
   status: PrintStatus;
   critical: boolean;
-  plannedFinish?: string | null;
+  dateLabel?: "计划完成" | "实际完成";
+  dateValue?: string | null;
 };
 
 export type TimelinePrintRow = {
@@ -142,7 +143,7 @@ export function TimelinePrintReport({
         <ReportPage key={pageIndex} title="项目里程碑时间轴" subtitle={`${months[0]?.label ?? "—"} 至 ${months.at(-1)?.label ?? "—"} · 当前筛选共 ${rows.length} 个项目`} snapshot={snapshot} filters={filters} page={pageIndex + 1} pageCount={pages.length} legend={<TimelinePrintLegend />}>
           <table className="cockpit-print-table timeline">
             <thead><tr><th>项目 / 健康度</th>{months.map((month) => <th key={month.key} className={month.isCurrent ? "current" : ""}>{month.year}<br/><b>{month.shortLabel}</b></th>)}</tr></thead>
-            <tbody>{pageRows.length ? pageRows.map((row) => <tr key={row.id} style={{ "--print-row-height": `${timelinePrintRowHeightMm(row, fontScale)}mm` } as CSSProperties}><th><strong>{statusSymbol[row.status]} {row.name}</strong><small>{statusLabel[row.status]} · {row.score}分 · {row.owner} · {row.org}{row.stageLabel ? <><br/>{row.stageLabel}</> : null}</small></th>{months.map((month) => { const markers = row.markers.filter((marker) => marker.monthKey === month.key); return <td key={month.key} className={month.isCurrent ? "current" : ""}>{markers.length ? markers.map((marker) => <span className={`print-marker ${marker.status}`} key={marker.key}><b>{marker.symbol} {marker.label}{marker.critical ? " ◆" : ""}</b>{marker.plannedFinish ? <small>计划完成 {marker.plannedFinish}</small> : null}</span>) : <i>—</i>}</td>; })}</tr>) : <tr><td colSpan={months.length + 1}>当前筛选条件下暂无项目</td></tr>}</tbody>
+            <tbody>{pageRows.length ? pageRows.map((row) => <tr key={row.id} style={{ "--print-row-height": `${timelinePrintRowHeightMm(row, fontScale)}mm` } as CSSProperties}><th><strong>{statusSymbol[row.status]} {row.name}</strong><small>{statusLabel[row.status]} · {row.score}分 · {row.owner} · {row.org}{row.stageLabel ? <><br/>{row.stageLabel}</> : null}</small></th>{months.map((month) => { const markers = row.markers.filter((marker) => marker.monthKey === month.key); return <td key={month.key} className={month.isCurrent ? "current" : ""}>{markers.length ? markers.map((marker) => <span className={`print-marker ${marker.status}`} key={marker.key}><b>{marker.symbol} {marker.label}{marker.critical ? " ◆" : ""}</b>{marker.dateLabel && marker.dateValue ? <small>{marker.dateLabel} {marker.dateValue}</small> : null}</span>) : <i>—</i>}</td>; })}</tr>) : <tr><td colSpan={months.length + 1}>当前筛选条件下暂无项目</td></tr>}</tbody>
           </table>
         </ReportPage>
       ))}

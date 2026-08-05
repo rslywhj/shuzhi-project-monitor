@@ -69,6 +69,11 @@ export type TimelineKpi = {
 
 export type TimelineKpis = Record<TimelineKpiFilter, TimelineKpi>;
 
+export type TimelineMilestoneDisplayDate = {
+  label: "计划完成" | "实际完成";
+  value: string;
+};
+
 const MONTH_KEY_PATTERN = /^(\d{4})-(\d{2})$/;
 
 export function unfinishedPlannedFinish(
@@ -79,6 +84,23 @@ export function unfinishedPlannedFinish(
     milestone.completion >= 100 ||
     Boolean(milestone.actualFinish);
   return completed ? null : (milestone.plannedFinish || null);
+}
+
+export function timelineMilestoneDisplayDate(
+  milestone: TimelineMilestoneInput,
+): TimelineMilestoneDisplayDate | null {
+  const completed =
+    milestone.executionStatus === "completed" ||
+    milestone.completion >= 100 ||
+    Boolean(milestone.actualFinish);
+  if (completed) {
+    return milestone.actualFinish
+      ? { label: "实际完成", value: milestone.actualFinish }
+      : null;
+  }
+  return milestone.plannedFinish
+    ? { label: "计划完成", value: milestone.plannedFinish }
+    : null;
 }
 
 export function compactTimelineDate(value: string) {

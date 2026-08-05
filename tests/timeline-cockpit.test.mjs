@@ -7,6 +7,7 @@ import {
   buildTimelineMonths,
   compactTimelineDate,
   markerMatchesKpi,
+  timelineMilestoneDisplayDate,
   timelineProjectIsVisible,
   unfinishedPlannedFinish,
 } from "../lib/timeline-cockpit.ts";
@@ -65,6 +66,20 @@ test("shows a compact planned finish date only for unfinished milestones", () =>
       milestone({ completion: 60, executionStatus: "completed" }),
     ),
     null,
+  );
+  assert.deepEqual(timelineMilestoneDisplayDate(unfinished), {
+    label: "计划完成",
+    value: "2026-08-19",
+  });
+  assert.deepEqual(
+    timelineMilestoneDisplayDate(
+      milestone({
+        completion: 100,
+        executionStatus: "completed",
+        actualFinish: "2026-08-18",
+      }),
+    ),
+    { label: "实际完成", value: "2026-08-18" },
   );
 });
 

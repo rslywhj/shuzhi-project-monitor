@@ -15,7 +15,7 @@ import {
   compactTimelineDate,
   timelineProjectIsVisible,
   timelineProjectPriority,
-  unfinishedPlannedFinish,
+  timelineMilestoneDisplayDate,
   type TimelineKpiFilter,
   type TimelineMarker,
   type TimelineMonth,
@@ -288,15 +288,19 @@ export default function TimelineCockpit({
     status: project.status,
     score: project.score,
     stageLabel: timelineProjectStageLabel(project) ?? "尚无执行中节点",
-    markers: markers.map((marker) => ({
-      key: marker.key,
-      monthKey: marker.monthKey,
-      label: `${marker.milestone.name} ${markerRoleLabel(marker)}`,
-      symbol: markerSymbol(marker),
-      status: marker.milestone.status,
-      critical: marker.milestone.critical,
-      plannedFinish: unfinishedPlannedFinish(marker.milestone),
-    })),
+    markers: markers.map((marker) => {
+      const displayDate = timelineMilestoneDisplayDate(marker.milestone);
+      return {
+        key: marker.key,
+        monthKey: marker.monthKey,
+        label: `${marker.milestone.name} ${markerRoleLabel(marker)}`,
+        symbol: markerSymbol(marker),
+        status: marker.milestone.status,
+        critical: marker.milestone.critical,
+        dateLabel: displayDate?.label,
+        dateValue: displayDate?.value,
+      };
+    }),
   }));
 
   function applyPageSize(value: string) {
@@ -585,7 +589,7 @@ export default function TimelineCockpit({
                           activeKpi,
                           currentMonthKey,
                         );
-                      const plannedFinish = unfinishedPlannedFinish(
+                      const displayDate = timelineMilestoneDisplayDate(
                         marker.milestone,
                       );
                       const showPrimaryStageIndicator =
@@ -604,14 +608,14 @@ export default function TimelineCockpit({
                               markers: [marker],
                             })
                           }
-                          aria-label={`${project.name} ${marker.milestone.name} ${markerRoleLabel(marker)} ${STATUS_LABEL[marker.milestone.status]}${plannedFinish ? ` 计划完成 ${plannedFinish}` : ""}`}
+                          aria-label={`${project.name} ${marker.milestone.name} ${markerRoleLabel(marker)} ${STATUS_LABEL[marker.milestone.status]}${displayDate ? ` ${displayDate.label} ${displayDate.value}` : ""}`}
                         >
                           <span className="timeline-marker-symbol">{markerSymbol(marker)}</span>
                           <span className="timeline-marker-title">
                             <strong>{marker.milestone.name}</strong>
-                            {plannedFinish && (
-                              <small title={`计划完成日期 ${plannedFinish}`}>
-                                计划完成 {compactTimelineDate(plannedFinish)}
+                            {displayDate && (
+                              <small title={`${displayDate.label}日期 ${displayDate.value}`}>
+                                {displayDate.label} {compactTimelineDate(displayDate.value)}
                               </small>
                             )}
                           </span>

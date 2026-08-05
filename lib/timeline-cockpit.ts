@@ -332,3 +332,22 @@ export function timelineProjectPriority(
     statusRank[project.status]
   );
 }
+
+export function compareTimelineProjectUrgency(
+  left: { project: TimelineProjectInput; markers: TimelineMarker[] },
+  right: { project: TimelineProjectInput; markers: TimelineMarker[] },
+  currentMonthKey: string,
+) {
+  return (
+    timelineProjectPriority(
+      right.project,
+      right.markers,
+      currentMonthKey,
+    ) -
+      timelineProjectPriority(
+        left.project,
+        left.markers,
+        currentMonthKey,
+      ) || left.project.name.localeCompare(right.project.name, "zh-CN")
+  );
+}

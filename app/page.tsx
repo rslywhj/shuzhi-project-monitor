@@ -30,6 +30,17 @@ import {
   formatShanghaiMonthDayTime,
   SHANGHAI_TIME_ZONE_LABEL,
 } from "@/lib/date-time";
+import {
+  buildProjectTimelineMarkers,
+  buildTimelineMonths,
+  compareTimelineProjectUrgency,
+} from "@/lib/timeline-cockpit";
+import {
+  DEFAULT_COCKPIT_SORT_MODE,
+  normalizeCockpitSortMode,
+  persistCockpitSortMode,
+  type CockpitSortMode,
+} from "@/lib/cockpit-sort";
 
 type Status = "green" | "yellow" | "red" | "na";
 type View =
@@ -781,6 +792,9 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
   const [owner, setOwner] = useState("全部负责人");
   const [projectType, setProjectType] = useState("全部类型");
   const [health, setHealth] = useState("全部状态");
+  const [sortMode, setSortMode] = useState<CockpitSortMode>(
+    DEFAULT_COCKPIT_SORT_MODE,
+  );
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(COCKPIT_DEFAULT_PAGE_SIZE);
   const [pageSizeInput, setPageSizeInput] = useState(
@@ -803,16 +817,41 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
     .filter((template) => template.active)
     .sort((left, right) => left.sequence - right.sequence)
     .map((template) => template.name);
+  const cockpitTodayParts = shanghaiDateParts();
+  const cockpitToday = `${cockpitTodayParts.year}-${String(cockpitTodayParts.month).padStart(2, "0")}-${String(cockpitTodayParts.day).padStart(2, "0")}`;
+  const currentMonthKey = cockpitToday.slice(0, 7);
+  const sortAsOfDate = snapshot?.lockedAt
+    ? formatShanghaiDate(snapshot.lockedAt)
+    : cockpitToday;
+  const sortMonths = useMemo(
+    () => buildTimelineMonths(currentMonthKey),
+    [currentMonthKey],
+  );
   const matching = useMemo(
-    () =>
-      activeProjects.filter(
+    () => {
+      const scopedProjects = activeProjects.filter(
         (project) =>
           (org === "全部组织" || project.org === org) &&
           (owner === "全部负责人" || project.owner === owner) &&
           (projectType === "全部类型" || project.type === projectType) &&
           (health === "全部状态" || statusLabel[project.status] === health),
-      ),
-    [activeProjects, health, org, owner, projectType],
+      );
+      if (sortMode === "default") return scopedProjects;
+      return scopedProjects
+        .map((project) => ({
+          project,
+          markers: buildProjectTimelineMarkers(
+            project,
+            sortMonths,
+            sortAsOfDate,
+          ),
+        }))
+        .sort((left, right) =>
+          compareTimelineProjectUrgency(left, right, currentMonthKey),
+        )
+        .map(({ project }) => project);
+    },
+    [activeProjects, currentMonthKey, health, org, owner, projectType, sortAsOfDate, sortMode, sortMonths],
   );
   const pageCount = Math.max(
     1,
@@ -869,8 +908,7 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
       return rightPriority - leftPriority || left.score - right.score;
     })
     .slice(0, 3);
-  const todayParts = shanghaiDateParts();
-  const today = `${todayParts.year}-${String(todayParts.month).padStart(2, "0")}-${String(todayParts.day).padStart(2, "0")}`;
+  const today = cockpitToday;
   const nextWeek = new Date(`${today}T00:00:00Z`);
   nextWeek.setUTCDate(nextWeek.getUTCDate() + 7);
   const nextWeekDate = nextWeek.toISOString().slice(0, 10);
@@ -971,6 +1009,7 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
             pageSize?: number;
             autoPageEnabled?: boolean;
             autoPageSeconds?: number;
+            sortMode?: CockpitSortMode;
           };
           if (
             Number.isInteger(preferences.pageSize) &&
@@ -990,6 +1029,7 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
           ) {
             setAutoPageSeconds(preferences.autoPageSeconds!);
           }
+          setSortMode(normalizeCockpitSortMode(preferences.sortMode));
         }
       } catch {
         // Ignore invalid browser preferences and keep safe defaults.
@@ -1012,13 +1052,14 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
     if (!paginationPreferencesReady) return;
     window.localStorage.setItem(
       COCKPIT_PAGINATION_STORAGE_KEY,
-      JSON.stringify({ pageSize, autoPageEnabled, autoPageSeconds }),
+      JSON.stringify({ pageSize, autoPageEnabled, autoPageSeconds, sortMode }),
     );
   }, [
     autoPageEnabled,
     autoPageSeconds,
     pageSize,
     paginationPreferencesReady,
+    sortMode,
   ]);
 
   useEffect(() => {
@@ -1083,6 +1124,12 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
         <label>健康度
           <select value={health} onChange={e => { setHealth(e.target.value); setPage(0); }}>
             <option>全部状态</option><option>正常</option><option>预警</option><option>严重</option>
+          </select>
+        </label>
+        <label>排序
+          <select value={sortMode} onChange={e => { const nextSortMode = e.target.value as CockpitSortMode; persistCockpitSortMode(window.localStorage, COCKPIT_PAGINATION_STORAGE_KEY, nextSortMode); setSortMode(nextSortMode); setPage(0); }}>
+            <option value="urgency">当月紧迫度</option>
+            <option value="default">项目原顺序</option>
           </select>
         </label>
         <div className="legend"><span className="green">● 正常</span><span className="yellow">▲ 预警</span><span className="red">■ 严重</span><span className="not-started">○ 未开始</span><span className="na">— 不适用</span><span>并 并行节点</span><span>遗 前序遗留</span></div>

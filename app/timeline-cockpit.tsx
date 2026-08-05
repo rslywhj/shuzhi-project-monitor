@@ -11,10 +11,10 @@ import {
   buildProjectTimelineMarkers,
   buildTimelineKpis,
   buildTimelineMonths,
+  compareTimelineProjectUrgency,
   markerMatchesKpi,
   compactTimelineDate,
   timelineProjectIsVisible,
-  timelineProjectPriority,
   timelineMilestoneDisplayDate,
   type TimelineKpiFilter,
   type TimelineMarker,
@@ -22,6 +22,12 @@ import {
   type TimelineProjectInput,
   type TimelineStatus,
 } from "@/lib/timeline-cockpit";
+import {
+  DEFAULT_COCKPIT_SORT_MODE,
+  normalizeCockpitSortMode,
+  persistCockpitSortMode,
+  type CockpitSortMode,
+} from "@/lib/cockpit-sort";
 import {
   formatShanghaiDate,
   formatShanghaiMonthDayTime,
@@ -174,6 +180,9 @@ export default function TimelineCockpit({
   const [owner, setOwner] = useState("全部负责人");
   const [projectType, setProjectType] = useState("全部类型");
   const [health, setHealth] = useState("全部状态");
+  const [sortMode, setSortMode] = useState<CockpitSortMode>(
+    DEFAULT_COCKPIT_SORT_MODE,
+  );
   const [activeKpi, setActiveKpi] = useState<TimelineKpiFilter | null>(null);
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
@@ -237,20 +246,11 @@ export default function TimelineCockpit({
           (health === "全部状态" || STATUS_LABEL[project.status] === health) &&
           (!activeKpi || kpis[activeKpi].projectIds.has(project.id)),
       );
-    return visibleProjects.sort(
-      (left, right) =>
-        timelineProjectPriority(
-          right.project,
-          right.markers,
-          currentMonthKey,
-        ) -
-          timelineProjectPriority(
-            left.project,
-            left.markers,
-            currentMonthKey,
-          ) ||
-        left.project.name.localeCompare(right.project.name, "zh-CN"),
-    );
+    return sortMode === "urgency"
+      ? visibleProjects.sort((left, right) =>
+          compareTimelineProjectUrgency(left, right, currentMonthKey),
+        )
+      : visibleProjects;
   }, [
     activeKpi,
     asOfDate,
@@ -262,6 +262,7 @@ export default function TimelineCockpit({
     owner,
     projectData,
     projectType,
+    sortMode,
   ]);
   const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
   const currentPage = Math.min(page, pageCount - 1);
@@ -350,6 +351,7 @@ export default function TimelineCockpit({
             pageSize?: number;
             autoPageEnabled?: boolean;
             autoPageSeconds?: number;
+            sortMode?: CockpitSortMode;
           };
           if (
             Number.isInteger(preferences.pageSize) &&
@@ -369,6 +371,7 @@ export default function TimelineCockpit({
           ) {
             setAutoPageSeconds(preferences.autoPageSeconds!);
           }
+          setSortMode(normalizeCockpitSortMode(preferences.sortMode));
         }
       } catch {
         // Keep safe defaults when a browser contains stale preferences.
@@ -383,9 +386,9 @@ export default function TimelineCockpit({
     if (!preferencesReady) return;
     window.localStorage.setItem(
       PAGINATION_STORAGE_KEY,
-      JSON.stringify({ pageSize, autoPageEnabled, autoPageSeconds }),
+      JSON.stringify({ pageSize, autoPageEnabled, autoPageSeconds, sortMode }),
     );
-  }, [autoPageEnabled, autoPageSeconds, pageSize, preferencesReady]);
+  }, [autoPageEnabled, autoPageSeconds, pageSize, preferencesReady, sortMode]);
 
   useEffect(() => {
     if (!autoPageEnabled || pageCount <= 1 || selected) return;
@@ -527,6 +530,12 @@ export default function TimelineCockpit({
                 <option>全部状态</option><option>正常</option><option>预警</option><option>严重</option>
               </select>
             </label>
+            <label>排序
+              <select value={sortMode} onChange={(event) => { const nextSortMode = event.target.value as CockpitSortMode; persistCockpitSortMode(window.localStorage, PAGINATION_STORAGE_KEY, nextSortMode); setSortMode(nextSortMode); setPage(0); }}>
+                <option value="urgency">当月紧迫度</option>
+                <option value="default">项目原顺序</option>
+              </select>
+            </label>
           </div>
         </div>
       </section>
@@ -540,9 +549,10 @@ export default function TimelineCockpit({
           style={{ "--timeline-month-count": months.length } as CSSProperties}
         >
           <div className="timeline-grid-head">
-            <div className="timeline-project-column">
-              <span>项目 / 健康度</span>
-              <small>按当月紧迫度排序</small>
+            <div className="timeline-project-column timeline-project-header">
+              <span>健康</span>
+              <strong>项目</strong>
+              <small>评分</small>
             </div>
             {months.map((month) => (
               <div
@@ -552,7 +562,6 @@ export default function TimelineCockpit({
               >
                 <span>{month.year}</span>
                 <strong>{month.shortLabel}</strong>
-                <small>{month.isCurrent ? "当前月" : "里程碑完成月"}</small>
               </div>
             ))}
           </div>

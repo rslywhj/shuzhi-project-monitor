@@ -35,6 +35,7 @@ export type TimelinePrintRow = {
   org: string;
   status: PrintStatus;
   score: number;
+  stageLabel?: string;
   markers: TimelinePrintMarker[];
 };
 
@@ -45,6 +46,7 @@ export type MatrixPrintRow = {
   org: string;
   status: PrintStatus;
   score: number;
+  stageLabel?: string;
   cells: Array<{
     status: PrintStatus;
     completion: number | null;
@@ -139,7 +141,7 @@ export function TimelinePrintReport({
         <ReportPage key={pageIndex} title="项目里程碑时间轴" subtitle={`${months[0]?.label ?? "—"} 至 ${months.at(-1)?.label ?? "—"} · 当前筛选共 ${rows.length} 个项目`} snapshot={snapshot} filters={filters} page={pageIndex + 1} pageCount={pages.length} legend={<TimelinePrintLegend />}>
           <table className="cockpit-print-table timeline">
             <thead><tr><th>项目 / 健康度</th>{months.map((month) => <th key={month.key} className={month.isCurrent ? "current" : ""}>{month.year}<br/><b>{month.shortLabel}</b></th>)}</tr></thead>
-            <tbody>{pageRows.length ? pageRows.map((row) => <tr key={row.id} style={{ "--print-row-height": `${timelinePrintRowHeightMm(row, fontScale)}mm` } as CSSProperties}><th><strong>{statusSymbol[row.status]} {row.name}</strong><small>{statusLabel[row.status]} · {row.score}分 · {row.owner} · {row.org}</small></th>{months.map((month) => { const markers = row.markers.filter((marker) => marker.monthKey === month.key); return <td key={month.key} className={month.isCurrent ? "current" : ""}>{markers.length ? markers.map((marker) => <span className={`print-marker ${marker.status}`} key={marker.key}>{marker.symbol} {marker.label}{marker.critical ? " ◆" : ""}</span>) : <i>—</i>}</td>; })}</tr>) : <tr><td colSpan={months.length + 1}>当前筛选条件下暂无项目</td></tr>}</tbody>
+            <tbody>{pageRows.length ? pageRows.map((row) => <tr key={row.id} style={{ "--print-row-height": `${timelinePrintRowHeightMm(row, fontScale)}mm` } as CSSProperties}><th><strong>{statusSymbol[row.status]} {row.name}</strong><small>{statusLabel[row.status]} · {row.score}分 · {row.owner} · {row.org}{row.stageLabel ? <><br/>{row.stageLabel}</> : null}</small></th>{months.map((month) => { const markers = row.markers.filter((marker) => marker.monthKey === month.key); return <td key={month.key} className={month.isCurrent ? "current" : ""}>{markers.length ? markers.map((marker) => <span className={`print-marker ${marker.status}`} key={marker.key}>{marker.symbol} {marker.label}{marker.critical ? " ◆" : ""}</span>) : <i>—</i>}</td>; })}</tr>) : <tr><td colSpan={months.length + 1}>当前筛选条件下暂无项目</td></tr>}</tbody>
           </table>
         </ReportPage>
       ))}
@@ -167,7 +169,7 @@ export function MatrixPrintReport({
         <ReportPage key={pageIndex} title="项目 × 标准节点态势矩阵" subtitle={`当前筛选共 ${rows.length} 个项目 · ${milestones.length} 个标准节点`} snapshot={snapshot} filters={filters} page={pageIndex + 1} pageCount={pages.length} legend={<MatrixPrintLegend />}>
           <table className="cockpit-print-table matrix">
             <thead><tr><th>项目 / 健康度</th>{milestones.map((milestone, index) => <th key={`${milestone}-${index}`}><span>{String(index + 1).padStart(2, "0")}</span><br/>{milestone}</th>)}</tr></thead>
-            <tbody>{pageRows.length ? pageRows.map((row) => <tr key={row.id} style={{ "--print-row-height": `${rowHeight}mm` } as CSSProperties}><th><strong>{statusSymbol[row.status]} {row.name}</strong><small>{statusLabel[row.status]} · {row.score}分<br/>{row.owner} · {row.org}</small></th>{row.cells.map((cell, index) => <td className={cell.status} key={index}><b>{statusSymbol[cell.status]}</b><small>{cell.status === "na" ? "N/A" : cell.deviationDays && cell.deviationDays > 0 ? `+${cell.deviationDays}天` : `${cell.completion ?? 0}%`}</small></td>)}</tr>) : <tr><td colSpan={milestones.length + 1}>当前筛选条件下暂无项目</td></tr>}</tbody>
+            <tbody>{pageRows.length ? pageRows.map((row) => <tr key={row.id} style={{ "--print-row-height": `${rowHeight}mm` } as CSSProperties}><th><strong>{statusSymbol[row.status]} {row.name}</strong><small>{statusLabel[row.status]} · {row.score}分<br/>{row.owner} · {row.org}{row.stageLabel ? <><br/>{row.stageLabel}</> : null}</small></th>{row.cells.map((cell, index) => <td className={cell.status} key={index}><b>{statusSymbol[cell.status]}</b><small>{cell.status === "na" ? "N/A" : cell.deviationDays && cell.deviationDays > 0 ? `+${cell.deviationDays}天` : `${cell.completion ?? 0}%`}</small></td>)}</tr>) : <tr><td colSpan={milestones.length + 1}>当前筛选条件下暂无项目</td></tr>}</tbody>
           </table>
         </ReportPage>
       ))}

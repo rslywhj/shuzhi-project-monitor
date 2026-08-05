@@ -13,7 +13,13 @@ import {
   weeklyReports,
 } from "@/db/schema";
 import { apiError } from "@/lib/api-utils";
+import { formatShanghaiDate, shanghaiDateIso } from "@/lib/date-time";
 import { runPortfolioAutomation } from "@/lib/portfolio-automation";
+import {
+  calculateProjectStage,
+  latestConfirmedPrimary,
+  type ProjectStageSummary,
+} from "@/lib/project-stage";
 import { ensureSeeded } from "@/lib/seed";
 import { getRequestIdentity, unauthorized } from "@/lib/server-auth";
 
@@ -146,6 +152,19 @@ export async function GET(request: Request) {
         );
       }
     }
+    const confirmedPrimaryByProject = latestConfirmedPrimary(reportRows);
+    const liveStageByProject = new Map(
+      projectRows.map((project) => {
+        const summary = calculateProjectStage({
+          projectId: project.id,
+          milestones: projectMilestones.get(project.id) ?? [],
+          asOfDate: shanghaiDateIso(),
+          confirmedPrimaryMilestoneId: confirmedPrimaryByProject.get(project.id),
+          lifecycleStatus: project.lifecycleStatus,
+        });
+        return [project.id, summary] as const;
+      }),
+    );
     const lockedSnapshot = snapshotRows.find(
       (snapshot) => snapshot.status === "locked",
     );
@@ -156,10 +175,17 @@ export async function GET(request: Request) {
       predictedDelays: [],
       resourceConflicts: [],
     };
+    let dashboardStageDataQuality = {
+      missingPrimaryProjectIds: [] as string[],
+      shouldStartProjectIds: [] as string[],
+      carryoverProjectIds: [] as string[],
+    };
     if (lockedSnapshot) {
       const payload = JSON.parse(lockedSnapshot.payloadJson) as {
         projects?: typeof projectRows;
         milestones?: typeof milestoneRows;
+        projectStages?: ProjectStageSummary[];
+        stageDataQuality?: typeof dashboardStageDataQuality;
         dashboardAlerts?: DashboardAlerts;
       };
       dashboardAlerts = {
@@ -176,6 +202,10 @@ export async function GET(request: Request) {
         rows.push(milestone);
         snapshotMilestones.set(milestone.projectId, rows);
       }
+      const snapshotStageByProject = new Map(
+        (payload.projectStages ?? []).map((stage) => [stage.projectId, stage]),
+      );
+      dashboardStageDataQuality = payload.stageDataQuality ?? dashboardStageDataQuality;
       dashboardProjects = (payload.projects ?? []).map((project) => ({
         id: project.id,
         name: project.name,
@@ -204,6 +234,14 @@ export async function GET(request: Request) {
         ),
         cells: matrixCells(snapshotMilestones.get(project.id) ?? []),
         milestones: snapshotMilestones.get(project.id) ?? [],
+        stageSummary:
+          snapshotStageByProject.get(project.id) ??
+          calculateProjectStage({
+            projectId: project.id,
+            milestones: snapshotMilestones.get(project.id) ?? [],
+            asOfDate: formatShanghaiDate(lockedSnapshot.lockedAt),
+            lifecycleStatus: project.lifecycleStatus,
+          }),
         updatedAt: project.updatedAt,
       }));
     }
@@ -238,15 +276,21 @@ export async function GET(request: Request) {
         ),
         cells: matrixCells(projectMilestones.get(project.id) ?? []),
         milestones: projectMilestones.get(project.id) ?? [],
+        stageSummary: liveStageByProject.get(project.id),
         updatedAt: project.updatedAt,
         openRiskCount: openRiskCounts.get(project.id) ?? 0,
         openActionCount: openActionCounts.get(project.id) ?? 0,
       })),
-      weeklyReports: reportRows,
+      weeklyReports: reportRows.map((report) => ({
+        ...report,
+        milestoneUpdates: JSON.parse(report.milestoneUpdatesJson) as unknown,
+        milestoneUpdatesJson: undefined,
+      })),
       actions: actionRows,
       risks: riskRows,
       dashboardProjects,
       dashboardAlerts,
+      dashboardStageDataQuality,
       dashboardSnapshot: lockedSnapshot
         ? {
             id: lockedSnapshot.id,

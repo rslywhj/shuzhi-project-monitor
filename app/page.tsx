@@ -72,6 +72,28 @@ function describePasswordPolicy(policy: PasswordPolicy) {
 }
 type ProjectManagerAccount = { email: string; displayName: string };
 type Navigate = (view: View, projectId?: string) => void;
+type MilestoneExecutionStatus =
+  | "not_started"
+  | "in_progress"
+  | "paused"
+  | "completed";
+type ProjectStageSummary = {
+  projectId: string;
+  asOfDate: string;
+  state: "not_started" | "active" | "completed";
+  primaryMilestoneId: number | null;
+  primaryBasis:
+    | "manager_confirmed"
+    | "system_recommended"
+    | "legacy_inferred"
+    | "none";
+  activeMilestoneIds: number[];
+  parallelMilestoneIds: number[];
+  carryoverMilestoneIds: number[];
+  overdueCarryoverMilestoneIds: number[];
+  shouldStartMilestoneIds: number[];
+  nextMilestoneId: number | null;
+};
 type MilestoneData = {
   id: number;
   templateId?: number | null;
@@ -84,6 +106,11 @@ type MilestoneData = {
   plannedFinish: string;
   forecastFinish: string | null;
   actualFinish: string | null;
+  executionStatus?: MilestoneExecutionStatus;
+  actualStart?: string | null;
+  pausedReason?: string;
+  executionUpdatedAt?: string | null;
+  executionUpdatedBy?: string | null;
   deviationDays: number;
   reason: string;
   applicable: boolean;
@@ -151,6 +178,7 @@ type ProjectData = (typeof projects)[number] & {
   completedAt?: string | null;
   archivedAt?: string | null;
   healthExplanation?: HealthExplanation | null;
+  stageSummary?: ProjectStageSummary;
   milestones?: MilestoneData[];
 };
 type ProjectLifecycleStatus = NonNullable<ProjectData["lifecycleStatus"]>;
@@ -254,6 +282,15 @@ type WeeklyReportRow = {
   variance: number;
   reason: string;
   forecastFinish: string | null;
+  primaryMilestoneId?: number | null;
+  milestoneUpdates?: WeeklyMilestoneUpdate[];
+  actions?: Array<{
+    milestoneId?: number;
+    name?: string;
+    owner?: string;
+    recoveryDate?: string;
+    detail?: string;
+  }>;
   status: "draft" | "submitted" | "locked";
   submittedBy: string;
   submittedAt: string;
@@ -265,6 +302,15 @@ type WeeklyReportDraft = {
   declaredProgress?: number;
   reason?: string;
   forecastFinish?: string;
+  primaryMilestoneId?: number | null;
+  milestoneUpdates?: WeeklyMilestoneUpdate[];
+  actions?: Array<{
+    milestoneId?: number;
+    name?: string;
+    owner?: string;
+    recoveryDate?: string;
+    detail?: string;
+  }>;
   milestone?: {
     sequence?: number;
     completion?: number;
@@ -276,6 +322,35 @@ type WeeklyReportDraft = {
     owner?: string;
     recoveryDate?: string;
     detail?: string;
+  };
+};
+type WeeklyMilestoneUpdate = {
+  milestoneId?: number;
+  id?: number;
+  sequence?: number;
+  executionStatus?: MilestoneExecutionStatus;
+  completion?: number;
+  actualStart?: string | null;
+  forecastFinish?: string | null;
+  actualFinish?: string | null;
+  pausedReason?: string;
+  reason?: string;
+};
+type WeeklyNodeDraft = WeeklyMilestoneUpdate & {
+  milestoneId: number;
+  sequence: number;
+  executionStatus: MilestoneExecutionStatus;
+  completion: number;
+  actualStart: string | null;
+  forecastFinish: string | null;
+  actualFinish: string | null;
+  pausedReason: string;
+  reason: string;
+  action?: {
+    name: string;
+    owner: string;
+    recoveryDate: string;
+    detail: string;
   };
 };
 type AttachmentData = {
@@ -370,6 +445,18 @@ type ProjectActivityData = {
 
 const statusLabel: Record<Status, string> = { green: "正常", yellow: "预警", red: "严重", na: "不适用" };
 const statusSymbol: Record<Status, string> = { green: "●", yellow: "▲", red: "■", na: "—" };
+const executionStatusLabel: Record<MilestoneExecutionStatus, string> = {
+  not_started: "未开始",
+  in_progress: "进行中",
+  paused: "暂停",
+  completed: "已完成",
+};
+const executionStatusSymbol: Record<MilestoneExecutionStatus, string> = {
+  not_started: "○",
+  in_progress: "▶",
+  paused: "Ⅱ",
+  completed: "✓",
+};
 const lifecycleLabel: Record<ProjectLifecycleStatus, string> = {
   active: "在建",
   completed: "已结项",
@@ -377,6 +464,12 @@ const lifecycleLabel: Record<ProjectLifecycleStatus, string> = {
 };
 const projectLifecycle = (project: ProjectData): ProjectLifecycleStatus =>
   project.lifecycleStatus ?? "active";
+const projectPrimaryMilestone = (project: ProjectData) =>
+  project.stageSummary?.primaryMilestoneId
+    ? project.milestones?.find(
+        (milestone) => milestone.id === project.stageSummary?.primaryMilestoneId,
+      )
+    : undefined;
 
 function shanghaiDateParts(value = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -813,6 +906,11 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
     org: project.org,
     status: project.status,
     score: project.score,
+    stageLabel: projectPrimaryMilestone(project)
+      ? `主：${projectPrimaryMilestone(project)?.name} · 并行${project.stageSummary?.parallelMilestoneIds.length ?? 0} · 遗留${project.stageSummary?.carryoverMilestoneIds.length ?? 0}`
+      : project.stageSummary?.shouldStartMilestoneIds.length
+        ? `应启动未启动 ${project.stageSummary.shouldStartMilestoneIds.length}项`
+        : "尚无执行中节点",
     cells: matrixMilestones.map((milestoneName, index) => {
       const milestone = project.milestones?.find(
         (row) => row.name === milestoneName,
@@ -979,7 +1077,7 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
             <option>全部状态</option><option>正常</option><option>预警</option><option>严重</option>
           </select>
         </label>
-        <div className="legend"><span className="green">● 正常</span><span className="yellow">▲ 预警</span><span className="red">■ 严重</span><span className="na">— 不适用</span></div>
+        <div className="legend"><span className="green">● 正常</span><span className="yellow">▲ 预警</span><span className="red">■ 严重</span><span className="na">— 不适用</span><span>主 当前主节点</span><span>并 并行节点</span><span>遗 前序遗留</span></div>
       </div>
     </section>
 
@@ -989,14 +1087,15 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
           <div className="heatmap-head"><div className="project-col">项目 / 健康度</div>{matrixMilestones.map((m, i) => <div key={`${m}-${i}`}><span>{String(i + 1).padStart(2, "0")}</span>{m}</div>)}</div>
           {filtered.map((p) => <div className="heatmap-row" key={p.id}>
             <button className="project-cell" onClick={() => onNavigate("project", p.id)}>
-              <StatusPill status={p.status} compact /><span><strong>{p.name}</strong><small>{p.owner} · {p.org}</small></span><b>{p.score}</b>
+              <StatusPill status={p.status} compact /><span><strong>{p.name}</strong><small>{projectPrimaryMilestone(p) ? `主：${projectPrimaryMilestone(p)?.name} · 并行${p.stageSummary?.parallelMilestoneIds.length ?? 0} · 遗留${p.stageSummary?.carryoverMilestoneIds.length ?? 0}` : `${p.owner} · ${p.org}`}</small></span><b>{p.score}</b>
             </button>
             {matrixMilestones.map((milestoneName, index) => {
               const status = p.cells[index] ?? "na";
               const milestone = p.milestones?.find((row) => row.name === milestoneName);
               const deviation = milestone?.deviationDays ?? 0;
-              return <button key={`${milestoneName}-${index}`} className={`heat-cell ${status}`} onClick={() => setSelected({ project: p, index })} aria-label={`${p.name} ${milestoneName} ${statusLabel[status]}`}>
-                <span className="cell-symbol">{statusSymbol[status]}</span>
+              const stageRole = !milestone ? "" : p.stageSummary?.primaryMilestoneId === milestone.id ? "primary-stage" : p.stageSummary?.parallelMilestoneIds.includes(milestone.id) ? "parallel-stage" : p.stageSummary?.carryoverMilestoneIds.includes(milestone.id) ? "carryover-stage" : "";
+              return <button key={`${milestoneName}-${index}`} className={`heat-cell ${status} ${stageRole}`} onClick={() => setSelected({ project: p, index })} aria-label={`${p.name} ${milestoneName} ${statusLabel[status]}`}>
+                <span className="cell-symbol">{stageRole === "primary-stage" ? "主" : stageRole === "parallel-stage" ? "并" : stageRole === "carryover-stage" ? "遗" : statusSymbol[status]}</span>
                 <small>{status === "na" ? "N/A" : deviation > 0 ? `+${deviation}天` : `${milestone?.completion ?? 0}%`}</small>
               </button>;
             })}
@@ -1100,8 +1199,8 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
             <span className="drawer-kicker">节点运行详情</span>
             <h2>{selected.project.name}</h2><p>{matrixMilestones[selected.index]} · 第 {selected.index + 1} 阶段</p>
             <div className="drawer-status"><StatusPill status={selected.project.cells[selected.index] ?? "na"} /><strong>{selectedMilestone?.deviationDays ? `${selectedMilestone.deviationDays > 0 ? "延期" : "提前"} ${Math.abs(selectedMilestone.deviationDays)} 天` : selectedMilestone ? "按计划推进" : "该节点不适用"}</strong></div>
-            <div className="drawer-grid"><div><small>计划完成</small><strong>{selectedMilestone?.plannedFinish ?? "—"}</strong></div><div><small>预测 / 实际</small><strong>{selectedMilestone?.actualFinish ?? selectedMilestone?.forecastFinish ?? "未填报"}</strong></div><div><small>节点权重</small><strong>{selectedMilestone?.applicable ? `${selectedMilestone.weight}%` : "N/A"}</strong></div><div><small>当前完成度</small><strong>{selectedMilestone?.applicable ? `${selectedMilestone.completion}%` : "N/A"}</strong></div></div>
-            <div className="cause-card"><span>偏差归因</span><p>{selectedMilestone?.reason || (selectedMilestone ? "当前暂无偏差说明。" : "项目未启用该标准节点。")}</p></div>
+            <div className="drawer-grid"><div><small>计划完成</small><strong>{selectedMilestone?.plannedFinish ?? "—"}</strong></div><div><small>预测 / 实际</small><strong>{selectedMilestone?.actualFinish ?? selectedMilestone?.forecastFinish ?? "未填报"}</strong></div><div><small>节点权重</small><strong>{selectedMilestone?.applicable ? `${selectedMilestone.weight}%` : "N/A"}</strong></div><div><small>当前完成度</small><strong>{selectedMilestone?.applicable ? `${selectedMilestone.completion}%` : "N/A"}</strong></div><div><small>执行状态</small><strong>{selectedMilestone ? `${executionStatusSymbol[selectedMilestone.executionStatus ?? (selectedMilestone.completion >= 100 ? "completed" : selectedMilestone.completion > 0 ? "in_progress" : "not_started")]} ${executionStatusLabel[selectedMilestone.executionStatus ?? (selectedMilestone.completion >= 100 ? "completed" : selectedMilestone.completion > 0 ? "in_progress" : "not_started")]}` : "—"}</strong></div><div><small>实际开始</small><strong>{selectedMilestone?.actualStart ?? "未填报"}</strong></div></div>
+            <div className="cause-card"><span>{selectedMilestone?.pausedReason ? "暂停原因" : "偏差归因"}</span><p>{selectedMilestone?.pausedReason || selectedMilestone?.reason || (selectedMilestone ? "当前暂无偏差说明。" : "项目未启用该标准节点。")}</p></div>
             <button className="drawer-primary" onClick={() => onNavigate("project", selected.project.id)}>进入项目详情 <span>→</span></button>
           </aside>
         </div>}
@@ -2241,15 +2340,16 @@ function Portfolio({
         </div>
         {portfolioError && <div className="portfolio-operation-error" role="alert">! {portfolioError}<button onClick={() => setPortfolioError("")}>×</button></div>}
         {displayMode === "table" ? <div className="project-table">
-          <div className="table-head"><span>项目名称</span><span>健康状态</span><span>项目经理</span><span>计划 / 实际</span><span>进度偏差</span><span>风险</span><span>更新时间</span><span /></div>
+          <div className="table-head"><span>项目名称</span><span>当前节点</span><span>健康状态</span><span>项目经理</span><span>计划 / 实际</span><span>进度偏差</span><span>风险</span><span>更新时间</span><span /></div>
           {filtered.map(p => <div className="table-row" key={p.id}>
             <button className="project-name" onClick={() => onNavigate("project", p.id)}><i>{p.id}</i><span><strong>{p.name} <em className={`lifecycle-badge ${projectLifecycle(p)}`}>{lifecycleLabel[projectLifecycle(p)]}</em></strong><small>{p.org} · {p.type}</small></span></button>
+            <span className="portfolio-stage-cell">{projectPrimaryMilestone(p) ? <><strong>◆ {projectPrimaryMilestone(p)?.name}</strong><small>{projectPrimaryMilestone(p)?.completion}% · 并行{p.stageSummary?.parallelMilestoneIds.length ?? 0} · 遗留{p.stageSummary?.carryoverMilestoneIds.length ?? 0}</small></> : p.stageSummary?.shouldStartMilestoneIds.length ? <><strong className="negative">! 应启动</strong><small>{p.stageSummary.shouldStartMilestoneIds.length}个节点未启动</small></> : <><strong>○ 待进入</strong><small>尚无执行中节点</small></>}</span>
             <span><StatusPill status={p.status} /></span><span className="owner"><i>{p.owner[0]}</i>{p.owner}</span>
             <span className="dual-progress"><b>{p.actual}%</b><ProgressBar value={p.actual} tone={p.status} /><small>计划 {p.plan}%</small></span>
             <span className={p.actual - p.plan < -5 ? "negative" : "positive"}>{p.actual - p.plan > 0 ? "+" : ""}{(p.actual - p.plan).toFixed(1)} pp</span>
             <span className={`risk ${p.risk === "高" ? "high" : p.risk === "中" ? "medium" : "low"}`}>{p.risk}风险</span><span title={p.updatedAt ? SHANGHAI_TIME_ZONE_LABEL : undefined}>{p.updatedAt ? formatShanghaiMonthDayTime(p.updatedAt) : "数据未同步"}</span><button className="more" aria-label={`查看${p.name}`} onClick={() => onNavigate("project", p.id)}>•••</button>
           </div>)}
-        </div> : <div className="portfolio-matrix"><div className="portfolio-matrix-grid" style={{ "--portfolio-milestone-count": matrixTemplates.length } as React.CSSProperties}><div className="portfolio-matrix-head"><div>项目 / 健康度</div>{matrixTemplates.map((template) => <div key={template.id}><span>{template.code}</span>{template.name}</div>)}</div>{filtered.map((project) => <div className="portfolio-matrix-row" key={project.id}><button className="portfolio-project-cell" onClick={() => onNavigate("project", project.id)}><StatusPill status={project.status} compact /><span><strong>{project.name} <em className={`lifecycle-badge ${projectLifecycle(project)}`}>{lifecycleLabel[projectLifecycle(project)]}</em></strong><small>{project.owner} · {project.org}</small></span><b>{project.score}</b></button>{matrixTemplates.map((template) => { const milestone = project.milestones?.find((row) => row.templateId === template.id || row.name === template.name); const cellStatus = milestone?.status ?? "na"; return <button key={template.id} className={`portfolio-heat-cell ${cellStatus}`} aria-label={`${project.name} ${template.name} ${statusLabel[cellStatus]}`} onClick={() => onNavigate("project", project.id)}><span>{statusSymbol[cellStatus]}</span><small>{cellStatus === "na" ? "N/A" : milestone && milestone.deviationDays > 0 ? `+${milestone.deviationDays}天` : `${milestone?.completion ?? 0}%`}</small></button>; })}</div>)}</div></div>}
+        </div> : <div className="portfolio-matrix"><div className="portfolio-matrix-grid" style={{ "--portfolio-milestone-count": matrixTemplates.length } as React.CSSProperties}><div className="portfolio-matrix-head"><div>项目 / 健康度</div>{matrixTemplates.map((template) => <div key={template.id}><span>{template.code}</span>{template.name}</div>)}</div>{filtered.map((project) => <div className="portfolio-matrix-row" key={project.id}><button className="portfolio-project-cell" onClick={() => onNavigate("project", project.id)}><StatusPill status={project.status} compact /><span><strong>{project.name} <em className={`lifecycle-badge ${projectLifecycle(project)}`}>{lifecycleLabel[projectLifecycle(project)]}</em></strong><small>{projectPrimaryMilestone(project) ? `主：${projectPrimaryMilestone(project)?.name}` : `${project.owner} · ${project.org}`}</small></span><b>{project.score}</b></button>{matrixTemplates.map((template) => { const milestone = project.milestones?.find((row) => row.templateId === template.id || row.name === template.name); const cellStatus = milestone?.status ?? "na"; const stageRole = !milestone ? "" : project.stageSummary?.primaryMilestoneId === milestone.id ? "primary-stage" : project.stageSummary?.parallelMilestoneIds.includes(milestone.id) ? "parallel-stage" : project.stageSummary?.carryoverMilestoneIds.includes(milestone.id) ? "carryover-stage" : ""; return <button key={template.id} className={`portfolio-heat-cell ${cellStatus} ${stageRole}`} aria-label={`${project.name} ${template.name} ${statusLabel[cellStatus]}`} onClick={() => onNavigate("project", project.id)}><span>{stageRole === "primary-stage" ? "主" : stageRole === "parallel-stage" ? "并" : stageRole === "carryover-stage" ? "遗" : statusSymbol[cellStatus]}</span><small>{cellStatus === "na" ? "N/A" : milestone && milestone.deviationDays > 0 ? `+${milestone.deviationDays}天` : `${milestone?.completion ?? 0}%`}</small></button>; })}</div>)}</div></div>}
         <div className="pagination"><span>共 {matching.length} 条，每页 10 条</span><div><button disabled={safePage === 0} onClick={() => setPage((current) => Math.max(0, current - 1))}>‹</button>{Array.from({ length: pageCount }, (_, index) => <button key={index} className={safePage === index ? "active" : ""} onClick={() => setPage(index)}>{index + 1}</button>)}<button disabled={safePage === pageCount - 1} onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))}>›</button></div></div>
       </section>
     </div>
@@ -2877,6 +2977,25 @@ function ProjectDetail({
   const displayMilestones = [...(currentProject.milestones ?? [])].sort(
     (left, right) => left.sequence - right.sequence,
   );
+  const stageSummary = currentProject.stageSummary;
+  const milestoneById = new Map(
+    displayMilestones.map((milestone) => [milestone.id, milestone]),
+  );
+  const primaryMilestone = stageSummary?.primaryMilestoneId
+    ? milestoneById.get(stageSummary.primaryMilestoneId)
+    : undefined;
+  const parallelMilestones = (stageSummary?.parallelMilestoneIds ?? [])
+    .map((id) => milestoneById.get(id))
+    .filter((row): row is MilestoneData => Boolean(row));
+  const carryoverMilestones = (stageSummary?.carryoverMilestoneIds ?? [])
+    .map((id) => milestoneById.get(id))
+    .filter((row): row is MilestoneData => Boolean(row));
+  const shouldStartMilestones = (stageSummary?.shouldStartMilestoneIds ?? [])
+    .map((id) => milestoneById.get(id))
+    .filter((row): row is MilestoneData => Boolean(row));
+  const nextMilestone = stageSummary?.nextMilestoneId
+    ? milestoneById.get(stageSummary.nextMilestoneId)
+    : undefined;
 
   async function openLifecyclePanel() {
     setShowLifecycle(true);
@@ -3134,6 +3253,16 @@ function ProjectDetail({
         <div className="hero-actions"><button className="outline-button" onClick={() => window.print()}>导出报告</button><button className="outline-button" onClick={() => onNavigate("biweekly-plan", currentProject.id)}>双周计划</button>{canChangeLifecycle && <button className="outline-button" onClick={openLifecyclePanel}>项目状态</button>}{canUpdate && <><button className="outline-button" onClick={() => { setProjectError(""); setShowProjectEdit(true); }}>编辑信息</button><button className="primary-button" onClick={() => onNavigate("report", currentProject.id)}>更新本周进度</button></>}</div>
       </section>
       {lifecycleLocked && <div className="lifecycle-readonly-banner"><span>▣</span><div><strong>项目{lifecycleLabel[currentLifecycle]}，当前为只读状态</strong><p>已停止周报、催报、健康度重算和快照统计；如需继续处理未闭环事项，请由 PMO 或管理员先恢复为在建。</p></div>{currentProject.lifecycleReason && <small>最近变更原因：{currentProject.lifecycleReason}</small>}</div>}
+      <section className="project-stage-card">
+        <div className="stage-primary">
+          <small>当前主节点</small>
+          {primaryMilestone ? <><strong>◆ {primaryMilestone.name}</strong><span>{executionStatusSymbol[primaryMilestone.executionStatus ?? (primaryMilestone.completion >= 100 ? "completed" : primaryMilestone.completion > 0 ? "in_progress" : "not_started")]} {executionStatusLabel[primaryMilestone.executionStatus ?? (primaryMilestone.completion >= 100 ? "completed" : primaryMilestone.completion > 0 ? "in_progress" : "not_started")]} · {primaryMilestone.completion}% · {statusLabel[primaryMilestone.status]}</span></> : stageSummary?.state === "completed" ? <><strong>✓ 全部节点完成</strong><span>项目当前无执行中节点</span></> : shouldStartMilestones[0] ? <><strong>! 应进入 {shouldStartMilestones[0].name}</strong><span>计划已开始，实际尚未启动</span></> : nextMilestone ? <><strong>○ 待进入 {nextMilestone.name}</strong><span>计划开始 {nextMilestone.plannedStart}</span></> : <><strong>— 尚未识别</strong><span>请在周报中更新节点执行状态</span></>}
+        </div>
+        <div><small>并行节点</small><strong>{parallelMilestones.length ? parallelMilestones.map((row) => row.name).join("、") : "无"}</strong><span>{parallelMilestones.length ? `${parallelMilestones.length}个节点同步推进` : "当前无并行节点"}</span></div>
+        <div className={carryoverMilestones.length ? "stage-warning" : ""}><small>前序遗留</small><strong>{carryoverMilestones.length ? carryoverMilestones.map((row) => row.name).join("、") : "无"}</strong><span>{stageSummary?.overdueCarryoverMilestoneIds.length ? `${stageSummary.overdueCarryoverMilestoneIds.length}个已经逾期` : "未发现前序遗留"}</span></div>
+        <div><small>下一节点</small><strong>{nextMilestone?.name ?? "—"}</strong><span>{nextMilestone ? `计划开始 ${nextMilestone.plannedStart}` : "暂无后续适用节点"}</span></div>
+        <em>{stageSummary?.primaryBasis === "manager_confirmed" ? "项目经理确认" : stageSummary?.primaryBasis === "system_recommended" ? "系统推荐" : stageSummary?.primaryBasis === "legacy_inferred" ? "历史数据推断" : `阶段口径 ${stageSummary?.asOfDate ?? "—"}`}</em>
+      </section>
       <section className="score-explain">
         <div className="score-ring"><strong>{currentProject.score}</strong><span>综合健康度</span></div><div className="score-copy"><h3>项目{statusLabel[currentProject.status]}：评分与一票否决规则共同判定</h3><p>基础分 100，当前累计扣分 {healthExplanation?.deductions.total ?? 100 - currentProject.score} 分。{healthExplanation ? `采用规则 V${healthExplanation.ruleVersion}，度量日 ${healthExplanation.asOfDate}。` : "健康度明细将在下一次自动重算后生成。"}</p>{healthExplanation ? <div className="deductions"><span>进度与节点 <b>-{healthExplanation.deductions.schedule}</b></span><span>开放风险 <b>-{healthExplanation.deductions.risk}</b></span><span>逾期措施 <b>-{healthExplanation.deductions.action}</b></span><span>周报时效 <b>-{healthExplanation.deductions.reporting}</b></span></div> : <div className="deductions"><span>进度偏差 <b>{variance}pp</b></span><span>节点预警 <b>{currentProject.cells.filter((cell) => cell === "yellow").length}项</b></span><span>严重节点 <b>{currentProject.cells.filter((cell) => cell === "red").length}项</b></span></div>}{activeVetoes.length > 0 && <div className="health-veto">■ 一票否决：{activeVetoes.join("、")}</div>}</div><span className="count-badge">{healthExplanation ? `规则 V${healthExplanation.ruleVersion}` : "等待明细"}</span>
       </section>
@@ -3147,7 +3276,7 @@ function ProjectDetail({
             const effectiveFinish = milestone.actualFinish ?? milestone.forecastFinish;
             return <div className={`milestone-row ${expanded === i ? "expanded" : ""}`} key={milestone.id}>
               <button className="milestone-main" onClick={() => setExpanded(expanded === i ? null : i)}>
-                <span className={`milestone-index ${status}`}>{milestone.sequence}</span><span className="milestone-name"><strong>{milestone.name}</strong><small>{milestone.critical ? "◆ 关键节点" : milestone.custom ? "自定义节点" : "标准节点"} · 权重 {milestone.weight}%</small></span>
+                <span className={`milestone-index ${status}`}>{milestone.sequence}</span><span className="milestone-name"><strong>{milestone.name} {stageSummary?.primaryMilestoneId === milestone.id && <i className="stage-role primary">主</i>}{stageSummary?.parallelMilestoneIds.includes(milestone.id) && <i className="stage-role parallel">并</i>}{stageSummary?.carryoverMilestoneIds.includes(milestone.id) && <i className="stage-role carryover">遗</i>}</strong><small>{executionStatusSymbol[milestone.executionStatus ?? (milestone.completion >= 100 ? "completed" : milestone.completion > 0 ? "in_progress" : "not_started")]} {executionStatusLabel[milestone.executionStatus ?? (milestone.completion >= 100 ? "completed" : milestone.completion > 0 ? "in_progress" : "not_started")]} · {milestone.critical ? "◆ 关键节点" : milestone.custom ? "自定义节点" : "标准节点"} · 权重 {milestone.weight}%</small></span>
                 <span><small>计划完成</small><strong>{milestone.plannedFinish}</strong></span><span><small>预测 / 实际</small><strong className={status === "red" ? "red-text" : ""}>{status === "na" ? "—" : effectiveFinish ?? "未填报"}</strong></span>
                 <span className="milestone-complete"><b>{milestone.completion}%</b><ProgressBar value={milestone.completion} tone={status} /></span><StatusPill status={status} /><em>{expanded === i ? "⌃" : "⌄"}</em>
               </button>
@@ -3319,6 +3448,15 @@ function WeeklyReport({ onNavigate, onDataChanged, projectId, projectData = proj
   const [completion, setCompletion] = useState(0);
   const [forecastFinish, setForecastFinish] = useState("");
   const [actualFinish, setActualFinish] = useState("");
+  const [executionStatus, setExecutionStatus] =
+    useState<MilestoneExecutionStatus>("not_started");
+  const [actualStart, setActualStart] = useState("");
+  const [pausedReason, setPausedReason] = useState("");
+  const [nodeReason, setNodeReason] = useState("");
+  const [nodeUpdates, setNodeUpdates] = useState<WeeklyNodeDraft[]>([]);
+  const [primaryMilestoneId, setPrimaryMilestoneId] = useState<number | null>(
+    currentProject.stageSummary?.primaryMilestoneId ?? null,
+  );
   const [declared, setDeclared] = useState(currentProject.declared);
   const [reason, setReason] = useState("");
   const [actionName, setActionName] = useState("");
@@ -3343,18 +3481,19 @@ function WeeklyReport({ onNavigate, onDataChanged, projectId, projectData = proj
     if (!totalWeight) return 0;
     return Number(
       (
-        applicableMilestones.reduce(
-          (sum, milestone) =>
-            sum +
-            milestone.weight *
-              (milestone.sequence === selectedMilestone?.sequence
-                ? completion
-                : milestone.completion),
-          0,
-        ) / totalWeight
+        applicableMilestones.reduce((sum, milestone) => {
+          const queued = nodeUpdates.find(
+            (update) => update.milestoneId === milestone.id,
+          );
+          const value =
+            milestone.sequence === selectedMilestone?.sequence
+              ? completion
+              : queued?.completion ?? milestone.completion;
+          return sum + milestone.weight * value;
+        }, 0) / totalWeight
       ).toFixed(1),
     );
-  }, [applicableMilestones, completion, selectedMilestone?.sequence]);
+  }, [applicableMilestones, completion, nodeUpdates, selectedMilestone?.sequence]);
   const diff = Number((declared - systemProgress).toFixed(1));
   const effectiveFinish =
     completion >= 100 ? actualFinish || forecastFinish : forecastFinish;
@@ -3385,10 +3524,46 @@ function WeeklyReport({ onNavigate, onDataChanged, projectId, projectData = proj
       recoveryDate &&
       actionDetail.trim(),
   );
+  const currentNodeDraft: WeeklyNodeDraft | null = selectedMilestone
+    ? {
+        milestoneId: selectedMilestone.id,
+        sequence: selectedMilestone.sequence,
+        executionStatus,
+        completion,
+        actualStart: actualStart || null,
+        forecastFinish: forecastFinish || null,
+        actualFinish: executionStatus === "completed" ? actualFinish || null : null,
+        pausedReason,
+        reason: nodeReason,
+        action:
+          requiresAction || actionName.trim() || actionDetail.trim()
+            ? {
+                name: actionName,
+                owner: actionOwner,
+                recoveryDate,
+                detail: actionDetail,
+              }
+            : undefined,
+      }
+    : null;
+  const effectiveNodeUpdates = currentNodeDraft
+    ? [
+        ...nodeUpdates.filter(
+          (update) => update.milestoneId !== currentNodeDraft.milestoneId,
+        ),
+        currentNodeDraft,
+      ]
+    : nodeUpdates;
+  const activeUpdateCount = effectiveNodeUpdates.filter(
+    (update) =>
+      update.executionStatus === "in_progress" ||
+      update.executionStatus === "paused",
+  ).length;
   const completionItems = [
     true,
     Boolean(selectedMilestone),
     Boolean(reason.trim()),
+    activeUpdateCount === 0 || Boolean(primaryMilestoneId),
     !requiresAction || actionComplete,
   ];
   const formCompleteness = Math.round(
@@ -3420,18 +3595,33 @@ function WeeklyReport({ onNavigate, onDataChanged, projectId, projectData = proj
           recommendedMilestone.plannedFinish,
       );
       setActualFinish(recommendedMilestone.actualFinish ?? "");
-      setReason(recommendedMilestone.reason ?? "");
+      setExecutionStatus(
+        recommendedMilestone.executionStatus ??
+          (recommendedMilestone.completion >= 100
+            ? "completed"
+            : recommendedMilestone.completion > 0
+              ? "in_progress"
+              : "not_started"),
+      );
+      setActualStart(recommendedMilestone.actualStart ?? "");
+      setPausedReason(recommendedMilestone.pausedReason ?? "");
+      setNodeReason(recommendedMilestone.reason ?? "");
+      setReason("");
       setDeclared(currentProject.declared);
       setActionOwner(currentProject.owner);
       setRecoveryDate(
         recommendedMilestone.forecastFinish ??
           recommendedMilestone.plannedFinish,
       );
+      setPrimaryMilestoneId(
+        currentProject.stageSummary?.primaryMilestoneId ?? null,
+      );
     }, 0);
     return () => window.clearTimeout(timer);
   }, [
     currentProject.declared,
     currentProject.owner,
+    currentProject.stageSummary?.primaryMilestoneId,
     recommendedMilestone,
   ]);
 
@@ -3458,22 +3648,83 @@ function WeeklyReport({ onNavigate, onDataChanged, projectId, projectData = proj
               row.status === "draft",
           )?.draft;
           if (!draft) return;
+          if (draft.milestoneUpdates?.length) {
+            const restoredUpdates = draft.milestoneUpdates.flatMap((update) => {
+              const milestone = applicableMilestones.find(
+                (row) =>
+                  row.id === Number(update.milestoneId ?? update.id) ||
+                  row.sequence === Number(update.sequence),
+              );
+              if (!milestone) return [];
+              const action = draft.actions?.find(
+                (row) => row.milestoneId === milestone.id,
+              );
+              return [{
+                milestoneId: milestone.id,
+                sequence: milestone.sequence,
+                executionStatus:
+                  update.executionStatus ??
+                  milestone.executionStatus ??
+                  (Number(update.completion ?? milestone.completion) >= 100
+                    ? "completed"
+                    : Number(update.completion ?? milestone.completion) > 0
+                      ? "in_progress"
+                      : "not_started"),
+                completion: Number(update.completion ?? milestone.completion),
+                actualStart: update.actualStart ?? milestone.actualStart ?? null,
+                forecastFinish:
+                  update.forecastFinish ?? milestone.forecastFinish ?? null,
+                actualFinish: update.actualFinish ?? milestone.actualFinish ?? null,
+                pausedReason:
+                  update.pausedReason ?? milestone.pausedReason ?? "",
+                reason: update.reason ?? milestone.reason ?? "",
+                action: action
+                  ? {
+                      name: action.name ?? "",
+                      owner: action.owner ?? currentProject.owner,
+                      recoveryDate: action.recoveryDate ?? "",
+                      detail: action.detail ?? "",
+                    }
+                  : undefined,
+              } satisfies WeeklyNodeDraft];
+            });
+            setNodeUpdates(restoredUpdates.slice(1));
+            setPrimaryMilestoneId(draft.primaryMilestoneId ?? null);
+            const first =
+              restoredUpdates.find(
+                (update) => update.milestoneId === draft.primaryMilestoneId,
+              ) ?? restoredUpdates[0];
+            if (first) {
+              setSelectedSequence(first.sequence);
+              setExecutionStatus(first.executionStatus);
+              setCompletion(first.completion);
+              setActualStart(first.actualStart ?? "");
+              setForecastFinish(first.forecastFinish ?? "");
+              setActualFinish(first.actualFinish ?? "");
+              setPausedReason(first.pausedReason);
+              setNodeReason(first.reason);
+              setActionName(first.action?.name ?? "");
+              setActionOwner(first.action?.owner ?? currentProject.owner);
+              setRecoveryDate(first.action?.recoveryDate ?? "");
+              setActionDetail(first.action?.detail ?? "");
+            }
+          }
           if (draft.milestone?.sequence) {
             setSelectedSequence(draft.milestone.sequence);
+            if (draft.milestone.completion !== undefined) {
+              setCompletion(draft.milestone.completion);
+            }
+            setForecastFinish(draft.milestone.forecastFinish ?? "");
+            setActualFinish(draft.milestone.actualFinish ?? "");
+            setActionName(draft.action?.name ?? "");
+            setActionOwner(draft.action?.owner ?? currentProject.owner);
+            setRecoveryDate(draft.action?.recoveryDate ?? "");
+            setActionDetail(draft.action?.detail ?? "");
           }
-          if (draft.milestone?.completion !== undefined) {
-            setCompletion(draft.milestone.completion);
-          }
-          setForecastFinish(draft.milestone?.forecastFinish ?? "");
-          setActualFinish(draft.milestone?.actualFinish ?? "");
           if (draft.declaredProgress !== undefined) {
             setDeclared(draft.declaredProgress);
           }
           setReason(draft.reason ?? "");
-          setActionName(draft.action?.name ?? "");
-          setActionOwner(draft.action?.owner ?? currentProject.owner);
-          setRecoveryDate(draft.action?.recoveryDate ?? "");
-          setActionDetail(draft.action?.detail ?? "");
           setSavedMessage("已恢复本周服务器草稿");
         })
         .catch((draftError) => {
@@ -3493,7 +3744,12 @@ function WeeklyReport({ onNavigate, onDataChanged, projectId, projectData = proj
       active = false;
       window.clearTimeout(timer);
     };
-  }, [currentProject.owner, projectId, reportingPeriod.weekKey]);
+  }, [
+    applicableMilestones,
+    currentProject.owner,
+    projectId,
+    reportingPeriod.weekKey,
+  ]);
 
   useEffect(() => {
     let active = true;
@@ -3515,17 +3771,63 @@ function WeeklyReport({ onNavigate, onDataChanged, projectId, projectData = proj
   }, [loadAttachments]);
 
   function selectMilestone(sequence: number) {
+    const retainedUpdates = currentNodeDraft
+      ? [
+          ...nodeUpdates.filter(
+            (update) => update.milestoneId !== currentNodeDraft.milestoneId,
+          ),
+          currentNodeDraft,
+        ]
+      : nodeUpdates;
     const milestone = applicableMilestones.find(
       (row) => row.sequence === sequence,
     );
     if (!milestone) return;
+    const saved = retainedUpdates.find(
+      (update) => update.milestoneId === milestone.id,
+    );
+    setNodeUpdates(
+      retainedUpdates.filter((update) => update.milestoneId !== milestone.id),
+    );
     setSelectedSequence(sequence);
-    setCompletion(milestone.completion);
-    setForecastFinish(milestone.forecastFinish ?? milestone.plannedFinish);
-    setActualFinish(milestone.actualFinish ?? "");
-    setReason(milestone.reason ?? "");
-    setRecoveryDate(milestone.forecastFinish ?? milestone.plannedFinish);
+    setCompletion(saved?.completion ?? milestone.completion);
+    setExecutionStatus(
+      saved?.executionStatus ??
+        milestone.executionStatus ??
+        (milestone.completion >= 100
+          ? "completed"
+          : milestone.completion > 0
+            ? "in_progress"
+            : "not_started"),
+    );
+    setActualStart(saved?.actualStart ?? milestone.actualStart ?? "");
+    setForecastFinish(
+      saved?.forecastFinish ?? milestone.forecastFinish ?? milestone.plannedFinish,
+    );
+    setActualFinish(saved?.actualFinish ?? milestone.actualFinish ?? "");
+    setPausedReason(saved?.pausedReason ?? milestone.pausedReason ?? "");
+    setNodeReason(saved?.reason ?? milestone.reason ?? "");
+    setActionName(saved?.action?.name ?? "");
+    setActionOwner(saved?.action?.owner ?? currentProject.owner);
+    setRecoveryDate(
+      saved?.action?.recoveryDate ??
+        milestone.forecastFinish ??
+        milestone.plannedFinish,
+    );
+    setActionDetail(saved?.action?.detail ?? "");
     setSubmitError("");
+  }
+
+  function removeNodeUpdate(milestoneId: number) {
+    if (currentNodeDraft?.milestoneId === milestoneId) {
+      setSubmitError("当前正在编辑该节点，请切换到其他节点后再移除。");
+      return;
+    } else {
+      setNodeUpdates((rows) =>
+        rows.filter((update) => update.milestoneId !== milestoneId),
+      );
+    }
+    if (primaryMilestoneId === milestoneId) setPrimaryMilestoneId(null);
   }
 
   async function uploadAttachment(
@@ -3601,9 +3903,77 @@ function WeeklyReport({ onNavigate, onDataChanged, projectId, projectData = proj
       setSubmitError("请填写本周进展或偏差原因。");
       return;
     }
-    if (submitMode === "submitted" && requiresAction && !actionComplete) {
-      setSubmitError("红黄节点必须完整填写纠偏措施、责任人、恢复日期和具体行动。");
-      return;
+    if (submitMode === "submitted") {
+      for (const update of effectiveNodeUpdates) {
+        if (
+          (update.executionStatus === "in_progress" ||
+            update.executionStatus === "paused") &&
+          !update.actualStart
+        ) {
+          setSubmitError("进行中或暂停节点必须填写实际开始日期。");
+          return;
+        }
+        if (update.executionStatus === "paused" && !update.pausedReason.trim()) {
+          setSubmitError("暂停节点必须填写暂停原因。");
+          return;
+        }
+        if (
+          update.executionStatus === "completed" &&
+          (update.completion !== 100 || !update.actualFinish)
+        ) {
+          setSubmitError("已完成节点必须达到100%并填写实际完成日期。");
+          return;
+        }
+        const milestone = applicableMilestones.find(
+          (row) => row.id === update.milestoneId,
+        );
+        if (!milestone) continue;
+        const finish = update.actualFinish ?? update.forecastFinish;
+        const updateDeviation = finish
+          ? daysBetween(milestone.plannedFinish, finish)
+          : 0;
+        const updateOverdue =
+          update.completion < 100 && milestone.plannedFinish < today;
+        const updateWarning =
+          updateOverdue ||
+          updateDeviation >= (milestone.critical ? 1 : 4);
+        if (
+          updateWarning &&
+          !(
+            update.action?.name.trim() &&
+            update.action.owner.trim() &&
+            update.action.recoveryDate &&
+            update.action.detail.trim()
+          )
+        ) {
+          setSubmitError(
+            `${milestone.name}已触发红黄预警，请完整填写对应纠偏措施。`,
+          );
+          return;
+        }
+      }
+      const projectedActiveIds = new Set([
+        ...(currentProject.stageSummary?.activeMilestoneIds ?? []),
+        ...effectiveNodeUpdates
+          .filter(
+            (update) =>
+              update.executionStatus === "in_progress" ||
+              update.executionStatus === "paused",
+          )
+          .map((update) => update.milestoneId),
+      ]);
+      for (const update of effectiveNodeUpdates) {
+        if (
+          update.executionStatus === "completed" ||
+          update.executionStatus === "not_started"
+        ) {
+          projectedActiveIds.delete(update.milestoneId);
+        }
+      }
+      if (projectedActiveIds.size > 0 && !primaryMilestoneId) {
+        setSubmitError("存在进行中或暂停节点，请确认一个当前主节点。");
+        return;
+      }
     }
     setSubmitting(true);
     setSubmitError("");
@@ -3618,22 +3988,22 @@ function WeeklyReport({ onNavigate, onDataChanged, projectId, projectData = proj
           declaredProgress: declared,
           reason,
           forecastFinish: forecastFinish || undefined,
-          milestone: {
-            sequence: selectedMilestone.sequence,
-            completion,
-            forecastFinish: forecastFinish || undefined,
-            actualFinish:
-              completion >= 100 ? actualFinish || forecastFinish : undefined,
-          },
-          action:
-            requiresAction || actionName.trim() || actionDetail.trim()
-              ? {
-                  name: actionName,
-                  owner: actionOwner,
-                  recoveryDate,
-                  detail: actionDetail,
-                }
-              : undefined,
+          primaryMilestoneId,
+          milestoneUpdates: effectiveNodeUpdates.map((update) => ({
+            milestoneId: update.milestoneId,
+            executionStatus: update.executionStatus,
+            completion: update.completion,
+            actualStart: update.actualStart || undefined,
+            forecastFinish: update.forecastFinish || undefined,
+            actualFinish: update.actualFinish || undefined,
+            pausedReason: update.pausedReason || undefined,
+            reason: update.reason || reason,
+          })),
+          actions: effectiveNodeUpdates.flatMap((update) =>
+            update.action
+              ? [{ milestoneId: update.milestoneId, ...update.action }]
+              : [],
+          ),
         }),
       });
       const result = (await response.json()) as { error?: string };
@@ -3677,13 +4047,17 @@ function WeeklyReport({ onNavigate, onDataChanged, projectId, projectData = proj
           <section className="content-card form-section">
             <div className="form-title"><span>01</span><div><h3>总体进度确认</h3><p>系统根据节点权重自动计算，申报值偏差超过 5pp 将提示核验。</p></div></div>
             <div className="progress-compare"><div><small>系统计算进度</small><strong>{systemProgress}%</strong><ProgressBar value={systemProgress} /></div><div><small>项目经理申报进度</small><strong>{declared}%</strong><input aria-label="项目经理申报进度" type="range" min="0" max="100" value={declared} onChange={e => setDeclared(Number(e.target.value))} /></div><div className={Math.abs(diff) > 5 ? "compare-warning" : "compare-ok"}><span>{Math.abs(diff) > 5 ? "!" : "✓"}</span><strong>{diff > 0 ? "+" : ""}{diff}pp</strong><small>{Math.abs(diff) > 5 ? "需说明差异" : "口径一致"}</small></div></div>
+            <label className="full-label report-overall-reason">本周总体进展说明 <b>*</b><textarea value={reason} onChange={event => setReason(event.target.value)} placeholder="概述本周总体进展、成果、主要偏差和下周关注事项" /></label>
           </section>
           <section className="content-card form-section">
-            <div className="form-title"><span>02</span><div><h3>节点进展更新</h3><p>选择一个本周发生变化或需要关注的适用节点。</p></div></div>
+            <div className="form-title"><span>02</span><div><h3>本周节点进展</h3><p>可依次选择多个节点更新，并从进行中或暂停节点中确认一个当前主节点。</p></div></div>
+            {effectiveNodeUpdates.length > 0 && <div className="weekly-node-queue">{effectiveNodeUpdates.map((update) => { const milestone = applicableMilestones.find((row) => row.id === update.milestoneId); const active = selectedMilestone?.id === update.milestoneId; return <button type="button" className={active ? "active" : ""} key={update.milestoneId} onClick={() => milestone && selectMilestone(milestone.sequence)}><span>{primaryMilestoneId === update.milestoneId ? "◆ 主" : executionStatusSymbol[update.executionStatus]}</span><strong>{milestone?.name ?? `节点${update.milestoneId}`}</strong><small>{executionStatusLabel[update.executionStatus]} · {update.completion}%</small>{!active && <i onClick={(event) => { event.stopPropagation(); removeNodeUpdate(update.milestoneId); }}>×</i>}</button>; })}</div>}
             {selectedMilestone ? <div className={`node-form ${previewStatus === "yellow" ? "warning-node" : ""}`}>
               <div className="node-form-head"><div><StatusPill status={previewStatus} /><h4>{selectedMilestone.name} {selectedMilestone.critical && <span>◆ 关键节点</span>}</h4></div><small>计划完成 {selectedMilestone.plannedFinish} · 原完成度 {selectedMilestone.completion}%</small></div>
-              <div className="form-grid"><label>更新节点<select value={selectedMilestone.sequence} onChange={(event) => selectMilestone(Number(event.target.value))}>{applicableMilestones.map((milestone) => <option key={milestone.id} value={milestone.sequence}>{milestone.sequence}. {milestone.name}{milestone.status === "red" ? "（红）" : milestone.status === "yellow" ? "（黄）" : ""}</option>)}</select></label><label>完成度<div className="percent-input"><input aria-label="节点完成度" type="number" min="0" max="100" step="1" value={completion} onChange={(event) => setCompletion(Math.min(100, Math.max(0, Number(event.target.value))))} /><span>%</span></div></label><label>{completion >= 100 ? "实际完成日期" : "预测完成日期"}<input type="date" value={completion >= 100 ? actualFinish : forecastFinish} onChange={(event) => completion >= 100 ? setActualFinish(event.target.value) : setForecastFinish(event.target.value)} /></label><label>相对基线偏差<div className={`readonly-input ${deviationDays >= redDays ? "red-text" : deviationDays >= yellowDays ? "yellow-text" : ""}`}>{deviationDays > 0 ? "+" : ""}{deviationDays} 天</div></label></div>
-              <label className="full-label">本周进展 / 偏差原因 <b>*</b><textarea value={reason} onChange={e => setReason(e.target.value)} placeholder="说明本周完成事项；如有偏差，说明根因、影响与判断依据" /></label>
+              <div className="form-grid"><label>更新节点<select value={selectedMilestone.sequence} onChange={(event) => selectMilestone(Number(event.target.value))}>{applicableMilestones.map((milestone) => <option key={milestone.id} value={milestone.sequence}>{milestone.sequence}. {milestone.name}{milestone.status === "red" ? "（红）" : milestone.status === "yellow" ? "（黄）" : ""}</option>)}</select></label><label>执行状态<select value={executionStatus} onChange={(event) => { const next = event.target.value as MilestoneExecutionStatus; setExecutionStatus(next); if (next === "not_started") { setCompletion(0); setActualStart(""); setActualFinish(""); } if (next === "completed") setCompletion(100); if (next === "in_progress" && !actualStart) setActualStart(today); if ((next === "not_started" || next === "completed") && primaryMilestoneId === selectedMilestone.id) setPrimaryMilestoneId(null); }}>{Object.entries(executionStatusLabel).map(([value,label]) => <option key={value} value={value}>{executionStatusSymbol[value as MilestoneExecutionStatus]} {label}</option>)}</select></label><label>完成度<div className="percent-input"><input aria-label="节点完成度" type="number" min="0" max="100" step="1" value={completion} onChange={(event) => { const value = Math.min(100, Math.max(0, Number(event.target.value))); setCompletion(value); if (value === 100) { setExecutionStatus("completed"); if (primaryMilestoneId === selectedMilestone.id) setPrimaryMilestoneId(null); } else if (value > 0 && executionStatus === "not_started") setExecutionStatus("in_progress"); }} /><span>%</span></div></label><label>实际开始日期<input type="date" disabled={executionStatus === "not_started"} value={actualStart} onChange={(event) => setActualStart(event.target.value)} /></label><label>{executionStatus === "completed" ? "实际完成日期" : "预测完成日期"}<input type="date" value={executionStatus === "completed" ? actualFinish : forecastFinish} onChange={(event) => executionStatus === "completed" ? setActualFinish(event.target.value) : setForecastFinish(event.target.value)} /></label><label>相对基线偏差<div className={`readonly-input ${deviationDays >= redDays ? "red-text" : deviationDays >= yellowDays ? "yellow-text" : ""}`}>{deviationDays > 0 ? "+" : ""}{deviationDays} 天</div></label></div>
+              {executionStatus === "paused" && <label className="full-label">暂停原因 <b>*</b><textarea value={pausedReason} onChange={event => setPausedReason(event.target.value)} placeholder="说明暂停原因、依赖条件和恢复判断标准" /></label>}
+              <label className="primary-stage-confirm"><input type="radio" name="primaryMilestone" checked={primaryMilestoneId === selectedMilestone.id} disabled={executionStatus !== "in_progress" && executionStatus !== "paused"} onChange={() => setPrimaryMilestoneId(selectedMilestone.id)} /><span><strong>确认为当前主节点</strong><small>仅进行中或暂停节点可被确认为项目当前主节点</small></span></label>
+              <label className="full-label">本节点进展 / 偏差原因 <b>*</b><textarea value={nodeReason} onChange={e => setNodeReason(e.target.value)} placeholder="说明本节点完成事项；如有偏差，说明根因、影响与判断依据" /></label>
             </div> : <div className="empty-state">当前项目没有可填报的适用节点</div>}
           </section>
           {requiresAction && <section className="content-card form-section">
@@ -3698,8 +4072,8 @@ function WeeklyReport({ onNavigate, onDataChanged, projectId, projectData = proj
           <div className="report-actions"><button className="outline-button" disabled={lifecycleLocked || submitting || loadingDraft} onClick={() => saveWeeklyReport("draft")}>{submitting ? "处理中…" : "保存草稿"}</button><button className="primary-button" disabled={lifecycleLocked || submitting || loadingDraft || !selectedMilestone} onClick={() => saveWeeklyReport("submitted")}>{submitting ? "正在提交…" : "提交本周进度"}</button></div>
         </div>
         <aside className="report-aside">
-          <div className="aside-card"><h3>填报完整度</h3><div className="completion-circle" style={{ background: `conic-gradient(var(--blue) ${formCompleteness}%,#e9edf3 0)` }}><strong>{formCompleteness}%</strong></div><ul><li className="done">✓ 总体进度</li><li className={selectedMilestone ? "done" : ""}>{selectedMilestone ? "✓" : "○"} 节点更新</li><li className={reason.trim() ? "done" : ""}>{reason.trim() ? "✓" : "○"} 本周进展说明</li><li className={!requiresAction || actionComplete ? "done" : ""}>{!requiresAction || actionComplete ? "✓" : "○"} 纠偏措施</li><li className={attachmentRows.length ? "done" : ""}>{attachmentRows.length ? "✓" : "○"} 支撑附件（选填）</li></ul></div>
-          <div className="aside-card rule-tips"><h3>本次规则检查</h3><p className={Math.abs(diff) <= 5 ? "pass" : "warning"}>{Math.abs(diff) <= 5 ? "✓ 申报与计算进度一致" : `▲ 申报与计算相差 ${Math.abs(diff).toFixed(1)}pp`}</p><p className={reason.trim() ? "pass" : "warning"}>{reason.trim() ? "✓ 已填写本周进展说明" : "▲ 尚未填写进展说明"}</p><p className={!requiresAction || actionComplete ? "pass" : "warning"}>{!requiresAction ? "✓ 当前节点未触发措施必填" : actionComplete ? "✓ 纠偏措施字段完整" : "▲ 红黄节点措施尚不完整"}</p><p className={deviationDays > 0 ? "warning" : "pass"}>{deviationDays > 0 ? `▲ 预测完成日晚于基线 ${deviationDays} 天` : "✓ 节点未晚于批准基线"}</p></div>
+          <div className="aside-card"><h3>填报完整度</h3><div className="completion-circle" style={{ background: `conic-gradient(var(--blue) ${formCompleteness}%,#e9edf3 0)` }}><strong>{formCompleteness}%</strong></div><ul><li className="done">✓ 总体进度</li><li className={effectiveNodeUpdates.length ? "done" : ""}>{effectiveNodeUpdates.length ? "✓" : "○"} 节点更新（{effectiveNodeUpdates.length}）</li><li className={reason.trim() ? "done" : ""}>{reason.trim() ? "✓" : "○"} 总体进展说明</li><li className={activeUpdateCount === 0 || primaryMilestoneId ? "done" : ""}>{activeUpdateCount === 0 || primaryMilestoneId ? "✓" : "○"} 当前主节点</li><li className={!requiresAction || actionComplete ? "done" : ""}>{!requiresAction || actionComplete ? "✓" : "○"} 当前节点纠偏措施</li><li className={attachmentRows.length ? "done" : ""}>{attachmentRows.length ? "✓" : "○"} 支撑附件（选填）</li></ul></div>
+          <div className="aside-card rule-tips"><h3>本次规则检查</h3><p className={Math.abs(diff) <= 5 ? "pass" : "warning"}>{Math.abs(diff) <= 5 ? "✓ 申报与计算进度一致" : `▲ 申报与计算相差 ${Math.abs(diff).toFixed(1)}pp`}</p><p className={reason.trim() ? "pass" : "warning"}>{reason.trim() ? "✓ 已填写本周总体说明" : "▲ 尚未填写总体说明"}</p><p className={activeUpdateCount === 0 || primaryMilestoneId ? "pass" : "warning"}>{activeUpdateCount === 0 ? "✓ 当前无执行中节点" : primaryMilestoneId ? "✓ 已确认当前主节点" : "▲ 尚未确认当前主节点"}</p><p className={!requiresAction || actionComplete ? "pass" : "warning"}>{!requiresAction ? "✓ 当前节点未触发措施必填" : actionComplete ? "✓ 纠偏措施字段完整" : "▲ 红黄节点措施尚不完整"}</p><p className={deviationDays > 0 ? "warning" : "pass"}>{deviationDays > 0 ? `▲ 预测完成日晚于基线 ${deviationDays} 天` : "✓ 节点未晚于批准基线"}</p></div>
           <div className="aside-card"><h3>快照提示</h3><p>{reportingPeriod.fridayLabel} 17:00 PMO 将锁定第{reportingPeriod.week}周快照。锁定后本周期不可再修改。</p></div>
         </aside>
       </div>
@@ -5032,6 +5406,17 @@ function PmoPage({ onNavigate, onDataChanged, identity, projectData = projects }
   const activeTemplateWeight = templateRows
     .filter((row) => row.active)
     .reduce((sum, row) => sum + Number(row.defaultWeight || 0), 0);
+  const stageMissingPrimary = activeProjects.filter(
+    (project) =>
+      project.stageSummary?.state === "active" &&
+      project.stageSummary.primaryBasis !== "manager_confirmed",
+  );
+  const stageShouldStart = activeProjects.filter(
+    (project) => (project.stageSummary?.shouldStartMilestoneIds.length ?? 0) > 0,
+  );
+  const stageCarryovers = activeProjects.filter(
+    (project) => (project.stageSummary?.carryoverMilestoneIds.length ?? 0) > 0,
+  );
   return <div className="workspace-page">
     <WorkspaceHeader title="PMO 管理中心" subtitle="统一规则、治理数据、锁定管理口径" onNavigate={onNavigate} identity={identity} />
     <div className="page-content pmo-page">
@@ -5045,7 +5430,7 @@ function PmoPage({ onNavigate, onDataChanged, identity, projectData = projects }
         {notificationMessage && <div className="form-success">{notificationMessage}</div>}
         <div className="pmo-grid">
           <section className="content-card quality-panel"><div className="card-title"><div><h2>锁定前数据检查</h2><p>{reportingPeriod.weekKey} · 系统自动检查完整性、时效性与规则异常</p></div><span className="quality-score">{currentCompleteness}分</span></div>
-            <div className="quality-items"><div className={missingProjectCount ? "warn" : "ok"}><span>{missingProjectCount ? "!" : "✓"}</span><div><strong>周报提交</strong><small>{submittedProjectCount} / {snapshotProjectCount} 已完成</small></div><b>{currentCompleteness}%</b></div><div className="ok"><span>✓</span><div><strong>关键字段完整性</strong><small>正式提交数据均已通过服务端必填校验</small></div><b>已校验</b></div><div className={missingProjectCount ? "warn" : "ok"}><span>{missingProjectCount ? "!" : "✓"}</span><div><strong>待补交项目</strong><small>{missingProjectCount}个项目尚未正式提交本周周报</small></div><b>{missingProjectCount} 项</b></div><div className={varianceReports.length ? "warn" : "ok"}><span>{varianceReports.length ? "!" : "✓"}</span><div><strong>申报偏差异常</strong><small>申报进度与计算值相差超过5pp</small></div><b>{varianceReports.length} 项</b></div></div>
+            <div className="quality-items"><div className={missingProjectCount ? "warn" : "ok"}><span>{missingProjectCount ? "!" : "✓"}</span><div><strong>周报提交</strong><small>{submittedProjectCount} / {snapshotProjectCount} 已完成</small></div><b>{currentCompleteness}%</b></div><div className="ok"><span>✓</span><div><strong>关键字段完整性</strong><small>正式提交数据均已通过服务端执行状态与日期校验</small></div><b>已校验</b></div><div className={stageMissingPrimary.length ? "warn" : "ok"}><span>{stageMissingPrimary.length ? "!" : "✓"}</span><div><strong>主节点确认</strong><small>执行中项目尚未由项目经理确认主节点</small></div><b>{stageMissingPrimary.length} 项</b></div><div className={stageShouldStart.length ? "warn" : "ok"}><span>{stageShouldStart.length ? "!" : "✓"}</span><div><strong>应启动未启动</strong><small>计划开始日已到但实际状态仍为未开始</small></div><b>{stageShouldStart.length} 项</b></div><div className={stageCarryovers.length ? "warn" : "ok"}><span>{stageCarryovers.length ? "!" : "✓"}</span><div><strong>前序遗留</strong><small>后序工作已启动但仍存在未完成前序节点</small></div><b>{stageCarryovers.length} 项</b></div><div className={varianceReports.length ? "warn" : "ok"}><span>{varianceReports.length ? "!" : "✓"}</span><div><strong>申报偏差异常</strong><small>申报进度与计算值相差超过5pp</small></div><b>{varianceReports.length} 项</b></div></div>
           </section>
           <section className="content-card"><div className="card-title"><div><h2>待处理事项</h2><p>由当前周报、红灯状态、差异校验和审批队列实时生成</p></div><div className="todo-batch-actions">{missingProjects.length > 0 && <button disabled={Boolean(notificationWorking)} onClick={() => sendNotifications(missingProjects.map((project) => project.id), "report_reminder")}>{notificationWorking.startsWith("report_reminder:") ? "催报中…" : `催报缺报 ${missingProjects.length} 项`}</button>}{redProjects.length > 0 && <button className="red" disabled={Boolean(notificationWorking)} onClick={() => sendNotifications(redProjects.map((project) => project.id), "red_escalation")}>{notificationWorking.startsWith("red_escalation:") ? "升级中…" : `升级红灯 ${redProjects.length} 项`}</button>}<span className="count-badge">{missingProjects.length + redProjects.length + varianceReports.length + pendingChanges.length} 项</span></div></div>
             <div className="todo-list">{missingProjects.slice(0, 2).map((project) => <div key={`missing-${project.id}`}><span className="todo-icon red">!</span><div><strong>{project.name}</strong><p>尚未提交第{reportingPeriod.week}周正式进度</p></div><button disabled={Boolean(notificationWorking)} onClick={() => sendNotifications([project.id], "report_reminder")}>催报</button></div>)}{redProjects.slice(0, 2).map((project) => <div key={`red-${project.id}`}><span className="todo-icon red">■</span><div><strong>{project.name}</strong><p>项目综合状态红色，需升级至管理与治理角色</p></div><button disabled={Boolean(notificationWorking)} onClick={() => sendNotifications([project.id], "red_escalation")}>升级</button></div>)}{varianceReports.slice(0, 2).map((report) => { const project = projectData.find((item) => item.id === report.projectId); return <div key={`variance-${report.id}`}><span className="todo-icon yellow">▲</span><div><strong>{project?.name ?? report.projectId}</strong><p>申报进度与计算值相差 {Math.abs(report.variance).toFixed(1)}pp</p></div><button onClick={() => onNavigate("project", report.projectId)}>核验</button></div>; })}{pendingChanges.slice(0, 2).map((change) => <div key={`change-${change.id}`}><span className="todo-icon blue">≋</span><div><strong>{projectData.find((project) => project.id === change.projectId)?.name ?? change.projectId}</strong><p>基线变更 V{change.versionFrom} → V{change.versionTo} 待审批</p></div><button onClick={() => { setChangeId(change.id); setTab("基线变更"); }}>审批</button></div>)}{missingProjects.length + redProjects.length + varianceReports.length + pendingChanges.length === 0 && <div className="todo-empty"><span className="todo-icon blue">✓</span><div><strong>当前没有待处理事项</strong><p>本周数据已达到锁定前检查要求</p></div></div>}</div>

@@ -13,9 +13,14 @@ import {
   weeklyReports,
 } from "@/db/schema";
 import { buildPortfolioDelayForecast } from "@/lib/delay-forecast";
+import { shanghaiDateIso } from "@/lib/date-time";
 import { recalculateProjectHealth } from "@/lib/health";
 import { buildResourceCapacity } from "@/lib/resource-capacity";
 import { ensureSeeded } from "@/lib/seed";
+import {
+  calculateProjectStage,
+  latestConfirmedPrimary,
+} from "@/lib/project-stage";
 
 export type SnapshotLockSource = "manual" | "automation";
 
@@ -129,7 +134,37 @@ export async function lockPortfolioSnapshot(options: {
         );
   const capturedAt = options.capturedAt ?? new Date();
   const capturedAtIso = capturedAt.toISOString();
-  const capturedDate = capturedAtIso.slice(0, 10);
+  const capturedDate = shanghaiDateIso(capturedAt);
+  const confirmedPrimaryByProject = latestConfirmedPrimary(reportRows);
+  const milestonesByProject = new Map<string, typeof milestoneRows>();
+  for (const milestone of snapshotMilestones) {
+    const rows = milestonesByProject.get(milestone.projectId) ?? [];
+    rows.push(milestone);
+    milestonesByProject.set(milestone.projectId, rows);
+  }
+  const projectStages = snapshotProjectRows.map((project) =>
+    calculateProjectStage({
+      projectId: project.id,
+      milestones: milestonesByProject.get(project.id) ?? [],
+      asOfDate: capturedDate,
+      confirmedPrimaryMilestoneId: confirmedPrimaryByProject.get(project.id),
+      lifecycleStatus: project.lifecycleStatus,
+    }),
+  );
+  const stageDataQuality = {
+    missingPrimaryProjectIds: projectStages
+      .filter(
+        (stage) =>
+          stage.state === "active" && stage.primaryBasis !== "manager_confirmed",
+      )
+      .map((stage) => stage.projectId),
+    shouldStartProjectIds: projectStages
+      .filter((stage) => stage.shouldStartMilestoneIds.length > 0)
+      .map((stage) => stage.projectId),
+    carryoverProjectIds: projectStages
+      .filter((stage) => stage.carryoverMilestoneIds.length > 0)
+      .map((stage) => stage.projectId),
+  };
   const delayForecast = buildPortfolioDelayForecast({
     projects: allProjectRows,
     milestones: milestoneRows,
@@ -208,6 +243,8 @@ export async function lockPortfolioSnapshot(options: {
   const snapshotPayload = JSON.stringify({
     projects: snapshotProjectRows,
     milestones: snapshotMilestones,
+    projectStages,
+    stageDataQuality,
     dashboardAlerts,
     delayForecast,
     resourceCapacity,

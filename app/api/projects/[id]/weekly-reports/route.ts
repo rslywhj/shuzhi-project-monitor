@@ -10,6 +10,7 @@ import {
   weeklyReports,
 } from "@/db/schema";
 import {
+  ApiRequestError,
   apiError,
   requiredIsoDate,
   requiredString,
@@ -19,6 +20,11 @@ import {
 import { shanghaiDateIso } from "@/lib/date-time";
 import { ensureSeeded } from "@/lib/seed";
 import { recalculateProjectHealth } from "@/lib/health";
+import {
+  normalizeMilestoneExecution,
+  type MilestoneExecutionPayload,
+} from "@/lib/milestone-execution";
+import { calculateProjectStage } from "@/lib/project-stage";
 import {
   lifecycleLockedResponse,
   projectLifecycleLocked,
@@ -39,12 +45,21 @@ type WeeklyReportPayload = {
   declaredProgress?: number;
   reason?: string;
   forecastFinish?: string;
+  primaryMilestoneId?: number | null;
+  milestoneUpdates?: MilestoneExecutionPayload[];
   milestone?: {
     sequence?: number;
     completion?: number;
     forecastFinish?: string;
     actualFinish?: string;
   };
+  actions?: Array<{
+    milestoneId?: number;
+    name?: string;
+    owner?: string;
+    recoveryDate?: string;
+    detail?: string;
+  }>;
   action?: {
     name?: string;
     owner?: string;
@@ -81,7 +96,9 @@ export async function GET(
       weeklyReports: rows.map((row) => ({
         ...row,
         draft: JSON.parse(row.draftJson) as unknown,
+        milestoneUpdates: JSON.parse(row.milestoneUpdatesJson) as unknown,
         draftJson: undefined,
+        milestoneUpdatesJson: undefined,
       })),
     });
   } catch (error) {
@@ -132,63 +149,62 @@ export async function POST(
       .select()
       .from(milestones)
       .where(eq(milestones.projectId, id));
-    let milestoneId: number | null = null;
-    let milestoneUpdate:
-      | {
-          id: number;
-          completion: number;
-          forecastFinish: string | null;
-          actualFinish: string | null;
-          deviationDays: number;
-        }
-      | undefined;
-    if (payload.milestone?.sequence) {
-      const completion = safeNumber(payload.milestone.completion, "节点完成度");
-      const currentMilestone = milestoneRows.find(
-        (row) => row.sequence === payload.milestone?.sequence,
+    const legacyPayload: MilestoneExecutionPayload[] =
+      payload.milestone?.sequence
+        ? [
+            {
+              sequence: payload.milestone.sequence,
+              completion: payload.milestone.completion,
+              forecastFinish: payload.milestone.forecastFinish,
+              actualFinish: payload.milestone.actualFinish,
+              reason,
+            },
+          ]
+        : [];
+    const requestedUpdates = Array.isArray(payload.milestoneUpdates)
+      ? payload.milestoneUpdates
+      : legacyPayload;
+    if (requestedUpdates.length > 20) {
+      return Response.json(
+        { error: "单次周报最多更新20个节点。" },
+        { status: 400 },
+      );
+    }
+    const normalizedUpdates = requestedUpdates.map((update) => {
+      const currentMilestone = milestoneRows.find((row) =>
+        update.milestoneId
+          ? row.id === Number(update.milestoneId)
+          : row.sequence === Number(update.sequence),
       );
       if (!currentMilestone) {
-        return Response.json({ error: "未找到需要更新的项目节点。" }, { status: 404 });
+        throw new ApiRequestError("未找到需要更新的项目节点。", 404);
       }
-      if (!currentMilestone.applicable) {
-        return Response.json(
-          { error: "不适用节点不能提交进度。" },
-          { status: 400 },
-        );
-      }
-      const forecastFinish = payload.milestone.forecastFinish
-        ? requiredIsoDate(payload.milestone.forecastFinish, "节点预测完成日")
-        : currentMilestone.forecastFinish;
-      const actualFinish =
-        completion === 100
-          ? requiredIsoDate(
-              payload.milestone.actualFinish ?? forecastFinish,
-              "节点实际完成日",
-            )
-          : null;
-      const effectiveFinish = actualFinish ?? forecastFinish;
-      const deviationDays = effectiveFinish
-        ? Math.round(
-            (Date.parse(`${effectiveFinish}T00:00:00Z`) -
-              Date.parse(`${currentMilestone.plannedFinish}T00:00:00Z`)) /
-              86_400_000,
-          )
-        : 0;
-      milestoneId = currentMilestone.id;
-      milestoneUpdate = {
-        id: currentMilestone.id,
-        completion,
-        forecastFinish,
-        actualFinish,
-        deviationDays,
-      };
+      return normalizeMilestoneExecution(
+        currentMilestone,
+        { ...update, reason: update.reason ?? reason },
+        {
+          strict:
+            submitMode === "submitted" &&
+            Array.isArray(payload.milestoneUpdates),
+        },
+      );
+    });
+    if (
+      new Set(normalizedUpdates.map((update) => update.id)).size !==
+      normalizedUpdates.length
+    ) {
+      return Response.json(
+        { error: "同一节点不能在一份周报中重复更新。" },
+        { status: 400 },
+      );
     }
-
-    const progressRows = milestoneRows.map((row) =>
-      milestoneUpdate?.id === row.id
-        ? { ...row, completion: milestoneUpdate.completion }
-        : row,
+    const updateById = new Map(
+      normalizedUpdates.map((update) => [update.id, update]),
     );
+    const progressRows = milestoneRows.map((row) => {
+      const update = updateById.get(row.id);
+      return update ? { ...row, ...update } : row;
+    });
     const applicableRows = progressRows.filter((row) => row.applicable);
     const applicableWeight = applicableRows.reduce(
       (sum, row) => sum + row.weight,
@@ -217,45 +233,90 @@ export async function POST(
       );
     }
 
-    let actionValues:
-      | typeof correctiveActions.$inferInsert
-      | undefined;
-    if (submitMode === "submitted" && payload.action) {
-      actionValues = {
-        projectId: id,
-        milestoneId,
-        name: requiredString(payload.action.name, "措施名称"),
-        owner: requiredString(payload.action.owner, "措施责任人"),
-        recoveryDate: requiredIsoDate(payload.action.recoveryDate, "预计恢复日期"),
-        detail: requiredString(payload.action.detail, "具体行动"),
-        createdBy: identity.email,
-        updatedAt: new Date().toISOString(),
-      };
-    }
-    if (milestoneUpdate) {
-      const [activeRule] = await db
-        .select()
-        .from(ruleConfigs)
-        .where(eq(ruleConfigs.active, true))
-        .orderBy(desc(ruleConfigs.version))
-        .limit(1);
-      const currentMilestone = milestoneRows.find(
-        (row) => row.id === milestoneUpdate?.id,
-      )!;
+    const requestedActions = Array.isArray(payload.actions)
+      ? payload.actions
+      : payload.action
+        ? [
+            {
+              ...payload.action,
+              milestoneId: normalizedUpdates[0]?.id,
+            },
+          ]
+        : [];
+    const actionValues: Array<typeof correctiveActions.$inferInsert> =
+      submitMode === "submitted"
+        ? requestedActions.map((action) => ({
+            projectId: id,
+            milestoneId: action.milestoneId ?? normalizedUpdates[0]?.id ?? null,
+            name: requiredString(action.name, "措施名称"),
+            owner: requiredString(action.owner, "措施责任人"),
+            recoveryDate: requiredIsoDate(action.recoveryDate, "预计恢复日期"),
+            detail: requiredString(action.detail, "具体行动"),
+            createdBy: identity.email,
+            updatedAt: new Date().toISOString(),
+          }))
+        : [];
+    const [activeRule] = await db
+      .select()
+      .from(ruleConfigs)
+      .where(eq(ruleConfigs.active, true))
+      .orderBy(desc(ruleConfigs.version))
+      .limit(1);
+    for (const update of normalizedUpdates) {
+      const currentMilestone = milestoneRows.find((row) => row.id === update.id)!;
       const yellowDays = currentMilestone.critical
         ? (activeRule?.criticalYellowDays ?? 1)
         : (activeRule?.normalYellowDays ?? 4);
       const overdue =
-        milestoneUpdate.completion < 100 &&
-        currentMilestone.plannedFinish <
-          shanghaiDateIso();
+        update.completion < 100 && currentMilestone.plannedFinish < shanghaiDateIso();
       if (
         submitMode === "submitted" &&
-        (overdue || milestoneUpdate.deviationDays >= yellowDays) &&
-        !actionValues
+        (overdue || update.deviationDays >= yellowDays) &&
+        !actionValues.some((action) => action.milestoneId === update.id)
       ) {
         return Response.json(
-          { error: "红黄节点必须同步填写纠偏措施、责任人和预计恢复日期。" },
+          {
+            error: `${currentMilestone.name}已触发红黄预警，必须同步填写纠偏措施、责任人和预计恢复日期。`,
+          },
+          { status: 400 },
+        );
+      }
+    }
+    const primaryMilestoneId = payload.primaryMilestoneId
+      ? safeNumber(payload.primaryMilestoneId, "当前主节点编号", 1, 1_000_000)
+      : normalizedUpdates.length === 1 &&
+          (normalizedUpdates[0].executionStatus === "in_progress" ||
+            normalizedUpdates[0].executionStatus === "paused")
+          ? normalizedUpdates[0].id
+          : null;
+    const activeMilestones = progressRows.filter(
+      (row) =>
+        row.applicable &&
+        row.completion < 100 &&
+        (row.executionStatus === "in_progress" ||
+          row.executionStatus === "paused"),
+    );
+    if (
+      submitMode === "submitted" &&
+      activeMilestones.length > 0 &&
+      !primaryMilestoneId
+    ) {
+      return Response.json(
+        { error: "存在进行中或暂停节点，请确认一个当前主节点后再提交。" },
+        { status: 400 },
+      );
+    }
+    if (primaryMilestoneId) {
+      const primary = progressRows.find((row) => row.id === primaryMilestoneId);
+      if (
+        !primary ||
+        !primary.applicable ||
+        primary.completion >= 100 ||
+        (primary.executionStatus !== "in_progress" &&
+          primary.executionStatus !== "paused")
+      ) {
+        return Response.json(
+          { error: "当前主节点必须是适用且未完成的进行中或暂停节点。" },
           { status: 400 },
         );
       }
@@ -273,6 +334,8 @@ export async function POST(
         forecastFinish: payload.forecastFinish
           ? requiredIsoDate(payload.forecastFinish, "项目预测完成日")
           : null,
+        primaryMilestoneId,
+        milestoneUpdatesJson: JSON.stringify(normalizedUpdates),
         draftJson:
           submitMode === "draft" ? JSON.stringify(payload) : "{}",
         status: submitMode,
@@ -288,6 +351,8 @@ export async function POST(
           forecastFinish: payload.forecastFinish
             ? requiredIsoDate(payload.forecastFinish, "项目预测完成日")
             : null,
+          primaryMilestoneId,
+          milestoneUpdatesJson: JSON.stringify(normalizedUpdates),
           draftJson:
             submitMode === "draft" ? JSON.stringify(payload) : "{}",
           status: submitMode,
@@ -306,22 +371,32 @@ export async function POST(
       });
       return Response.json({ report }, { status: 201 });
     }
-    if (milestoneUpdate) {
+    for (const milestoneUpdate of normalizedUpdates) {
       await db
         .update(milestones)
         .set({
+          executionStatus: milestoneUpdate.executionStatus,
           completion: milestoneUpdate.completion,
+          actualStart: milestoneUpdate.actualStart,
           forecastFinish: milestoneUpdate.forecastFinish,
           actualFinish: milestoneUpdate.actualFinish,
+          pausedReason: milestoneUpdate.pausedReason,
           deviationDays: milestoneUpdate.deviationDays,
-          reason,
+          reason: milestoneUpdate.reason || reason,
+          executionUpdatedAt: new Date().toISOString(),
+          executionUpdatedBy: identity.email,
           updatedAt: sql`CURRENT_TIMESTAMP`,
         })
         .where(eq(milestones.id, milestoneUpdate.id));
     }
-    const [action] = actionValues
-      ? await db.insert(correctiveActions).values(actionValues).returning()
-      : [undefined];
+    const actions: Array<typeof correctiveActions.$inferSelect> = [];
+    for (const actionValue of actionValues) {
+      const [action] = await db
+        .insert(correctiveActions)
+        .values(actionValue)
+        .returning();
+      actions.push(action);
+    }
 
     await db
       .update(projects)
@@ -341,11 +416,31 @@ export async function POST(
         reportId: report.id,
         weekKey,
         variance,
+        primaryMilestoneId,
+        milestoneUpdates: normalizedUpdates.map((update) => ({
+          milestoneId: update.id,
+          executionStatus: update.executionStatus,
+          completion: update.completion,
+        })),
         health,
       }),
     });
+    const refreshedMilestones = progressRows.map((row) => {
+      const update = updateById.get(row.id);
+      return update ? { ...row, ...update } : row;
+    });
+    const stageSummary = calculateProjectStage({
+      projectId: id,
+      milestones: refreshedMilestones,
+      asOfDate: shanghaiDateIso(),
+      confirmedPrimaryMilestoneId: primaryMilestoneId,
+      lifecycleStatus: project.lifecycleStatus,
+    });
 
-    return Response.json({ report, action, health }, { status: 201 });
+    return Response.json(
+      { report, actions, action: actions[0], health, stageSummary },
+      { status: 201 },
+    );
   } catch (error) {
     return apiError(error);
   }

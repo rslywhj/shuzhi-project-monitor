@@ -307,6 +307,15 @@ export const milestones = sqliteTable(
     plannedFinish: text("planned_finish").notNull(),
     forecastFinish: text("forecast_finish"),
     actualFinish: text("actual_finish"),
+    executionStatus: text("execution_status", {
+      enum: ["not_started", "in_progress", "paused", "completed"],
+    })
+      .notNull()
+      .default("not_started"),
+    actualStart: text("actual_start"),
+    pausedReason: text("paused_reason").notNull().default(""),
+    executionUpdatedAt: text("execution_updated_at"),
+    executionUpdatedBy: text("execution_updated_by"),
     completion: real("completion").notNull().default(0),
     status: text("status", { enum: ["green", "yellow", "red", "na"] })
       .notNull()
@@ -318,6 +327,10 @@ export const milestones = sqliteTable(
   (table) => [
     uniqueIndex("milestones_project_sequence_idx").on(table.projectId, table.sequence),
     index("milestones_status_idx").on(table.status),
+    index("milestones_project_execution_idx").on(
+      table.projectId,
+      table.executionStatus,
+    ),
   ],
 );
 
@@ -376,6 +389,11 @@ export const weeklyReports = sqliteTable(
     variance: real("variance").notNull(),
     reason: text("reason").notNull(),
     forecastFinish: text("forecast_finish"),
+    primaryMilestoneId: integer("primary_milestone_id").references(
+      () => milestones.id,
+      { onDelete: "set null" },
+    ),
+    milestoneUpdatesJson: text("milestone_updates_json").notNull().default("[]"),
     draftJson: text("draft_json").notNull().default("{}"),
     status: text("status", { enum: ["draft", "submitted", "locked"] })
       .notNull()
@@ -386,6 +404,7 @@ export const weeklyReports = sqliteTable(
   (table) => [
     uniqueIndex("weekly_reports_project_week_idx").on(table.projectId, table.weekKey),
     index("weekly_reports_week_idx").on(table.weekKey),
+    index("weekly_reports_primary_milestone_idx").on(table.primaryMilestoneId),
   ],
 );
 

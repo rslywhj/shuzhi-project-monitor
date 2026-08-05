@@ -496,6 +496,9 @@ async function ensureDemoScenarioData(db: ReturnType<typeof getDb>) {
       );
       return weekOffsets.map((offset, index) => {
         const isDraft = seed.id === "P15" && offset === 0;
+        const currentMilestone = milestoneByProjectAndSequence.get(
+          `${seed.id}:${seed.completeThrough + 1}`,
+        );
         const systemProgress = Math.max(
           0,
           Number(
@@ -524,6 +527,29 @@ async function ensureDemoScenarioData(db: ReturnType<typeof getDb>) {
           forecastFinish: demoDateAt(
             seed.startOffset + 12 * 18 + seed.forecastDelay,
           ),
+          primaryMilestoneId:
+            !isDraft &&
+            seed.id !== "P16" &&
+            currentMilestone?.executionStatus !== "not_started"
+              ? currentMilestone?.id ?? null
+              : null,
+          milestoneUpdatesJson: JSON.stringify(
+            offset === 0 && currentMilestone
+              ? [
+                  {
+                    id: currentMilestone.id,
+                    executionStatus: currentMilestone.executionStatus,
+                    completion: currentMilestone.completion,
+                    actualStart: currentMilestone.actualStart,
+                    forecastFinish: currentMilestone.forecastFinish,
+                    actualFinish: currentMilestone.actualFinish,
+                    pausedReason: currentMilestone.pausedReason,
+                    reason: currentMilestone.reason,
+                    deviationDays: currentMilestone.deviationDays,
+                  },
+                ]
+              : [],
+          ),
           draftJson: JSON.stringify(
             isDraft
               ? {
@@ -543,6 +569,30 @@ async function ensureDemoScenarioData(db: ReturnType<typeof getDb>) {
     for (const rowsChunk of chunks(reportRows, 8)) {
       await db.insert(weeklyReports).values(rowsChunk).onConflictDoNothing();
     }
+  }
+  const reportsWithoutPrimary = await db
+    .select()
+    .from(weeklyReports)
+    .where(isNull(weeklyReports.primaryMilestoneId));
+  for (const report of reportsWithoutPrimary) {
+    if (report.status === "draft") continue;
+    const projectSeed = seedProjects.find((seed) => seed.id === report.projectId);
+    if (!projectSeed) continue;
+    const currentMilestone = milestoneByProjectAndSequence.get(
+      `${report.projectId}:${projectSeed.completeThrough + 1}`,
+    );
+    if (
+      !currentMilestone ||
+      report.projectId === "P16" ||
+      currentMilestone.executionStatus === "not_started" ||
+      currentMilestone.executionStatus === "completed"
+    ) {
+      continue;
+    }
+    await db
+      .update(weeklyReports)
+      .set({ primaryMilestoneId: currentMilestone.id })
+      .where(eq(weeklyReports.id, report.id));
   }
 
   const [{ value: riskCount }] = await db
@@ -817,7 +867,10 @@ export async function ensureSeeded() {
       ([, name, defaultWeight, critical], index) => {
         const sequence = index + 1;
         const applicable = !(project.naSequences ?? []).includes(sequence);
-        const completed = applicable && sequence <= project.completeThrough;
+        const carryover =
+          project.id === "P05" && sequence === project.completeThrough;
+        const completed =
+          applicable && sequence <= project.completeThrough && !carryover;
         const current =
           applicable && sequence === project.completeThrough + 1;
         const plannedFinishOffset = project.startOffset + sequence * 18;
@@ -857,7 +910,29 @@ export async function ensureSeeded() {
             completed
               ? demoDateAt(plannedFinishOffset + project.actualDelay)
               : null,
-          completion: completed ? 100 : current ? project.partialCompletion : 0,
+          executionStatus: completed
+            ? ("completed" as const)
+            : current
+              ? project.id === "P04"
+                ? ("not_started" as const)
+                : project.id === "P03"
+                  ? ("paused" as const)
+                  : ("in_progress" as const)
+              : ("not_started" as const),
+          actualStart:
+            completed || (current && project.id !== "P04")
+              ? demoDateAt(project.startOffset + index * 18 + 1)
+              : null,
+          pausedReason:
+            current && project.id === "P03"
+              ? "核心业务代表档期冲突，需求确认会议暂缓。"
+              : "",
+          completion:
+            completed
+              ? 100
+              : current && project.id !== "P04"
+                ? project.partialCompletion
+                : 0,
           status,
           deviationDays,
           reason:
@@ -889,6 +964,9 @@ export async function ensureSeeded() {
         plannedFinish: demoDateAt(38),
         forecastFinish: demoDateAt(43),
         actualFinish: null,
+        executionStatus: "paused" as const,
+        actualStart: demoDateAt(24),
+        pausedReason: "等待数据治理委员会确认分类边界。",
         completion: 20,
         status: "yellow" as const,
         deviationDays: 5,

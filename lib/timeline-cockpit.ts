@@ -9,6 +9,7 @@ export type TimelineMilestoneInput = {
   status: TimelineStatus;
   completion: number;
   plannedFinish: string;
+  plannedStart?: string;
   forecastFinish: string | null;
   actualFinish: string | null;
   deviationDays: number;
@@ -17,6 +18,9 @@ export type TimelineMilestoneInput = {
   critical: boolean;
   custom: boolean;
   weight: number;
+  executionStatus?: "not_started" | "in_progress" | "paused" | "completed";
+  actualStart?: string | null;
+  pausedReason?: string;
 };
 
 export type TimelineProjectInput = {
@@ -28,6 +32,15 @@ export type TimelineProjectInput = {
   status: TimelineStatus;
   score: number;
   lifecycleStatus?: "active" | "completed" | "archived";
+  stageSummary?: {
+    primaryMilestoneId: number | null;
+    primaryBasis: "manager_confirmed" | "system_recommended" | "legacy_inferred" | "none";
+    parallelMilestoneIds: number[];
+    carryoverMilestoneIds: number[];
+    overdueCarryoverMilestoneIds: number[];
+    shouldStartMilestoneIds: number[];
+    nextMilestoneId: number | null;
+  };
   milestones?: TimelineMilestoneInput[];
 };
 

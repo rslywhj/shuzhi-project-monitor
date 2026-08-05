@@ -267,6 +267,11 @@ export default function TimelineCockpit({
     org: project.org,
     status: project.status,
     score: project.score,
+    stageLabel: project.stageSummary?.primaryMilestoneId
+      ? `主：${project.milestones?.find((milestone) => milestone.id === project.stageSummary?.primaryMilestoneId)?.name ?? "待确认"} · 并行${project.stageSummary.parallelMilestoneIds.length} · 遗留${project.stageSummary.carryoverMilestoneIds.length}`
+      : project.stageSummary?.shouldStartMilestoneIds.length
+        ? `应启动未启动 ${project.stageSummary.shouldStartMilestoneIds.length}项`
+        : "尚无执行中节点",
     markers: markers.map((marker) => ({
       key: marker.key,
       monthKey: marker.monthKey,
@@ -541,7 +546,7 @@ export default function TimelineCockpit({
                 <TimelineStatusPill status={project.status} compact />
                 <span>
                   <strong>{project.name}</strong>
-                  <small>{project.owner} · {project.org}</small>
+                  <small>{project.stageSummary?.primaryMilestoneId ? `主：${project.milestones?.find((milestone) => milestone.id === project.stageSummary?.primaryMilestoneId)?.name ?? "待确认"} · 并行${project.stageSummary.parallelMilestoneIds.length} · 遗留${project.stageSummary.carryoverMilestoneIds.length}` : project.stageSummary?.shouldStartMilestoneIds.length ? `! ${project.stageSummary.shouldStartMilestoneIds.length}个节点应启动未启动` : `${project.owner} · ${project.org}`}</small>
                 </span>
                 <b>{project.score}</b>
               </button>
@@ -567,7 +572,7 @@ export default function TimelineCockpit({
                         <button
                           type="button"
                           key={marker.key}
-                          className={`timeline-marker ${marker.milestone.status} ${marker.roles.includes("actual") ? "role-actual" : marker.roles.includes("forecast") ? "role-forecast" : marker.overdue ? "role-overdue" : "role-plan"} ${marker.overdue ? "overdue" : ""} ${highlighted ? "highlighted" : "dimmed"}`}
+                          className={`timeline-marker ${marker.milestone.status} ${marker.roles.includes("actual") ? "role-actual" : marker.roles.includes("forecast") ? "role-forecast" : marker.overdue ? "role-overdue" : "role-plan"} ${marker.overdue ? "overdue" : ""} ${project.stageSummary?.primaryMilestoneId === marker.milestone.id ? "stage-main" : project.stageSummary?.parallelMilestoneIds.includes(marker.milestone.id) ? "stage-parallel" : project.stageSummary?.carryoverMilestoneIds.includes(marker.milestone.id) ? "stage-carryover" : ""} ${highlighted ? "highlighted" : "dimmed"}`}
                           onClick={() =>
                             setSelected({
                               project,
@@ -580,6 +585,7 @@ export default function TimelineCockpit({
                           <span className="timeline-marker-symbol">{markerSymbol(marker)}</span>
                           <strong>{marker.milestone.name}</strong>
                           <em>{markerRoleLabel(marker)}</em>
+                          {project.stageSummary?.primaryMilestoneId === marker.milestone.id && <i title="当前主节点">主</i>}
                           {marker.milestone.critical && <i title="关键节点">关</i>}
                         </button>
                       );
@@ -724,6 +730,8 @@ export default function TimelineCockpit({
                       <div><small>预测完成</small><strong>{marker.milestone.forecastFinish || "未填报"}</strong></div>
                       <div><small>实际完成</small><strong>{marker.milestone.actualFinish || "未完成"}</strong></div>
                       <div><small>完成度 / 偏差</small><strong>{marker.milestone.completion}% · {marker.milestone.deviationDays > 0 ? "+" : ""}{marker.milestone.deviationDays}天</strong></div>
+                      <div><small>执行状态</small><strong>{marker.milestone.executionStatus === "completed" ? "✓ 已完成" : marker.milestone.executionStatus === "paused" ? "Ⅱ 暂停" : marker.milestone.executionStatus === "in_progress" ? "▶ 进行中" : "○ 未开始"}</strong></div>
+                      <div><small>实际开始</small><strong>{marker.milestone.actualStart || "未填报"}</strong></div>
                     </div>
                     <div className="timeline-node-meta">
                       <span>{marker.milestone.critical ? "◆ 关键节点" : "◇ 普通节点"}</span>
@@ -732,7 +740,7 @@ export default function TimelineCockpit({
                     </div>
                     <div className="cause-card">
                       <span>偏差归因</span>
-                      <p>{marker.milestone.reason || "当前暂无偏差说明。"}</p>
+                      <p>{marker.milestone.pausedReason ? `暂停原因：${marker.milestone.pausedReason}` : marker.milestone.reason || "当前暂无偏差说明。"}</p>
                     </div>
                   </article>
                 ))}

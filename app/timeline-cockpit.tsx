@@ -27,6 +27,7 @@ import {
   formatShanghaiMonthDayTime,
   shanghaiDateIso,
 } from "@/lib/date-time";
+import { shouldShowPrimaryStageIndicator } from "@/lib/project-stage";
 import { ThemeControl } from "./theme-provider";
 import {
   TimelinePrintReport,
@@ -86,6 +87,23 @@ const KPI_COPY: Record<
     symbol: "■",
   },
 };
+
+function timelineProjectStageLabel(project: TimelineProjectInput) {
+  if (project.stageSummary?.primaryMilestoneId) {
+    const primaryName =
+      project.milestones?.find(
+        (milestone) =>
+          milestone.id === project.stageSummary?.primaryMilestoneId,
+      )?.name ?? "待确认";
+    return shouldShowPrimaryStageIndicator(project.stageSummary)
+      ? `主：${primaryName} · 并行${project.stageSummary.parallelMilestoneIds.length} · 遗留${project.stageSummary.carryoverMilestoneIds.length}`
+      : `当前：${primaryName}`;
+  }
+  if (project.stageSummary?.shouldStartMilestoneIds.length) {
+    return `应启动未启动 ${project.stageSummary.shouldStartMilestoneIds.length}项`;
+  }
+  return null;
+}
 
 function TimelineLogo() {
   return (
@@ -269,11 +287,7 @@ export default function TimelineCockpit({
     org: project.org,
     status: project.status,
     score: project.score,
-    stageLabel: project.stageSummary?.primaryMilestoneId
-      ? `主：${project.milestones?.find((milestone) => milestone.id === project.stageSummary?.primaryMilestoneId)?.name ?? "待确认"} · 并行${project.stageSummary.parallelMilestoneIds.length} · 遗留${project.stageSummary.carryoverMilestoneIds.length}`
-      : project.stageSummary?.shouldStartMilestoneIds.length
-        ? `应启动未启动 ${project.stageSummary.shouldStartMilestoneIds.length}项`
-        : "尚无执行中节点",
+    stageLabel: timelineProjectStageLabel(project) ?? "尚无执行中节点",
     markers: markers.map((marker) => ({
       key: marker.key,
       monthKey: marker.monthKey,
@@ -549,7 +563,7 @@ export default function TimelineCockpit({
                 <TimelineStatusPill status={project.status} compact />
                 <span>
                   <strong>{project.name}</strong>
-                  <small>{project.stageSummary?.primaryMilestoneId ? `主：${project.milestones?.find((milestone) => milestone.id === project.stageSummary?.primaryMilestoneId)?.name ?? "待确认"} · 并行${project.stageSummary.parallelMilestoneIds.length} · 遗留${project.stageSummary.carryoverMilestoneIds.length}` : project.stageSummary?.shouldStartMilestoneIds.length ? `! ${project.stageSummary.shouldStartMilestoneIds.length}个节点应启动未启动` : `${project.owner} · ${project.org}`}</small>
+                  <small>{timelineProjectStageLabel(project) ?? `${project.owner} · ${project.org}`}</small>
                 </span>
                 <b>{project.score}</b>
               </button>
@@ -574,11 +588,15 @@ export default function TimelineCockpit({
                       const plannedFinish = unfinishedPlannedFinish(
                         marker.milestone,
                       );
+                      const showPrimaryStageIndicator =
+                        project.stageSummary?.primaryMilestoneId ===
+                          marker.milestone.id &&
+                        shouldShowPrimaryStageIndicator(project.stageSummary);
                       return (
                         <button
                           type="button"
                           key={marker.key}
-                          className={`timeline-marker ${marker.milestone.status} ${marker.roles.includes("actual") ? "role-actual" : marker.roles.includes("forecast") ? "role-forecast" : marker.overdue ? "role-overdue" : "role-plan"} ${marker.overdue ? "overdue" : ""} ${project.stageSummary?.primaryMilestoneId === marker.milestone.id ? "stage-main" : project.stageSummary?.parallelMilestoneIds.includes(marker.milestone.id) ? "stage-parallel" : project.stageSummary?.carryoverMilestoneIds.includes(marker.milestone.id) ? "stage-carryover" : ""} ${highlighted ? "highlighted" : "dimmed"}`}
+                          className={`timeline-marker ${marker.milestone.status} ${marker.roles.includes("actual") ? "role-actual" : marker.roles.includes("forecast") ? "role-forecast" : marker.overdue ? "role-overdue" : "role-plan"} ${marker.overdue ? "overdue" : ""} ${showPrimaryStageIndicator ? "stage-main" : project.stageSummary?.parallelMilestoneIds.includes(marker.milestone.id) ? "stage-parallel" : project.stageSummary?.carryoverMilestoneIds.includes(marker.milestone.id) ? "stage-carryover" : ""} ${highlighted ? "highlighted" : "dimmed"}`}
                           onClick={() =>
                             setSelected({
                               project,
@@ -598,7 +616,7 @@ export default function TimelineCockpit({
                             )}
                           </span>
                           <em>{markerRoleLabel(marker)}</em>
-                          {project.stageSummary?.primaryMilestoneId === marker.milestone.id && <i title="当前主节点">主</i>}
+                          {showPrimaryStageIndicator && <i title="当前主节点">主</i>}
                           {marker.milestone.critical && <i title="关键节点">关</i>}
                         </button>
                       );

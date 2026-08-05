@@ -37,6 +37,25 @@ export type ProjectStageSummary = {
   nextMilestoneId: number | null;
 };
 
+export function shouldShowPrimaryStageIndicator(
+  summary:
+    | Pick<
+        ProjectStageSummary,
+        "primaryMilestoneId" | "parallelMilestoneIds" | "carryoverMilestoneIds"
+      >
+    | null
+    | undefined,
+) {
+  if (!summary?.primaryMilestoneId) return false;
+  return (
+    new Set([
+      summary.primaryMilestoneId,
+      ...summary.parallelMilestoneIds,
+      ...summary.carryoverMilestoneIds,
+    ]).size > 1
+  );
+}
+
 function completed(milestone: ProjectStageMilestone) {
   return (
     milestone.executionStatus === "completed" ||

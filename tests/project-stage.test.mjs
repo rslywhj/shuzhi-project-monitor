@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   calculateProjectStage,
   latestConfirmedPrimary,
+  shouldShowPrimaryStageIndicator,
 } from "../lib/project-stage.ts";
 
 function milestone(overrides = {}) {
@@ -136,4 +137,31 @@ test("reads only the latest submitted primary confirmation per project", () => {
   ]);
   assert.equal(result.get("P01"), 1);
   assert.equal(result.get("P02"), 4);
+});
+
+test("shows the primary-stage indicator only when multiple stage nodes need distinction", () => {
+  assert.equal(
+    shouldShowPrimaryStageIndicator({
+      primaryMilestoneId: 2,
+      parallelMilestoneIds: [],
+      carryoverMilestoneIds: [],
+    }),
+    false,
+  );
+  assert.equal(
+    shouldShowPrimaryStageIndicator({
+      primaryMilestoneId: 2,
+      parallelMilestoneIds: [3],
+      carryoverMilestoneIds: [],
+    }),
+    true,
+  );
+  assert.equal(
+    shouldShowPrimaryStageIndicator({
+      primaryMilestoneId: 2,
+      parallelMilestoneIds: [1],
+      carryoverMilestoneIds: [1],
+    }),
+    true,
+  );
 });

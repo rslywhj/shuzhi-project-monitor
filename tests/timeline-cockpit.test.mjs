@@ -5,8 +5,10 @@ import {
   buildProjectTimelineMarkers,
   buildTimelineKpis,
   buildTimelineMonths,
+  compactTimelineDate,
   markerMatchesKpi,
   timelineProjectIsVisible,
+  unfinishedPlannedFinish,
 } from "../lib/timeline-cockpit.ts";
 
 function milestone(overrides = {}) {
@@ -43,6 +45,28 @@ function project(overrides = {}) {
     ...overrides,
   };
 }
+
+test("shows a compact planned finish date only for unfinished milestones", () => {
+  const unfinished = milestone({ plannedFinish: "2026-08-19" });
+  assert.equal(unfinishedPlannedFinish(unfinished), "2026-08-19");
+  assert.equal(compactTimelineDate("2026-08-19"), "08-19");
+  assert.equal(
+    unfinishedPlannedFinish(milestone({ completion: 100 })),
+    null,
+  );
+  assert.equal(
+    unfinishedPlannedFinish(
+      milestone({ completion: 60, actualFinish: "2026-08-18" }),
+    ),
+    null,
+  );
+  assert.equal(
+    unfinishedPlannedFinish(
+      milestone({ completion: 60, executionStatus: "completed" }),
+    ),
+    null,
+  );
+});
 
 test("builds a rolling six-month window from previous month to four months ahead", () => {
   assert.equal(addTimelineMonths("2026-01", -1), "2025-12");

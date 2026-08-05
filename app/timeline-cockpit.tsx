@@ -12,8 +12,10 @@ import {
   buildTimelineKpis,
   buildTimelineMonths,
   markerMatchesKpi,
+  compactTimelineDate,
   timelineProjectIsVisible,
   timelineProjectPriority,
+  unfinishedPlannedFinish,
   type TimelineKpiFilter,
   type TimelineMarker,
   type TimelineMonth,
@@ -279,6 +281,7 @@ export default function TimelineCockpit({
       symbol: markerSymbol(marker),
       status: marker.milestone.status,
       critical: marker.milestone.critical,
+      plannedFinish: unfinishedPlannedFinish(marker.milestone),
     })),
   }));
 
@@ -568,6 +571,9 @@ export default function TimelineCockpit({
                           activeKpi,
                           currentMonthKey,
                         );
+                      const plannedFinish = unfinishedPlannedFinish(
+                        marker.milestone,
+                      );
                       return (
                         <button
                           type="button"
@@ -580,10 +586,17 @@ export default function TimelineCockpit({
                               markers: [marker],
                             })
                           }
-                          aria-label={`${project.name} ${marker.milestone.name} ${markerRoleLabel(marker)} ${STATUS_LABEL[marker.milestone.status]}`}
+                          aria-label={`${project.name} ${marker.milestone.name} ${markerRoleLabel(marker)} ${STATUS_LABEL[marker.milestone.status]}${plannedFinish ? ` 计划完成 ${plannedFinish}` : ""}`}
                         >
                           <span className="timeline-marker-symbol">{markerSymbol(marker)}</span>
-                          <strong>{marker.milestone.name}</strong>
+                          <span className="timeline-marker-title">
+                            <strong>{marker.milestone.name}</strong>
+                            {plannedFinish && (
+                              <small title={`计划完成日期 ${plannedFinish}`}>
+                                计划完成 {compactTimelineDate(plannedFinish)}
+                              </small>
+                            )}
+                          </span>
                           <em>{markerRoleLabel(marker)}</em>
                           {project.stageSummary?.primaryMilestoneId === marker.milestone.id && <i title="当前主节点">主</i>}
                           {marker.milestone.critical && <i title="关键节点">关</i>}

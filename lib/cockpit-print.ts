@@ -1,13 +1,14 @@
 import { normalizeFontScale } from "./theme.ts";
 
 export type TimelinePrintHeightRow = {
-  markers: Array<{ monthKey: string }>;
+  markers: Array<{ monthKey: string; plannedFinish?: string | null }>;
 };
 
 const PRINT_BODY_BASE_HEIGHT_MM = 142;
 const PRINT_SCALE_HEIGHT_PENALTY_MM = 10;
 const TIMELINE_BASE_ROW_HEIGHT_MM = 13.5;
 const TIMELINE_MARKER_HEIGHT_MM = 5.8;
+const TIMELINE_MARKER_WITH_PLAN_HEIGHT_MM = 7.4;
 const MATRIX_BASE_ROW_HEIGHT_MM = 16;
 
 export function printBodyHeightMm(fontScale: number) {
@@ -21,18 +22,24 @@ export function timelinePrintRowHeightMm(
   fontScale: number,
 ) {
   const scale = normalizeFontScale(fontScale);
-  const markerCountByMonth = new Map<string, number>();
+  const markerHeightByMonth = new Map<string, number>();
   for (const marker of row.markers) {
-    markerCountByMonth.set(
+    markerHeightByMonth.set(
       marker.monthKey,
-      (markerCountByMonth.get(marker.monthKey) ?? 0) + 1,
+      (markerHeightByMonth.get(marker.monthKey) ?? 0) +
+        (marker.plannedFinish
+          ? TIMELINE_MARKER_WITH_PLAN_HEIGHT_MM
+          : TIMELINE_MARKER_HEIGHT_MM),
     );
   }
-  const maximumMarkers = Math.max(1, ...markerCountByMonth.values());
+  const maximumMarkerHeight = Math.max(
+    TIMELINE_MARKER_HEIGHT_MM,
+    ...markerHeightByMonth.values(),
+  );
   return Number(
     (Math.max(
       TIMELINE_BASE_ROW_HEIGHT_MM,
-      maximumMarkers * TIMELINE_MARKER_HEIGHT_MM,
+      maximumMarkerHeight,
     ) * scale).toFixed(2),
   );
 }

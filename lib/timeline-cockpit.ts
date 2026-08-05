@@ -71,6 +71,21 @@ export type TimelineKpis = Record<TimelineKpiFilter, TimelineKpi>;
 
 const MONTH_KEY_PATTERN = /^(\d{4})-(\d{2})$/;
 
+export function unfinishedPlannedFinish(
+  milestone: TimelineMilestoneInput,
+) {
+  const completed =
+    milestone.executionStatus === "completed" ||
+    milestone.completion >= 100 ||
+    Boolean(milestone.actualFinish);
+  return completed ? null : (milestone.plannedFinish || null);
+}
+
+export function compactTimelineDate(value: string) {
+  const match = value.match(/^\d{4}-(\d{2})-(\d{2})$/);
+  return match ? `${match[1]}-${match[2]}` : value;
+}
+
 function parseMonthKey(monthKey: string) {
   const match = monthKey.match(MONTH_KEY_PATTERN);
   if (!match) throw new Error(`Invalid month key: ${monthKey}`);

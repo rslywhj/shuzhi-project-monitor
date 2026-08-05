@@ -452,7 +452,7 @@ html[data-theme="dark"] .app-shell :where(.biweekly-summary article,.biweekly-se
 
 /* display preferences: color scheme and runtime font scaling */
 .theme-control{height:38px;min-width:0;display:block;position:relative;padding:0;border:1px solid;border-radius:4px;white-space:nowrap}
-.theme-control summary{width:100%;height:100%;display:flex;align-items:center;justify-content:center;gap:5px;padding:0 7px;border-radius:inherit;cursor:pointer;list-style:none;user-select:none}
+.theme-control summary{width:100%;height:100%;display:flex;align-items:center;justify-content:center;gap:5px;padding:0 7px;border-radius:inherit;color:inherit;background:transparent;cursor:pointer;list-style:none;user-select:none;transition:background .16s,color .16s,box-shadow .16s}
 .theme-control summary::-webkit-details-marker{display:none}
 .theme-control summary>span:first-child{flex:0 0 auto;font-size:.75rem}
 .theme-control summary>span:nth-child(2){font-size:.6875rem;font-weight:600}
@@ -777,7 +777,9 @@ html[data-theme="dark"] .app-shell .data-banner{background:#3b321b;color:#f0d589
   box-shadow:none;
 }
 .cockpit .cockpit-header-actions .theme-control.theme-cockpit{background:transparent;color:#9dbed2}
-.cockpit .cockpit-header-actions .theme-control.theme-cockpit:hover,
+.cockpit .cockpit-header-actions .theme-control.theme-cockpit:hover{background:transparent;color:#9dbed2}
+.cockpit .cockpit-header-actions .theme-control.theme-cockpit summary:hover,
+.cockpit .cockpit-header-actions .theme-control.theme-cockpit[open] summary{background:rgba(73,151,201,.15);color:#e3f4ff;box-shadow:inset 0 0 0 1px rgba(91,177,229,.2)}
 .cockpit .cockpit-header-actions .cockpit-view-switch:hover{background:rgba(73,151,201,.15);color:#e3f4ff}
 .cockpit .cockpit-header-actions .theme-control select{font-size:9px;font-weight:600}
 .cockpit .cockpit-header-actions .cockpit-view-switch{background:transparent;color:#8fc2df}
@@ -791,7 +793,10 @@ html[data-theme="light"] .cockpit .cockpit-header-actions{
 }
 html[data-theme="light"] .cockpit .cockpit-header-actions :where(.theme-control.theme-cockpit,.cockpit-view-switch){border:0;background:transparent;color:#356b91}
 html[data-theme="light"] .cockpit .cockpit-header-actions .cockpit-pdf-button{background:#edf7fb;color:#2181a7}
-html[data-theme="light"] .cockpit .cockpit-header-actions :where(.theme-control.theme-cockpit,.cockpit-view-switch):hover{background:#e8f2f8;color:#174f76}
+html[data-theme="light"] .cockpit .cockpit-header-actions .theme-control.theme-cockpit:hover{background:transparent;color:#356b91}
+html[data-theme="light"] .cockpit .cockpit-header-actions .theme-control.theme-cockpit summary:hover,
+html[data-theme="light"] .cockpit .cockpit-header-actions .theme-control.theme-cockpit[open] summary{background:#e8f2f8;color:#174f76;box-shadow:inset 0 0 0 1px rgba(114,168,202,.42)}
+html[data-theme="light"] .cockpit .cockpit-header-actions .cockpit-view-switch:hover{background:#e8f2f8;color:#174f76}
 html[data-theme="light"] .cockpit .cockpit-header-actions .light-button{border:0;background:linear-gradient(135deg,#247fc8,#2ba4bd);color:#fff}
 
 @media(max-width:1180px){

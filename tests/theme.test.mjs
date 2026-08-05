@@ -34,6 +34,23 @@ test("resolves manual and system color-scheme preferences", () => {
   assert.equal(FONT_SCALE_STORAGE_KEY, "shuzhi-font-scale-v1");
 });
 
+test("keeps the light cockpit display button readable on hover", async () => {
+  const css = await readFile(
+    new URL("../app/globals.css", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    css,
+    /html\[data-theme="light"\] \.cockpit \.cockpit-header-actions \.theme-control\.theme-cockpit summary:hover/,
+  );
+  assert.match(
+    css,
+    /summary:hover,\s*html\[data-theme="light"\][^{]+\[open\] summary\{background:#e8f2f8;color:#174f76/,
+  );
+  assert.match(css, /\.theme-control summary\{[^}]*color:inherit[^}]*transition:/);
+});
+
 test("wires one persistent theme control into both product surfaces", async () => {
   const [provider, page, timeline, layout, css, postcss, fontScalePlugin] = await Promise.all([
     readFile(new URL("../app/theme-provider.tsx", import.meta.url), "utf8"),

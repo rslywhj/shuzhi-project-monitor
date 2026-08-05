@@ -17,3 +17,18 @@ test("keeps the management cockpit scrollable in shorter desktop viewports", asy
   assert.match(responsiveBlock, /overflow-y:auto/);
   assert.doesNotMatch(responsiveBlock, /overflow:hidden/);
 });
+
+test("keeps timeline month navigation arrows centered at enlarged font scales", async () => {
+  const css = await readFile(
+    new URL("../app/globals.css", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    css,
+    /\.timeline-window-nav button\{[^}]*height:calc\(26px \* var\(--ui-font-scale,1\)\)[^}]*display:inline-grid[^}]*place-items:center[^}]*line-height:1/,
+  );
+  assert.match(
+    css,
+    /\.timeline-window-nav button:first-child,.timeline-window-nav button:nth-child\(3\)\{[^}]*width:calc\(27px \* var\(--ui-font-scale,1\)\)[^}]*font-size:calc\(17px \* var\(--ui-font-scale,1\)\)/,
+  );
+});

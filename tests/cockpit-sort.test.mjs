@@ -106,10 +106,11 @@ test("persists shared header sorting and migrates the former dropdown", () => {
   });
 });
 
-test("renders sortable project and health headers in both management cockpits", async () => {
-  const [timeline, page, css] = await Promise.all([
+test("renders project and score-based health sorting without a separate health status", async () => {
+  const [timeline, page, printReport, css] = await Promise.all([
     readFile(new URL("../app/timeline-cockpit.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/cockpit-print-report.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   ]);
 
@@ -121,9 +122,15 @@ test("renders sortable project and health headers in both management cockpits", 
     assert.doesNotMatch(source, /<option value="urgency">/);
     assert.doesNotMatch(source, /<option value="default">/);
   }
-  assert.match(timeline, /timeline-project-column timeline-project-header/);
+  assert.match(timeline, /timeline-project-column timeline-project-header project-sort-header/);
   assert.match(page, /project-col project-sort-header/);
+  assert.doesNotMatch(timeline, /TimelineStatusPill status=\{project\.status\} compact/);
+  assert.doesNotMatch(page, /StatusPill status=\{p\.status\} compact/);
+  assert.doesNotMatch(printReport, /statusSymbol\[row\.status\]/);
+  assert.doesNotMatch(printReport, /statusLabel\[row\.status\]/);
+  assert.match(printReport, /健康度 \{row\.score\}分/);
   assert.match(css, /project-sort-header>button\.active/);
   assert.match(css, /project-sort-header>button:focus-visible/);
-  assert.match(css, /timeline-project-header.*grid-template-columns:32px minmax\(0,1fr\) 32px/);
+  assert.match(css, /timeline-project-header.*grid-template-columns:minmax\(0,1fr\) 58px/);
+  assert.match(css, /timeline-project-cell,.project-cell\{grid-template-columns:minmax\(0,1fr\) 58px/);
 });

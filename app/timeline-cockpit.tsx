@@ -556,16 +556,7 @@ export default function TimelineCockpit({
           style={{ "--timeline-month-count": months.length } as CSSProperties}
         >
           <div className="timeline-grid-head">
-            <div className="timeline-project-column timeline-project-header">
-              <button
-                type="button"
-                className={sort.field === "health" ? "active" : ""}
-                aria-label={`按健康度${sort.field === "health" && sort.direction === "asc" ? "倒序" : "正序"}排列`}
-                aria-pressed={sort.field === "health"}
-                onClick={() => toggleSort("health")}
-              >
-                健康度 <i>{sort.field === "health" ? (sort.direction === "asc" ? "↑" : "↓") : "↕"}</i>
-              </button>
+            <div className="timeline-project-column timeline-project-header project-sort-header">
               <button
                 type="button"
                 className={sort.field === "project" ? "active" : ""}
@@ -575,7 +566,15 @@ export default function TimelineCockpit({
               >
                 项目 <i>{sort.field === "project" ? (sort.direction === "asc" ? "↑" : "↓") : "↕"}</i>
               </button>
-              <small>评分</small>
+              <button
+                type="button"
+                className={sort.field === "health" ? "active" : ""}
+                aria-label={`按健康度评分${sort.field === "health" && sort.direction === "asc" ? "倒序" : "正序"}排列`}
+                aria-pressed={sort.field === "health"}
+                onClick={() => toggleSort("health")}
+              >
+                健康度 <i>{sort.field === "health" ? (sort.direction === "asc" ? "↑" : "↓") : "↕"}</i>
+              </button>
             </div>
             {months.map((month) => (
               <div
@@ -596,7 +595,6 @@ export default function TimelineCockpit({
                 className="timeline-project-column timeline-project-cell"
                 onClick={() => onNavigate("project", project.id)}
               >
-                <TimelineStatusPill status={project.status} compact />
                 <span>
                   <strong>{project.name}</strong>
                   <small>{timelineProjectStageLabel(project) ?? `${project.owner} · ${project.org}`}</small>

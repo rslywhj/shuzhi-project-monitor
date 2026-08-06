@@ -31,15 +31,13 @@ import {
   SHANGHAI_TIME_ZONE_LABEL,
 } from "@/lib/date-time";
 import {
-  buildProjectTimelineMarkers,
-  buildTimelineMonths,
-  compareTimelineProjectUrgency,
-} from "@/lib/timeline-cockpit";
-import {
-  DEFAULT_COCKPIT_SORT_MODE,
-  normalizeCockpitSortMode,
-  persistCockpitSortMode,
-  type CockpitSortMode,
+  DEFAULT_COCKPIT_SORT,
+  compareCockpitProjects,
+  nextCockpitSort,
+  normalizeCockpitSortPreference,
+  persistCockpitSort,
+  type CockpitSort,
+  type CockpitSortField,
 } from "@/lib/cockpit-sort";
 
 type Status = "green" | "yellow" | "red" | "na";
@@ -792,9 +790,7 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
   const [owner, setOwner] = useState("全部负责人");
   const [projectType, setProjectType] = useState("全部类型");
   const [health, setHealth] = useState("全部状态");
-  const [sortMode, setSortMode] = useState<CockpitSortMode>(
-    DEFAULT_COCKPIT_SORT_MODE,
-  );
+  const [sort, setSort] = useState<CockpitSort>(DEFAULT_COCKPIT_SORT);
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(COCKPIT_DEFAULT_PAGE_SIZE);
   const [pageSizeInput, setPageSizeInput] = useState(
@@ -819,14 +815,6 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
     .map((template) => template.name);
   const cockpitTodayParts = shanghaiDateParts();
   const cockpitToday = `${cockpitTodayParts.year}-${String(cockpitTodayParts.month).padStart(2, "0")}-${String(cockpitTodayParts.day).padStart(2, "0")}`;
-  const currentMonthKey = cockpitToday.slice(0, 7);
-  const sortAsOfDate = snapshot?.lockedAt
-    ? formatShanghaiDate(snapshot.lockedAt)
-    : cockpitToday;
-  const sortMonths = useMemo(
-    () => buildTimelineMonths(currentMonthKey),
-    [currentMonthKey],
-  );
   const matching = useMemo(
     () => {
       const scopedProjects = activeProjects.filter(
@@ -836,22 +824,11 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
           (projectType === "全部类型" || project.type === projectType) &&
           (health === "全部状态" || statusLabel[project.status] === health),
       );
-      if (sortMode === "default") return scopedProjects;
-      return scopedProjects
-        .map((project) => ({
-          project,
-          markers: buildProjectTimelineMarkers(
-            project,
-            sortMonths,
-            sortAsOfDate,
-          ),
-        }))
-        .sort((left, right) =>
-          compareTimelineProjectUrgency(left, right, currentMonthKey),
-        )
-        .map(({ project }) => project);
+      return scopedProjects.sort((left, right) =>
+        compareCockpitProjects(left, right, sort),
+      );
     },
-    [activeProjects, currentMonthKey, health, org, owner, projectType, sortAsOfDate, sortMode, sortMonths],
+    [activeProjects, health, org, owner, projectType, sort],
   );
   const pageCount = Math.max(
     1,
@@ -982,6 +959,17 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
     setPage(0);
   }
 
+  function toggleSort(field: CockpitSortField) {
+    const nextSort = nextCockpitSort(sort, field);
+    persistCockpitSort(
+      window.localStorage,
+      COCKPIT_PAGINATION_STORAGE_KEY,
+      nextSort,
+    );
+    setSort(nextSort);
+    setPage(0);
+  }
+
   function focusMatrixByHealth(nextHealth: string) {
     setOrg("全部组织");
     setOwner("全部负责人");
@@ -1009,7 +997,9 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
             pageSize?: number;
             autoPageEnabled?: boolean;
             autoPageSeconds?: number;
-            sortMode?: CockpitSortMode;
+            sortField?: CockpitSort["field"];
+            sortDirection?: CockpitSort["direction"];
+            sortMode?: "urgency" | "default";
           };
           if (
             Number.isInteger(preferences.pageSize) &&
@@ -1029,7 +1019,7 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
           ) {
             setAutoPageSeconds(preferences.autoPageSeconds!);
           }
-          setSortMode(normalizeCockpitSortMode(preferences.sortMode));
+          setSort(normalizeCockpitSortPreference(preferences));
         }
       } catch {
         // Ignore invalid browser preferences and keep safe defaults.
@@ -1052,14 +1042,20 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
     if (!paginationPreferencesReady) return;
     window.localStorage.setItem(
       COCKPIT_PAGINATION_STORAGE_KEY,
-      JSON.stringify({ pageSize, autoPageEnabled, autoPageSeconds, sortMode }),
+      JSON.stringify({
+        pageSize,
+        autoPageEnabled,
+        autoPageSeconds,
+        sortField: sort.field,
+        sortDirection: sort.direction,
+      }),
     );
   }, [
     autoPageEnabled,
     autoPageSeconds,
     pageSize,
     paginationPreferencesReady,
-    sortMode,
+    sort,
   ]);
 
   useEffect(() => {
@@ -1126,12 +1122,6 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
             <option>全部状态</option><option>正常</option><option>预警</option><option>严重</option>
           </select>
         </label>
-        <label>排序
-          <select value={sortMode} onChange={e => { const nextSortMode = e.target.value as CockpitSortMode; persistCockpitSortMode(window.localStorage, COCKPIT_PAGINATION_STORAGE_KEY, nextSortMode); setSortMode(nextSortMode); setPage(0); }}>
-            <option value="urgency">当月紧迫度</option>
-            <option value="default">项目原顺序</option>
-          </select>
-        </label>
         <div className="legend"><span className="green">● 正常</span><span className="yellow">▲ 预警</span><span className="red">■ 严重</span><span className="not-started">○ 未开始</span><span className="na">— 不适用</span><span>并 并行节点</span><span>遗 前序遗留</span></div>
       </div>
     </section>
@@ -1139,7 +1129,7 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
     <section className="cockpit-main">
       <div className="heatmap-panel" ref={matrixRef}>
         <div className="heatmap-table" style={{ "--milestone-count": matrixMilestones.length } as React.CSSProperties}>
-          <div className="heatmap-head"><div className="project-col">项目 / 健康度</div>{matrixMilestones.map((m, i) => <div key={`${m}-${i}`}><span>{String(i + 1).padStart(2, "0")}</span>{m}</div>)}</div>
+          <div className="heatmap-head"><div className="project-col project-sort-header"><button type="button" className={sort.field === "health" ? "active" : ""} aria-label={`按健康度${sort.field === "health" && sort.direction === "asc" ? "倒序" : "正序"}排列`} aria-pressed={sort.field === "health"} onClick={() => toggleSort("health")}>健康度 <i>{sort.field === "health" ? (sort.direction === "asc" ? "↑" : "↓") : "↕"}</i></button><button type="button" className={sort.field === "project" ? "active" : ""} aria-label={`按项目名称${sort.field === "project" && sort.direction === "asc" ? "倒序" : "正序"}排列`} aria-pressed={sort.field === "project"} onClick={() => toggleSort("project")}>项目 <i>{sort.field === "project" ? (sort.direction === "asc" ? "↑" : "↓") : "↕"}</i></button><small>评分</small></div>{matrixMilestones.map((m, i) => <div key={`${m}-${i}`}><span>{String(i + 1).padStart(2, "0")}</span>{m}</div>)}</div>
           {filtered.map((p) => <div className="heatmap-row" key={p.id}>
             <button className="project-cell" onClick={() => onNavigate("project", p.id)}>
               <StatusPill status={p.status} compact /><span><strong>{p.name}</strong><small>{projectPrimaryMilestone(p) ? `主：${projectPrimaryMilestone(p)?.name} · 并行${p.stageSummary?.parallelMilestoneIds.length ?? 0} · 遗留${p.stageSummary?.carryoverMilestoneIds.length ?? 0}` : `${p.owner} · ${p.org}`}</small></span><b>{p.score}</b>

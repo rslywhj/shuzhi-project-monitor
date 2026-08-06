@@ -11,7 +11,6 @@ import {
   buildProjectTimelineMarkers,
   buildTimelineKpis,
   buildTimelineMonths,
-  compareTimelineProjectUrgency,
   markerMatchesKpi,
   compactTimelineDate,
   timelineProjectIsVisible,
@@ -23,10 +22,13 @@ import {
   type TimelineStatus,
 } from "@/lib/timeline-cockpit";
 import {
-  DEFAULT_COCKPIT_SORT_MODE,
-  normalizeCockpitSortMode,
-  persistCockpitSortMode,
-  type CockpitSortMode,
+  DEFAULT_COCKPIT_SORT,
+  compareCockpitProjects,
+  nextCockpitSort,
+  normalizeCockpitSortPreference,
+  persistCockpitSort,
+  type CockpitSort,
+  type CockpitSortField,
 } from "@/lib/cockpit-sort";
 import {
   formatShanghaiDate,
@@ -180,9 +182,7 @@ export default function TimelineCockpit({
   const [owner, setOwner] = useState("全部负责人");
   const [projectType, setProjectType] = useState("全部类型");
   const [health, setHealth] = useState("全部状态");
-  const [sortMode, setSortMode] = useState<CockpitSortMode>(
-    DEFAULT_COCKPIT_SORT_MODE,
-  );
+  const [sort, setSort] = useState<CockpitSort>(DEFAULT_COCKPIT_SORT);
   const [activeKpi, setActiveKpi] = useState<TimelineKpiFilter | null>(null);
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
@@ -246,15 +246,12 @@ export default function TimelineCockpit({
           (health === "全部状态" || STATUS_LABEL[project.status] === health) &&
           (!activeKpi || kpis[activeKpi].projectIds.has(project.id)),
       );
-    return sortMode === "urgency"
-      ? visibleProjects.sort((left, right) =>
-          compareTimelineProjectUrgency(left, right, currentMonthKey),
-        )
-      : visibleProjects;
+    return visibleProjects.sort((left, right) =>
+      compareCockpitProjects(left.project, right.project, sort),
+    );
   }, [
     activeKpi,
     asOfDate,
-    currentMonthKey,
     health,
     kpis,
     months,
@@ -262,7 +259,7 @@ export default function TimelineCockpit({
     owner,
     projectData,
     projectType,
-    sortMode,
+    sort,
   ]);
   const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
   const currentPage = Math.min(page, pageCount - 1);
@@ -315,6 +312,13 @@ export default function TimelineCockpit({
     setPage(0);
   }
 
+  function toggleSort(field: CockpitSortField) {
+    const nextSort = nextCockpitSort(sort, field);
+    persistCockpitSort(window.localStorage, PAGINATION_STORAGE_KEY, nextSort);
+    setSort(nextSort);
+    setPage(0);
+  }
+
   function changeKpi(filter: TimelineKpiFilter) {
     setViewOffset(0);
     setActiveKpi((current) => (current === filter ? null : filter));
@@ -352,7 +356,9 @@ export default function TimelineCockpit({
             pageSize?: number;
             autoPageEnabled?: boolean;
             autoPageSeconds?: number;
-            sortMode?: CockpitSortMode;
+            sortField?: CockpitSort["field"];
+            sortDirection?: CockpitSort["direction"];
+            sortMode?: "urgency" | "default";
           };
           if (
             Number.isInteger(preferences.pageSize) &&
@@ -372,7 +378,7 @@ export default function TimelineCockpit({
           ) {
             setAutoPageSeconds(preferences.autoPageSeconds!);
           }
-          setSortMode(normalizeCockpitSortMode(preferences.sortMode));
+          setSort(normalizeCockpitSortPreference(preferences));
         }
       } catch {
         // Keep safe defaults when a browser contains stale preferences.
@@ -387,9 +393,15 @@ export default function TimelineCockpit({
     if (!preferencesReady) return;
     window.localStorage.setItem(
       PAGINATION_STORAGE_KEY,
-      JSON.stringify({ pageSize, autoPageEnabled, autoPageSeconds, sortMode }),
+      JSON.stringify({
+        pageSize,
+        autoPageEnabled,
+        autoPageSeconds,
+        sortField: sort.field,
+        sortDirection: sort.direction,
+      }),
     );
-  }, [autoPageEnabled, autoPageSeconds, pageSize, preferencesReady, sortMode]);
+  }, [autoPageEnabled, autoPageSeconds, pageSize, preferencesReady, sort]);
 
   useEffect(() => {
     if (!autoPageEnabled || pageCount <= 1 || selected) return;
@@ -531,12 +543,6 @@ export default function TimelineCockpit({
                 <option>全部状态</option><option>正常</option><option>预警</option><option>严重</option>
               </select>
             </label>
-            <label>排序
-              <select value={sortMode} onChange={(event) => { const nextSortMode = event.target.value as CockpitSortMode; persistCockpitSortMode(window.localStorage, PAGINATION_STORAGE_KEY, nextSortMode); setSortMode(nextSortMode); setPage(0); }}>
-                <option value="urgency">当月紧迫度</option>
-                <option value="default">项目原顺序</option>
-              </select>
-            </label>
           </div>
         </div>
       </section>
@@ -551,8 +557,24 @@ export default function TimelineCockpit({
         >
           <div className="timeline-grid-head">
             <div className="timeline-project-column timeline-project-header">
-              <span>健康</span>
-              <strong>项目</strong>
+              <button
+                type="button"
+                className={sort.field === "health" ? "active" : ""}
+                aria-label={`按健康度${sort.field === "health" && sort.direction === "asc" ? "倒序" : "正序"}排列`}
+                aria-pressed={sort.field === "health"}
+                onClick={() => toggleSort("health")}
+              >
+                健康度 <i>{sort.field === "health" ? (sort.direction === "asc" ? "↑" : "↓") : "↕"}</i>
+              </button>
+              <button
+                type="button"
+                className={sort.field === "project" ? "active" : ""}
+                aria-label={`按项目名称${sort.field === "project" && sort.direction === "asc" ? "倒序" : "正序"}排列`}
+                aria-pressed={sort.field === "project"}
+                onClick={() => toggleSort("project")}
+              >
+                项目 <i>{sort.field === "project" ? (sort.direction === "asc" ? "↑" : "↓") : "↕"}</i>
+              </button>
               <small>评分</small>
             </div>
             {months.map((month) => (

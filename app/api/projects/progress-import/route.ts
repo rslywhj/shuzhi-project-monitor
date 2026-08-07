@@ -311,9 +311,36 @@ export async function POST(request: Request) {
         reason: [row.completionNote, row.coordinationNote].filter(Boolean).join("；"),
       };
     });
-    const baselineJson = JSON.stringify(
-      progressValues.map((row) => ({
+    const baselineRows = progressValues.map((row) => {
+      const existing = existingMilestoneBySequence.get(row.sequence);
+      const scheduleConfirmed = row.scheduleConfirmed || Boolean(existing?.scheduleConfirmed);
+      return {
+        milestoneId: existing?.id,
+        templateId: existingTemplateByCode.get(row.code)?.id ?? null,
         templateCode: row.code,
+        name: row.name,
+        sequence: row.sequence,
+        plannedStart: row.scheduleConfirmed
+          ? row.plannedStart
+          : existing?.scheduleConfirmed
+            ? existing.plannedStart
+            : row.plannedStart,
+        plannedFinish: row.scheduleConfirmed
+          ? row.plannedFinish
+          : existing?.scheduleConfirmed
+            ? existing.plannedFinish
+            : row.plannedFinish,
+        scheduleConfirmed,
+        weight: row.weight,
+        critical: row.critical,
+        applicable: true,
+      };
+    });
+    const preservedCustomBaselineRows = existingProgressMilestones
+      .filter((row) => row.custom || row.sequence > progressValues.length)
+      .map((row) => ({
+        milestoneId: row.id,
+        templateId: row.templateId,
         name: row.name,
         sequence: row.sequence,
         plannedStart: row.plannedStart,
@@ -321,9 +348,19 @@ export async function POST(request: Request) {
         scheduleConfirmed: row.scheduleConfirmed,
         weight: row.weight,
         critical: row.critical,
-        applicable: true,
-      })),
-    );
+        applicable: row.applicable,
+      }));
+    const baselineJson = JSON.stringify([
+      ...baselineRows,
+      ...preservedCustomBaselineRows,
+    ]);
+    const baselineVersionFrom = progressProject?.currentBaselineVersion ?? 1;
+    const baselineVersionTo = progressProject && baselineConflicts.length
+      ? baselineVersionFrom + 1
+      : baselineVersionFrom;
+    const baselineKind = progressProject && baselineConflicts.length
+      ? "approved"
+      : "original";
     const client = db.$client;
     await client.batch([
       client
@@ -394,13 +431,17 @@ export async function POST(request: Request) {
       client
         .prepare(
           `UPDATE projects
-           SET owner_email = ?, owner_name = ?, source_updated_at = ?, updated_at = CURRENT_TIMESTAMP
+           SET owner_email = ?, owner_name = ?, source_updated_at = ?,
+               current_baseline_version = CASE WHEN ? > 0 THEN ? ELSE current_baseline_version END,
+               updated_at = CURRENT_TIMESTAMP
            WHERE name = ?`,
         )
         .bind(
           ownerAccount?.email ?? progressProject?.ownerEmail ?? UNASSIGNED_EMAIL,
           ownerAccount?.displayName ?? progressProject?.ownerName ?? UNASSIGNED_NAME,
           progress.updatedDate,
+          baselineConflicts.length,
+          baselineVersionTo,
           progress.systemName,
         ),
       client
@@ -429,14 +470,12 @@ export async function POST(request: Request) {
            ON CONFLICT(project_id, sequence) DO UPDATE SET
              template_id = excluded.template_id, name = excluded.name, weight = excluded.weight,
              critical = excluded.critical, custom = 0, applicable = 1,
-             planned_start = CASE
-               WHEN milestones.schedule_confirmed = 0 AND excluded.schedule_confirmed = 1
+             planned_start = CASE WHEN excluded.schedule_confirmed = 1
                THEN excluded.planned_start ELSE milestones.planned_start END,
-             planned_finish = CASE
-               WHEN milestones.schedule_confirmed = 0 AND excluded.schedule_confirmed = 1
+             planned_finish = CASE WHEN excluded.schedule_confirmed = 1
                THEN excluded.planned_finish ELSE milestones.planned_finish END,
-             schedule_confirmed = CASE
-               WHEN milestones.schedule_confirmed = 1 THEN 1 ELSE excluded.schedule_confirmed END,
+             schedule_confirmed = CASE WHEN excluded.schedule_confirmed = 1
+               THEN 1 ELSE milestones.schedule_confirmed END,
              forecast_finish = excluded.forecast_finish,
              actual_finish = excluded.actual_finish,
              execution_status = excluded.execution_status,
@@ -454,9 +493,15 @@ export async function POST(request: Request) {
         .prepare(
           `INSERT OR IGNORE INTO baseline_versions
             (project_id, version, kind, milestone_json, created_by)
-           SELECT id, 1, 'original', ?, ? FROM projects WHERE name = ?`,
+           SELECT id, ?, ?, ?, ? FROM projects WHERE name = ?`,
         )
-        .bind(baselineJson, identity.email, progress.systemName),
+        .bind(
+          baselineVersionTo,
+          baselineKind,
+          baselineJson,
+          identity.email,
+          progress.systemName,
+        ),
       client
         .prepare(
           `INSERT INTO audit_logs (actor_email, action, entity_type, entity_id, detail_json)
@@ -472,6 +517,8 @@ export async function POST(request: Request) {
             progressProjectName: progress.systemName,
             updatedDate: progress.updatedDate,
             baselineConflictCount: baselineConflicts.length,
+            baselineVersionFrom,
+            baselineVersionTo,
           }),
         ),
     ]);
@@ -488,6 +535,8 @@ export async function POST(request: Request) {
       summary,
       baselineConflicts,
       scheduleWarnings: progress.scheduleWarnings,
+      baselineVersionFrom,
+      baselineVersionTo,
       created: createCount,
       updated: catalog.length - createCount,
     });

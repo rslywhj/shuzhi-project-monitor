@@ -16,6 +16,7 @@
     "deploy:cloudflare:ci": "node scripts/prepare-ci-wrangler-config.mjs && npm run build && wrangler deploy --config wrangler.ci.jsonc",
     "db:generate": "drizzle-kit generate",
     "db:local:apply": "wrangler d1 migrations apply DB --local --persist-to .wrangler/state --config wrangler.local.jsonc",
+    "db:local:reset": "node scripts/reset-local-data.mjs && npm run db:local:apply",
     "db:remote:apply": "wrangler d1 migrations apply DB --remote --config wrangler.production.jsonc"
   },
   "dependencies": {

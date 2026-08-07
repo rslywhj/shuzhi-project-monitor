@@ -55,15 +55,21 @@ test("parses, previews and commits repeatable official progress workbook sync", 
   assert.match(parser, /officialExcelDate/);
   assert.match(parser, /executionStatus/);
   assert.match(route, /canManagePortfolio/);
+  assert.match(route, /if \(!canManagePortfolio\(identity\)\) return forbidden\(\)/);
   assert.match(route, /baselineConflicts/);
   assert.match(route, /scheduleWarnings/);
   assert.match(route, /已按Excel原值保留/);
-  assert.match(route, /milestones\.schedule_confirmed = 0/);
+  assert.match(route, /current_baseline_version = CASE WHEN \? > 0/);
+  assert.match(route, /baselineVersionFrom \+ 1/);
+  assert.match(route, /baselineKind = progressProject && baselineConflicts\.length/);
+  assert.match(route, /WHEN excluded\.schedule_confirmed = 1/);
   assert.match(route, /project\.progress_excel_import/);
   assert.match(route, /ON CONFLICT\(project_id, sequence\) DO UPDATE/);
   assert.match(page, /同步三级进度表/);
   assert.match(page, /OfficialProgressImportModal/);
-  assert.match(page, /保留现基线/);
+  assert.match(page, /canManagePortfolio && <div className="portfolio-import-actions">/);
+  assert.match(page, /生成新的批准基线版本/);
+  assert.match(page, /原始V1和既有版本永久保留/);
   assert.match(css, /official-progress-import-modal/);
   assert.match(schema, /sourceSequence: integer\("source_sequence"\)/);
   assert.match(schema, /scheduleConfirmed: integer\("schedule_confirmed"/);
@@ -71,4 +77,18 @@ test("parses, previews and commits repeatable official progress workbook sync", 
   assert.match(migration, /'N36', '8\.3 项目后评价'/);
   assert.match(workflow, /wrangler d1 migrations apply DB --remote/);
   assert.match(seed, /chunks\(officialTemplateRows, 4\)/);
+});
+
+test("provides an explicitly local-only history reset command", async () => {
+  const [packageJson, resetScript, manual] = await Promise.all([
+    readFile(new URL("package.json", root), "utf8"),
+    readFile(new URL("scripts/reset-local-data.mjs", root), "utf8"),
+    readFile(new URL("docs/按角色用户使用手册.md", root), "utf8"),
+  ]);
+
+  assert.match(packageJson, /"db:local:reset"/);
+  assert.match(resetScript, /resolve\(workspace, "\.wrangler", "state"\)/);
+  assert.match(resetScript, /拒绝清理工作区以外的目录/);
+  assert.match(manual, /优先执行“结项 → 归档”/);
+  assert.match(manual, /正式环境硬删除/);
 });

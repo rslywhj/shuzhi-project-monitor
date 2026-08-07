@@ -39,6 +39,11 @@ import {
   type CockpitSort,
   type CockpitSortField,
 } from "@/lib/cockpit-sort";
+import {
+  parseOfficialProgressWorkbook,
+  type OfficialProgressImportPayload,
+} from "@/lib/official-progress-import";
+import { officialMilestoneStandard } from "@/lib/official-progress-standard";
 
 type Status = "green" | "yellow" | "red" | "na";
 type View =
@@ -120,6 +125,10 @@ type MilestoneData = {
   pausedReason?: string;
   executionUpdatedAt?: string | null;
   executionUpdatedBy?: string | null;
+  scheduleConfirmed?: boolean;
+  sourceExecutor?: string;
+  sourceCompletionNote?: string;
+  sourceCoordinationNote?: string;
   deviationDays: number;
   reason: string;
   applicable: boolean;
@@ -127,22 +136,7 @@ type MilestoneData = {
   custom: boolean;
 };
 
-const milestones = [
-  "立项启动",
-  "需求调研",
-  "需求确认",
-  "方案设计",
-  "方案评审",
-  "开发完成",
-  "测试验证",
-  "联调测试",
-  "试运行",
-  "用户验收",
-  "上线切换",
-  "结项移交",
-];
-const standardTemplateWeights = [5, 5, 8, 7, 10, 15, 10, 10, 5, 10, 10, 5];
-const standardCriticalSequences = new Set([6, 10, 11]);
+const milestones = officialMilestoneStandard.map((row) => row.name);
 type TemplateData = {
   id: number;
   code: string;
@@ -155,13 +149,13 @@ type TemplateData = {
 };
 const defaultTemplateData: TemplateData[] = milestones.map((name, index) => ({
   id: index + 1,
-  code: `M${String(index + 1).padStart(2, "0")}`,
+  code: officialMilestoneStandard[index].code,
   name,
   sequence: index + 1,
-  defaultWeight: standardTemplateWeights[index],
-  critical: standardCriticalSequences.has(index + 1),
+  defaultWeight: officialMilestoneStandard[index].defaultWeight,
+  critical: officialMilestoneStandard[index].critical,
   active: true,
-  description: "",
+  description: officialMilestoneStandard[index].coreWork,
 }));
 
 const projects = [
@@ -189,6 +183,9 @@ type ProjectData = (typeof projects)[number] & {
   healthExplanation?: HealthExplanation | null;
   stageSummary?: ProjectStageSummary;
   milestones?: MilestoneData[];
+  sourceSequence?: number | null;
+  sourceStage?: string;
+  sourceUpdatedAt?: string | null;
 };
 type ProjectLifecycleStatus = NonNullable<ProjectData["lifecycleStatus"]>;
 type ProjectClosureState = {
@@ -399,6 +396,7 @@ type BaselineMilestone = {
   sequence: number;
   plannedStart: string;
   plannedFinish: string;
+  scheduleConfirmed?: boolean;
   weight: number;
   critical: boolean;
   applicable: boolean;
@@ -1245,7 +1243,7 @@ function Cockpit({ onNavigate, projectData = projects, snapshot, templateData = 
             <span className="drawer-kicker">节点运行详情</span>
             <h2>{selected.project.name}</h2><p>{matrixMilestones[selected.index]} · 第 {selected.index + 1} 阶段</p>
             <div className="drawer-status"><StatusPill status={selected.project.cells[selected.index] ?? "na"} /><strong>{selectedMilestone?.deviationDays ? `${selectedMilestone.deviationDays > 0 ? "延期" : "提前"} ${Math.abs(selectedMilestone.deviationDays)} 天` : selectedMilestone ? "按计划推进" : "该节点不适用"}</strong></div>
-            <div className="drawer-grid"><div><small>计划完成</small><strong>{selectedMilestone?.plannedFinish ?? "—"}</strong></div><div><small>预测 / 实际</small><strong>{selectedMilestone?.actualFinish ?? selectedMilestone?.forecastFinish ?? "未填报"}</strong></div><div><small>节点权重</small><strong>{selectedMilestone?.applicable ? `${selectedMilestone.weight}%` : "N/A"}</strong></div><div><small>当前完成度</small><strong>{selectedMilestone?.applicable ? `${selectedMilestone.completion}%` : "N/A"}</strong></div><div><small>执行状态</small><strong>{selectedMilestone ? `${executionStatusSymbol[selectedMilestone.executionStatus ?? (selectedMilestone.completion >= 100 ? "completed" : selectedMilestone.completion > 0 ? "in_progress" : "not_started")]} ${executionStatusLabel[selectedMilestone.executionStatus ?? (selectedMilestone.completion >= 100 ? "completed" : selectedMilestone.completion > 0 ? "in_progress" : "not_started")]}` : "—"}</strong></div><div><small>实际开始</small><strong>{selectedMilestone?.actualStart ?? "未填报"}</strong></div></div>
+            <div className="drawer-grid"><div><small>计划完成</small><strong>{selectedMilestone?.scheduleConfirmed === false ? "待排期" : selectedMilestone?.plannedFinish ?? "—"}</strong></div><div><small>预测 / 实际</small><strong>{selectedMilestone?.actualFinish ?? selectedMilestone?.forecastFinish ?? "未填报"}</strong></div><div><small>节点权重</small><strong>{selectedMilestone?.applicable ? `${selectedMilestone.weight}%` : "N/A"}</strong></div><div><small>当前完成度</small><strong>{selectedMilestone?.applicable ? `${selectedMilestone.completion}%` : "N/A"}</strong></div><div><small>执行状态</small><strong>{selectedMilestone ? `${executionStatusSymbol[selectedMilestone.executionStatus ?? (selectedMilestone.completion >= 100 ? "completed" : selectedMilestone.completion > 0 ? "in_progress" : "not_started")]} ${executionStatusLabel[selectedMilestone.executionStatus ?? (selectedMilestone.completion >= 100 ? "completed" : selectedMilestone.completion > 0 ? "in_progress" : "not_started")]}` : "—"}</strong></div><div><small>实际开始</small><strong>{selectedMilestone?.actualStart ?? "未填报"}</strong></div></div>
             <div className="cause-card"><span>{selectedMilestone?.pausedReason ? "暂停原因" : "偏差归因"}</span><p>{selectedMilestone?.pausedReason || selectedMilestone?.reason || (selectedMilestone ? "当前暂无偏差说明。" : "项目未启用该标准节点。")}</p></div>
             <button className="drawer-primary" onClick={() => onNavigate("project", selected.project.id)}>进入项目详情 <span>→</span></button>
           </aside>
@@ -1771,6 +1769,58 @@ async function parseProjectImportWorkbook(file: File) {
   };
 }
 
+type OfficialProgressImportResult = {
+  valid: boolean;
+  mode: "preview" | "commit";
+  importId?: string;
+  created?: number;
+  updated?: number;
+  error?: string;
+  summary: {
+    templateCount: number;
+    templateChangeCount: number;
+    projectCount: number;
+    projectCreateCount: number;
+    projectUpdateCount: number;
+    progressProjectName: string;
+    progressScheduledCount: number;
+    progressCompletedCount: number;
+    ownerMatched: boolean;
+    baselineConflictCount: number;
+  };
+  baselineConflicts: Array<{
+    sequence: number;
+    name: string;
+    current: string;
+    workbook: string;
+  }>;
+  scheduleWarnings?: Array<{
+    sequence: number;
+    name: string;
+    plannedStart: string;
+    plannedFinish: string;
+    message: string;
+  }>;
+  projectPreview?: Array<{
+    sourceSequence: number;
+    name: string;
+    org: string;
+    sourceStage: string;
+  }>;
+};
+
+async function parseOfficialWorkbook(file: File) {
+  const { default: readExcelFile } = await import("read-excel-file/browser");
+  const sheets = await readExcelFile(file);
+  return parseOfficialProgressWorkbook(
+    sheets.map((sheet) => ({
+      sheet: sheet.sheet,
+      data: sheet.data as unknown[][],
+    })),
+    file.name,
+  );
+}
+
 async function downloadProjectImportTemplate(
   templateData: TemplateData[],
   projectManagers: ProjectManagerAccount[],
@@ -2160,6 +2210,98 @@ function ProjectImportModal({
   );
 }
 
+function OfficialProgressImportModal({
+  onClose,
+  onImported,
+}: {
+  onClose: () => void;
+  onImported: () => Promise<void>;
+}) {
+  const [fileName, setFileName] = useState("");
+  const [payload, setPayload] = useState<Omit<OfficialProgressImportPayload, "mode"> | null>(null);
+  const [result, setResult] = useState<OfficialProgressImportResult | null>(null);
+  const [phase, setPhase] = useState<"idle" | "reading" | "previewing" | "ready" | "committing" | "success">("idle");
+  const [error, setError] = useState("");
+  const busy = phase === "reading" || phase === "previewing" || phase === "committing";
+
+  async function requestImport(
+    mode: "preview" | "commit",
+    rows: Omit<OfficialProgressImportPayload, "mode">,
+  ) {
+    const response = await fetch("/api/projects/progress-import", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...rows, mode }),
+    });
+    const responseResult = (await response.json()) as OfficialProgressImportResult;
+    if (!response.ok) throw new Error(responseResult.error || "三级进度表同步失败。");
+    return responseResult;
+  }
+
+  async function selectWorkbook(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setFileName(file.name);
+    setPayload(null);
+    setResult(null);
+    setError("");
+    if (!file.name.toLowerCase().endsWith(".xlsx")) {
+      setError("仅支持.xlsx格式。");
+      return;
+    }
+    if (file.size > 20 * 1024 * 1024) {
+      setError("文件不能超过20MB。");
+      return;
+    }
+    try {
+      setPhase("reading");
+      const rows = await parseOfficialWorkbook(file);
+      setPayload(rows);
+      setPhase("previewing");
+      setResult(await requestImport("preview", rows));
+      setPhase("ready");
+    } catch (cause) {
+      setPhase("idle");
+      setError(cause instanceof Error ? cause.message : "Excel文件解析失败。");
+    }
+  }
+
+  async function commitImport() {
+    if (!payload || !result?.valid) return;
+    setError("");
+    setPhase("committing");
+    try {
+      const committed = await requestImport("commit", payload);
+      setResult(committed);
+      await onImported();
+      setPhase("success");
+    } catch (cause) {
+      setPhase("ready");
+      setError(cause instanceof Error ? cause.message : "同步失败。");
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={busy ? undefined : onClose}>
+      <section className="create-modal official-progress-import-modal" onClick={(event) => event.stopPropagation()} aria-busy={busy}>
+        <button className="modal-close" type="button" disabled={busy} onClick={onClose} aria-label="关闭三级进度表同步">×</button>
+        <span className="modal-kicker">OFFICIAL PROGRESS WORKBOOK</span>
+        <h2>同步统建项目三级进度表</h2>
+        <p>识别首个Sheet的36个基线节点及明细进度，同步第二个Sheet的统建系统清单。文件先预检，确认后才写入。</p>
+        {phase !== "success" && <label className={`import-dropzone ${busy ? "busy" : ""}`}><input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" disabled={busy} onChange={selectWorkbook} /><span className="import-file-symbol">⇧</span><strong>{phase === "reading" ? "正在识别36节点和项目清单…" : phase === "previewing" ? "正在执行服务端预检…" : fileName || "选择三级进度计划.xlsx"}</strong><small>原始Excel仅在浏览器解析，服务端只接收结构化数据</small></label>}
+        {result?.summary && phase !== "success" && <div className="import-summary official-import-summary"><div><small>基线节点</small><strong>{result.summary.templateCount}</strong><em>{result.summary.templateChangeCount}项口径变化</em></div><div><small>项目清单</small><strong>{result.summary.projectCount}</strong><em>新增{result.summary.projectCreateCount} / 更新{result.summary.projectUpdateCount}</em></div><div><small>明细进度项目</small><strong>{result.summary.progressProjectName}</strong><em>已排期{result.summary.progressScheduledCount} / 已完成{result.summary.progressCompletedCount}</em></div><div><small>负责人匹配</small><strong>{result.summary.ownerMatched ? "已匹配" : "待分配"}</strong><em>{result.summary.ownerMatched ? "关联已启用项目经理" : "导入后可重新指定"}</em></div></div>}
+        {result?.baselineConflicts.length ? <section className="import-validation-panel invalid baseline-conflict-panel"><div className="import-validation-head"><div><strong>发现{result.baselineConflicts.length}项计划日期变化</strong><small>进度同步不会覆盖已批准基线，需另行提交基线变更。</small></div><span>保留现基线</span></div><div className="import-error-table"><div><span>序号</span><span>节点</span><span>当前基线</span><span>Excel计划</span></div>{result.baselineConflicts.slice(0, 20).map((conflict) => <div key={conflict.sequence}><span>{conflict.sequence}</span><span>{conflict.name}</span><span>{conflict.current}</span><span>{conflict.workbook}</span></div>)}</div></section> : null}
+        {result?.scheduleWarnings?.length ? <section className="import-validation-panel invalid baseline-conflict-panel"><div className="import-validation-head"><div><strong>发现{result.scheduleWarnings.length}项源表排期异常</strong><small>为确保与原始Excel一致，日期已按原值保留；建议导入后通过基线治理核验。</small></div><span>允许同步</span></div><div className="import-error-table"><div><span>序号</span><span>节点</span><span>计划开始</span><span>计划完成</span></div>{result.scheduleWarnings.map((warning) => <div key={warning.sequence} title={warning.message}><span>{warning.sequence}</span><span>{warning.name}</span><span>{warning.plannedStart}</span><span>{warning.plannedFinish}</span></div>)}</div></section> : null}
+        {result?.projectPreview?.length && phase !== "success" ? <section className="official-project-preview"><div className="import-validation-head"><div><strong>项目清单预览</strong><small>展示前{result.projectPreview.length}项，确认后全量同步。</small></div><span>预检通过</span></div><div className="official-project-preview-list">{result.projectPreview.map((row) => <div key={row.sourceSequence}><b>{String(row.sourceSequence).padStart(2, "0")}</b><span><strong>{row.name}</strong><small>{row.org}</small></span><em>{row.sourceStage || "待完善"}</em></div>)}</div></section> : null}
+        {phase === "success" && result ? <section className="import-success-state"><span>✓</span><h3>三级进度表同步完成</h3><p>已更新36个基线节点，新建{result.created ?? 0}个项目、更新{result.updated ?? 0}个项目。</p><dl><div><dt>导入批次</dt><dd>{result.importId}</dd></div></dl></section> : null}
+        {error && <div className="form-error" role="alert">! {error}</div>}
+        <div className="modal-actions import-modal-actions"><button type="button" className="outline-button" disabled={busy} onClick={onClose}>{phase === "success" ? "完成" : "取消"}</button>{phase !== "success" && <button type="button" className="primary-button" disabled={phase !== "ready" || !result?.valid} onClick={commitImport}>{phase === "committing" ? "正在同步…" : "确认同步"}</button>}</div>
+      </section>
+    </div>
+  );
+}
+
 function Portfolio({
   onNavigate,
   onDataChanged,
@@ -2186,6 +2328,7 @@ function Portfolio({
   const [page, setPage] = useState(0);
   const [showCreate, setShowCreate] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [showOfficialProgressImport, setShowOfficialProgressImport] = useState(false);
   const [creating, setCreating] = useState(false);
   const [templateDownloading, setTemplateDownloading] = useState(false);
   const [createError, setCreateError] = useState("");
@@ -2380,6 +2523,7 @@ function Portfolio({
             {canManagePortfolio && <div className="portfolio-import-actions">
               <button className="outline-button" onClick={downloadImportTemplate} disabled={templateDownloading}>{templateDownloading ? "正在生成…" : "下载导入模板"}</button>
               <button className="outline-button import-button" onClick={() => setShowImport(true)}>⇧ Excel批量导入</button>
+              <button className="outline-button official-import-button" onClick={() => setShowOfficialProgressImport(true)}>↻ 同步三级进度表</button>
               <button className="primary-button" onClick={openCreateProject}>＋ 新建项目</button>
             </div>}
           </div>
@@ -2389,7 +2533,7 @@ function Portfolio({
           <div className="table-head"><span>项目名称</span><span>当前节点</span><span>健康状态</span><span>项目经理</span><span>计划 / 实际</span><span>进度偏差</span><span>风险</span><span>更新时间</span><span /></div>
           {filtered.map(p => <div className="table-row" key={p.id}>
             <button className="project-name" onClick={() => onNavigate("project", p.id)}><i>{p.id}</i><span><strong>{p.name} <em className={`lifecycle-badge ${projectLifecycle(p)}`}>{lifecycleLabel[projectLifecycle(p)]}</em></strong><small>{p.org} · {p.type}</small></span></button>
-            <span className="portfolio-stage-cell">{projectPrimaryMilestone(p) ? <><strong>◆ {projectPrimaryMilestone(p)?.name}</strong><small>{projectPrimaryMilestone(p)?.completion}% · 并行{p.stageSummary?.parallelMilestoneIds.length ?? 0} · 遗留{p.stageSummary?.carryoverMilestoneIds.length ?? 0}</small></> : p.stageSummary?.shouldStartMilestoneIds.length ? <><strong className="negative">! 应启动</strong><small>{p.stageSummary.shouldStartMilestoneIds.length}个节点未启动</small></> : <><strong>○ 待进入</strong><small>尚无执行中节点</small></>}</span>
+            <span className="portfolio-stage-cell">{projectPrimaryMilestone(p) ? <><strong>◆ {projectPrimaryMilestone(p)?.name}</strong><small>{projectPrimaryMilestone(p)?.completion}% · 并行{p.stageSummary?.parallelMilestoneIds.length ?? 0} · 遗留{p.stageSummary?.carryoverMilestoneIds.length ?? 0}</small></> : p.stageSummary?.shouldStartMilestoneIds.length ? <><strong className="negative">! 应启动</strong><small>{p.stageSummary.shouldStartMilestoneIds.length}个节点未启动</small></> : p.sourceStage ? <><strong>◇ {p.sourceStage}</strong><small>Excel项目清单口径</small></> : <><strong>○ 待进入</strong><small>尚无执行中节点</small></>}</span>
             <span><StatusPill status={p.status} /></span><span className="owner"><i>{p.owner[0]}</i>{p.owner}</span>
             <span className="dual-progress"><b>{p.actual}%</b><ProgressBar value={p.actual} tone={p.status} /><small>计划 {p.plan}%</small></span>
             <span className={p.actual - p.plan < -5 ? "negative" : "positive"}>{p.actual - p.plan > 0 ? "+" : ""}{(p.actual - p.plan).toFixed(1)} pp</span>
@@ -2596,6 +2740,12 @@ function Portfolio({
         templateData={templateData}
         projectManagers={projectManagers}
         onClose={() => setShowImport(false)}
+        onImported={onDataChanged}
+      />
+    )}
+    {showOfficialProgressImport && canManagePortfolio && (
+      <OfficialProgressImportModal
+        onClose={() => setShowOfficialProgressImport(false)}
         onImported={onDataChanged}
       />
     )}
@@ -2903,7 +3053,10 @@ function ProjectActivityPanel({
         const milestonesForVersion = version.milestones ?? [];
         const changedCount = milestonesForVersion.filter((milestone) => {
           const base = originalFor(milestone);
-          return base && base.plannedFinish !== milestone.plannedFinish;
+          return base && (
+            base.scheduleConfirmed !== milestone.scheduleConfirmed ||
+            (milestone.scheduleConfirmed !== false && base.plannedFinish !== milestone.plannedFinish)
+          );
         }).length;
         return <article className="baseline-version" key={version.id}>
           <button className="baseline-version-head" onClick={() => setExpandedVersion(expandedVersion === version.version ? null : version.version)}>
@@ -2916,8 +3069,15 @@ function ProjectActivityPanel({
             <div className="table-head"><span>节点</span><span>计划开始</span><span>计划完成</span><span>相对 V1</span><span>权重</span></div>
             {milestonesForVersion.map((milestone) => {
               const base = originalFor(milestone);
-              const delta = base ? daysBetween(base.plannedFinish, milestone.plannedFinish) : 0;
-              return <div className="table-row" key={`${version.id}-${milestone.milestoneId ?? milestone.name}`}><span>{milestone.sequence}. {milestone.name}{milestone.critical ? " ◆" : ""}</span><span>{milestone.plannedStart}</span><span>{milestone.plannedFinish}</span><span className={delta > 0 ? "red-text" : delta < 0 ? "green-text" : ""}>{delta === 0 ? "未变化" : `${delta > 0 ? "+" : ""}${delta}天`}</span><span>{milestone.applicable ? `${milestone.weight}%` : "不适用"}</span></div>;
+              const scheduleConfirmed = milestone.scheduleConfirmed !== false;
+              const baseScheduleConfirmed = base?.scheduleConfirmed !== false;
+              const delta = base && scheduleConfirmed && baseScheduleConfirmed
+                ? daysBetween(base.plannedFinish, milestone.plannedFinish)
+                : 0;
+              const baselineChangeLabel = scheduleConfirmed !== baseScheduleConfirmed
+                ? scheduleConfirmed ? "已排期" : "改为待排期"
+                : !scheduleConfirmed ? "待排期" : delta === 0 ? "未变化" : `${delta > 0 ? "+" : ""}${delta}天`;
+              return <div className="table-row" key={`${version.id}-${milestone.milestoneId ?? milestone.name}`}><span>{milestone.sequence}. {milestone.name}{milestone.critical ? " ◆" : ""}</span><span>{scheduleConfirmed ? milestone.plannedStart : "待排期"}</span><span>{scheduleConfirmed ? milestone.plannedFinish : "待排期"}</span><span className={delta > 0 ? "red-text" : delta < 0 ? "green-text" : ""}>{baselineChangeLabel}</span><span>{milestone.applicable ? `${milestone.weight}%` : "不适用"}</span></div>;
             })}
           </div>}
         </article>;
@@ -3306,7 +3466,7 @@ function ProjectDetail({
         </div>
         <div><small>并行节点</small><strong>{parallelMilestones.length ? parallelMilestones.map((row) => row.name).join("、") : "无"}</strong><span>{parallelMilestones.length ? `${parallelMilestones.length}个节点同步推进` : "当前无并行节点"}</span></div>
         <div className={carryoverMilestones.length ? "stage-warning" : ""}><small>前序遗留</small><strong>{carryoverMilestones.length ? carryoverMilestones.map((row) => row.name).join("、") : "无"}</strong><span>{stageSummary?.overdueCarryoverMilestoneIds.length ? `${stageSummary.overdueCarryoverMilestoneIds.length}个已经逾期` : "未发现前序遗留"}</span></div>
-        <div><small>下一节点</small><strong>{nextMilestone?.name ?? "—"}</strong><span>{nextMilestone ? `计划开始 ${nextMilestone.plannedStart}` : "暂无后续适用节点"}</span></div>
+        <div><small>下一节点</small><strong>{nextMilestone?.name ?? "—"}</strong><span>{nextMilestone ? nextMilestone.scheduleConfirmed === false ? "待补充节点排期" : `计划开始 ${nextMilestone.plannedStart}` : "暂无后续适用节点"}</span></div>
         <em>{stageSummary?.primaryBasis === "manager_confirmed" ? "项目经理确认" : stageSummary?.primaryBasis === "system_recommended" ? "系统推荐" : stageSummary?.primaryBasis === "legacy_inferred" ? "历史数据推断" : `阶段口径 ${stageSummary?.asOfDate ?? "—"}`}</em>
       </section>
       <section className="score-explain">
@@ -3323,7 +3483,7 @@ function ProjectDetail({
             return <div className={`milestone-row ${expanded === i ? "expanded" : ""}`} key={milestone.id}>
               <button className="milestone-main" onClick={() => setExpanded(expanded === i ? null : i)}>
                 <span className={`milestone-index ${status}`}>{milestone.sequence}</span><span className="milestone-name"><strong>{milestone.name} {stageSummary?.primaryMilestoneId === milestone.id && <i className="stage-role primary">主</i>}{stageSummary?.parallelMilestoneIds.includes(milestone.id) && <i className="stage-role parallel">并</i>}{stageSummary?.carryoverMilestoneIds.includes(milestone.id) && <i className="stage-role carryover">遗</i>}</strong><small>{executionStatusSymbol[milestone.executionStatus ?? (milestone.completion >= 100 ? "completed" : milestone.completion > 0 ? "in_progress" : "not_started")]} {executionStatusLabel[milestone.executionStatus ?? (milestone.completion >= 100 ? "completed" : milestone.completion > 0 ? "in_progress" : "not_started")]} · {milestone.critical ? "◆ 关键节点" : milestone.custom ? "自定义节点" : "标准节点"} · 权重 {milestone.weight}%</small></span>
-                <span><small>计划完成</small><strong>{milestone.plannedFinish}</strong></span><span><small>预测 / 实际</small><strong className={status === "red" ? "red-text" : ""}>{status === "na" ? "—" : effectiveFinish ?? "未填报"}</strong></span>
+                <span><small>计划完成</small><strong>{milestone.scheduleConfirmed === false ? "待排期" : milestone.plannedFinish}</strong></span><span><small>预测 / 实际</small><strong className={status === "red" ? "red-text" : ""}>{status === "na" ? "—" : effectiveFinish ?? "未填报"}</strong></span>
                 <span className="milestone-complete"><b>{milestone.completion}%</b><ProgressBar value={milestone.completion} tone={status} /></span><StatusPill status={status} /><em>{expanded === i ? "⌃" : "⌄"}</em>
               </button>
               {expanded === i && <div className="milestone-expand"><div><span>偏差说明</span><p>{milestone.reason || (milestone.deviationDays ? `当前相对批准基线偏差 ${milestone.deviationDays} 天。` : "当前无偏差说明。")}</p></div><div><span>节点口径</span><p>{milestone.applicable ? `${milestone.custom ? "项目自定义" : "标准模板"} · ${milestone.critical ? "关键节点" : "普通节点"} · 计划 ${milestone.plannedStart} 至 ${milestone.plannedFinish}` : "该节点已标记为不适用，不进入项目进度计算。"}</p></div><button onClick={() => setTab("操作审计")}>查看完整记录 →</button></div>}

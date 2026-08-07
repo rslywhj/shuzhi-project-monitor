@@ -190,7 +190,7 @@ test("serves management views from locked snapshots rather than mutable live row
   assert.match(page, /当前锁定快照口径/);
 });
 
-test("persists the twelve-node standard template and project-level milestone governance", async () => {
+test("persists the official 36-node standard template and project-level milestone governance", async () => {
   const [schema, seed, templatesRoute, candidatesRoute, promoteRoute, projectMilestonesRoute, projectRoute, page, css, migration] =
     await Promise.all([
       readFile(new URL("db/schema.ts", templateRoot), "utf8"),
@@ -228,8 +228,8 @@ test("persists the twelve-node standard template and project-level milestone gov
 
   assert.match(schema, /export const milestoneTemplates/);
   assert.match(schema, /baseline_changes_one_pending_project_idx/);
-  assert.match(seed, /M12/);
-  assert.match(seed, /结项移交/);
+  assert.match(seed, /officialMilestoneStandard/);
+  assert.match(seed, /official-progress-standard/);
   assert.match(templatesRoute, /milestone_template\.publish/);
   assert.match(candidatesRoute, /canManagePortfolio/);
   assert.match(candidatesRoute, /milestones\.custom, true/);

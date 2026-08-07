@@ -24,6 +24,7 @@ import {
   DEMO_MILESTONE_CADENCE_DAYS,
   seedProjects,
 } from "@/lib/demo-seed-data";
+import { officialMilestoneStandard } from "@/lib/official-progress-standard";
 
 async function ensureBaselineVersionRows(db: ReturnType<typeof getDb>) {
   const [projectRows, versionRows] = await Promise.all([
@@ -85,20 +86,13 @@ async function ensureBaselineVersionRows(db: ReturnType<typeof getDb>) {
   }
 }
 
-const standardMilestoneTemplates = [
-  ["M01", "立项启动", 5, false, "完成项目立项、组织与治理机制确认"],
-  ["M02", "需求调研", 5, false, "完成业务现状、用户旅程与需求素材收集"],
-  ["M03", "需求确认", 8, false, "冻结首期范围并完成需求签字确认"],
-  ["M04", "方案设计", 7, false, "完成业务、应用、数据与技术方案设计"],
-  ["M05", "方案评审", 10, false, "通过架构、安全及业务联合评审"],
-  ["M06", "开发完成", 15, true, "完成约定范围开发并达到提测条件"],
-  ["M07", "测试验证", 10, false, "完成系统、性能及安全测试"],
-  ["M08", "联调测试", 10, false, "完成上下游系统联调与问题闭环"],
-  ["M09", "试运行", 5, false, "完成试运行验证与上线准备"],
-  ["M10", "用户验收", 10, true, "完成用户验收及遗留问题确认"],
-  ["M11", "上线切换", 10, true, "完成生产上线、切换和运行观察"],
-  ["M12", "结项移交", 5, false, "完成项目结项、资料归档和运维移交"],
-] as const;
+const standardMilestoneTemplates = officialMilestoneStandard.map((row) => [
+  row.code,
+  row.name,
+  row.defaultWeight,
+  row.critical,
+  row.coreWork,
+] as const);
 
 function demoDateAt(days: number) {
   const value = new Date(`${shanghaiDateIso()}T00:00:00Z`);
@@ -738,22 +732,27 @@ async function ensureDemoScenarioData(db: ReturnType<typeof getDb>) {
 
 export async function ensureSeeded() {
   const db = getDb();
-  await db
-    .insert(milestoneTemplates)
-    .values(
-      standardMilestoneTemplates.map(
-        ([code, name, defaultWeight, critical, description], index) => ({
-          code,
-          name,
-          sequence: index + 1,
-          defaultWeight,
-          critical,
-          description,
-          createdBy: "system",
-        }),
-      ),
-    )
-    .onConflictDoNothing();
+  const officialTemplateRows = officialMilestoneStandard.map((row) => ({
+    code: row.code,
+    sourceCode: row.sourceCode,
+    name: row.name,
+    sequence: row.sequence,
+    defaultWeight: row.defaultWeight,
+    critical: row.critical,
+    description: row.coreWork,
+    stage: row.stage,
+    coreWork: row.coreWork,
+    deliverable: row.deliverable,
+    predecessor: row.predecessor,
+    riskPoint: row.riskPoint,
+    createdBy: "system",
+  }));
+  for (const rows of chunks(officialTemplateRows, 4)) {
+    await db
+      .insert(milestoneTemplates)
+      .values(rows)
+      .onConflictDoNothing();
+  }
   const templateRows = await db.select().from(milestoneTemplates);
   const [{ value: unlinkedMilestones }] = await db
     .select({ value: count() })
@@ -868,10 +867,7 @@ export async function ensureSeeded() {
           templateId: templateByName.get(name) ?? null,
           name,
           sequence,
-          weight:
-            project.id === "P06" && sequence === 12
-              ? 0
-              : defaultWeight,
+          weight: defaultWeight,
           critical,
           applicable,
           custom: false,
@@ -936,8 +932,8 @@ export async function ensureSeeded() {
         projectId: project.id,
         templateId: null,
         name: "数据分级分类验收",
-        sequence: 13,
-        weight: 5,
+        sequence: 37,
+        weight: 0,
         critical: false,
         applicable: true,
         custom: true,

@@ -76,6 +76,9 @@ export const projects = sqliteTable(
     currentBaselineVersion: integer("current_baseline_version").notNull().default(1),
     healthCalculatedAt: text("health_calculated_at"),
     healthExplanationJson: text("health_explanation_json").notNull().default("{}"),
+    sourceSequence: integer("source_sequence"),
+    sourceStage: text("source_stage").notNull().default(""),
+    sourceUpdatedAt: text("source_updated_at"),
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => [
@@ -277,6 +280,12 @@ export const milestoneTemplates = sqliteTable(
     critical: integer("critical", { mode: "boolean" }).notNull().default(false),
     active: integer("active", { mode: "boolean" }).notNull().default(true),
     description: text("description").notNull().default(""),
+    sourceCode: text("source_code").notNull().default(""),
+    stage: text("stage").notNull().default(""),
+    coreWork: text("core_work").notNull().default(""),
+    deliverable: text("deliverable").notNull().default(""),
+    predecessor: text("predecessor").notNull().default(""),
+    riskPoint: text("risk_point").notNull().default(""),
     createdBy: text("created_by").notNull(),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
@@ -313,7 +322,13 @@ export const milestones = sqliteTable(
       .notNull()
       .default("not_started"),
     actualStart: text("actual_start"),
+    scheduleConfirmed: integer("schedule_confirmed", { mode: "boolean" })
+      .notNull()
+      .default(true),
     pausedReason: text("paused_reason").notNull().default(""),
+    sourceExecutor: text("source_executor").notNull().default(""),
+    sourceCompletionNote: text("source_completion_note").notNull().default(""),
+    sourceCoordinationNote: text("source_coordination_note").notNull().default(""),
     executionUpdatedAt: text("execution_updated_at"),
     executionUpdatedBy: text("execution_updated_by"),
     completion: real("completion").notNull().default(0),
